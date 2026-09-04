@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   LayoutDashboard,
   Boxes,
@@ -50,6 +50,9 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import { supabase } from "./lib/supabaseClient";
+import { useSession } from "./lib/useSession";
+import * as api from "./lib/api";
 
 /* ---------------------------------------------------------------------- */
 /* Design tokens — dark sidebar / light workspace, warm-green readouts     */
@@ -123,6 +126,9 @@ const TOKENS = `
 /* ---------------------------------------------------------------------- */
 /* Mock data generation (deterministic)                                   */
 /* ---------------------------------------------------------------------- */
+/* Only used by generateLabUsageHistory() below — the 48-month lab-usage
+   chart is still synthetic (real historical analytics is a separate, larger
+   piece of work), so this deterministic PRNG stays around just for that. */
 function mulberry32(seed) {
   return function () {
     seed |= 0;
@@ -133,8 +139,6 @@ function mulberry32(seed) {
   };
 }
 const rand = mulberry32(42);
-const pick = (arr) => arr[Math.floor(rand() * arr.length)];
-const between = (a, b) => Math.round((a + rand() * (b - a)) * 10) / 10;
 
 const LAB_GROUPS = ["Okafor Lab", "Petrova Lab", "Chen Lab", "Singh Lab", "Martins Lab", "Whitfield Lab", "Al-Farsi Lab", "Novak Lab"];
 const PI_BY_LAB = {
@@ -149,16 +153,6 @@ const DISCIPLINE_META = {
 
 const MANUFACTURERS = ["Conviron", "Percival", "Sanyo/Panasonic", "Snijders", "BioChambers"];
 const MODELS = ["E-15", "AR-66", "MLR-352H", "GC-8", "TC-30"];
-const ENGINEERS = ["R. Adeyemi", "K. Sørensen", "M. Costa", "J. Fitzgerald"];
-const RESEARCHERS = [
-  "Alejandro Reyes", "Toshiro Nakamura", "Sylwia Kowalski", "Linda Boateng", "Hana Ibrahim",
-  "Paulo Duarte", "Elin Larsen", "Karolina Nowak", "Max Fischer",
-];
-const CROPS = [
-  "Arabidopsis salt-stress trial", "Wheat vernalisation series", "Drosophila temperature response",
-  "Barley drought-tolerance panel", "Moss desiccation study", "Fungal growth-rate assay",
-  "Seedling photoperiod trial", "Insect diapause induction",
-];
 const LIGHT_CYCLES = ["8/16 h (L/D)", "12/12 h (L/D)", "16/8 h (L/D)", "24 h dark", "Continuous light"];
 const LIGHTING_TYPES = ["LED", "Fluorescent", "LED + Fluorescent"];
 const BALLAST_TYPES = ["Electronic", "Magnetic"];
@@ -195,7 +189,10 @@ function fmtGB(iso) {
   if (!y || !m || !d) return iso;
   return `${d}/${m}/${y}`;
 }
-const TODAY = new Date("2026-08-23");
+/* Real "today", truncated to midnight so date-only comparisons (booking
+   start/end dates) behave the same way they did against the old hardcoded
+   mock date. */
+const TODAY = new Date(new Date().toISOString().slice(0, 10));
 /* Do two date ranges (inclusive) overlap? */
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return new Date(aStart) <= new Date(bEnd) && new Date(bStart) <= new Date(aEnd);
@@ -222,224 +219,28 @@ function requisitionTab(status) {
   return status === "pending" || status === "approved" ? "pending" : "completed";
 }
 
-const MAINTENANCE_CATEGORIES = {
-  "Calibration": { bg: "#F5F3FF", ink: "#6D28D9", border: "#DDD6FE" },
-  "Routine Maintenance": { bg: "#EFF6FF", ink: "#1D4ED8", border: "#C7DDFB" },
-  "Inspection": { bg: "#FEF9EC", ink: "#92400E", border: "#FBE7B8" },
-  "Repair": { bg: "#FDF2F2", ink: "#B23A34", border: "#F5D0CE" },
-  "Cleaning": { bg: "#ECFDF3", ink: "#15803D", border: "#BBF0CE" },
-};
-const MAINTENANCE_CATEGORY_KEYS = Object.keys(MAINTENANCE_CATEGORIES);
-const CATEGORY_COLOR_PALETTE = [
-  { bg: "#F5F3FF", ink: "#6D28D9", border: "#DDD6FE" },
-  { bg: "#EFF6FF", ink: "#1D4ED8", border: "#C7DDFB" },
-  { bg: "#FEF9EC", ink: "#92400E", border: "#FBE7B8" },
-  { bg: "#FDF2F2", ink: "#B23A34", border: "#F5D0CE" },
-  { bg: "#ECFDF3", ink: "#15803D", border: "#BBF0CE" },
-  { bg: "#FDF4FF", ink: "#A21CAF", border: "#F5D0FE" },
-  { bg: "#F0FDFA", ink: "#0F766E", border: "#99F6E4" },
-];
-const MAINTENANCE_NOTES_BY_CATEGORY = {
-  "Calibration": ["Annual pressure/temperature sensor calibration; certificate filed.", "Routine calibration, readings within spec."],
-  "Routine Maintenance": ["Filter clean, fan bearing checked.", "Door seal inspected and reset, drive belts tensioned."],
-  "Inspection": ["Statutory pressure-vessel / electrical inspection.", "Annual PAT test passed."],
-  "Repair": ["Replaced door seal, re-tested for drift.", "Fan motor bearing replaced; controller firmware updated."],
-  "Cleaning": ["Full clean-down, condensate drain cleared.", "Interior clean-down and cooling fins cleared."],
-};
+/* A single shared fallback swatch for a service-log category that's no
+   longer in the categories list (e.g. deleted after entries were logged
+   against it) — replaces the old hardcoded MAINTENANCE_CATEGORIES map now
+   that categories are real, admin-managed rows from the database. */
+const FALLBACK_CATEGORY_COLOR = { bg: "#EFF6FF", ink: "#1D4ED8", border: "#C7DDFB" };
 const DOCUMENT_TYPES = ["Manual", "Certificate", "Risk Assessment"];
-
-function makeServiceLog() {
-  const n = 1 + Math.floor(rand() * 3);
-  const log = [];
-  let cursor = addDays(TODAY, -30 - Math.floor(rand() * 300));
-  for (let i = 0; i < n; i++) {
-    const category = pick(MAINTENANCE_CATEGORY_KEYS);
-    log.push({
-      id: `svc-${Math.floor(rand() * 1e9)}`,
-      date: fmt(cursor),
-      category,
-      status: "completed",
-      engineer: pick(ENGINEERS),
-      cost: rand() < 0.6 ? Math.round(between(60, 1400)) : null,
-      notes: pick(MAINTENANCE_NOTES_BY_CATEGORY[category]),
-    });
-    cursor = addDays(cursor, 60 + Math.floor(rand() * 90));
-  }
-  return log.sort((a, b) => (a.date < b.date ? 1 : -1));
-}
-
-/* Adds a "Scheduled" entry to units whose next service is due soon, so the Maintenance History
-   panel can demonstrate the schedule → log-as-done workflow without needing every unit seeded. */
-function seedScheduledMaintenance(units) {
-  return units.map((u) => {
-    const daysAway = daysUntil(u.nextServiceDue);
-    if (u.status === "service" || daysAway > 30 || daysAway < -10) return u;
-    const category = daysAway < 0 ? "Inspection" : pick(["Inspection", "Routine Maintenance", "Calibration"]);
-    const scheduled = {
-      id: `svc-sched-${u.id}`,
-      date: u.nextServiceDue,
-      category,
-      status: "scheduled",
-      engineer: "",
-      cost: null,
-      notes: `${category} due${daysAway < 0 ? " (overdue)" : ""}.`,
-    };
-    return { ...u, serviceLog: [scheduled, ...u.serviceLog] };
-  });
-}
-
-function makeDocuments(unit) {
-  const docs = [
-    { id: `doc-${unit.id}-manual`, name: `${unit.model} Operating Manual`, type: "Manual", addedBy: "Facilities", date: unit.installDate, url: null },
-  ];
-  if (rand() < 0.65) {
-    docs.push({ id: `doc-${unit.id}-cert`, name: `Calibration Certificate ${new Date(unit.installDate).getFullYear() + 1}`, type: "Certificate", addedBy: pick(ENGINEERS), date: fmt(addDays(TODAY, -Math.floor(rand() * 300))), url: null });
-  }
-  if (rand() < 0.3) {
-    docs.push({ id: `doc-${unit.id}-ra`, name: "Risk Assessment", type: "Risk Assessment", addedBy: "Facilities", date: unit.installDate, url: null });
-  }
-  return docs;
-}
-
-function makeOccupant(discipline) {
-  return {
-    researcher: pick(RESEARCHERS),
-    labGroup: pick(LAB_GROUPS),
-    role: pick(ROLES),
-    project: pick(CROPS),
-    discipline,
-    setTemp: between(4, 28),
-    setHumidity: Math.round(between(35, 85)),
-    lightCycle: pick(LIGHT_CYCLES),
-  };
-}
-
-function makeCabinet(index) {
-  const id = `GC-${String(index).padStart(3, "0")}`;
-  const floor = pick(FLOORS);
-  const room = pick(ROOMS_BY_FLOOR[floor]);
-  const discipline = rand() < 0.68 ? "plant" : "insect";
-
-  const statusRoll = rand();
-  let status;
-  if (statusRoll < 0.2) status = "free";
-  else if (statusRoll < 0.32) status = "service";
-  else if (statusRoll < 0.54) status = "occupied";
-  else if (statusRoll < 0.78) status = "occupied-warning";
-  else status = "occupied-overdue";
-
-  let occupant = null;
-  if (status.startsWith("occupied")) {
-    const o = makeOccupant(discipline);
-    const start = addDays(TODAY, -Math.floor(rand() * 120));
-    let end;
-    if (status === "occupied-overdue") end = addDays(TODAY, -Math.floor(rand() * 10) - 1);
-    else if (status === "occupied-warning") end = addDays(TODAY, Math.floor(rand() * 6) + 1);
-    else end = addDays(TODAY, Math.floor(rand() * 150) + 30);
-    occupant = { ...o, startDate: fmt(start), endDate: fmt(end) };
-  }
-
-  const installDate = fmt(addDays(TODAY, -Math.floor(rand() * 2000) - 200));
-  const unit = {
-    id, type: "cabinet", floor, room,
-    discipline,
-    manufacturer: pick(MANUFACTURERS),
-    model: pick(MODELS),
-    serialNumber: `SN-${String(Math.floor(rand() * 90000) + 10000)}`,
-    assetNumber: `AST-${String(Math.floor(rand() * 9000) + 1000)}`,
-    tscanId: `TSC-${String(index).padStart(3, "0")}`,
-    shelves: 2 + Math.floor(rand() * 4),
-    lightingType: pick(LIGHTING_TYPES),
-    ballasts: pick(BALLAST_TYPES),
-    co2Control: rand() < 0.35,
-    dimmingControl: rand() < 0.4,
-    lastBulbFitting: fmt(addDays(TODAY, -Math.floor(rand() * 900) - 30)),
-    availableLightCycles: LIGHT_CYCLES,
-    installDate,
-    tempRange: [4, 40],
-    humidityRange: [20, 95],
-    status: status.startsWith("occupied") ? "occupied" : status,
-    urgency: status === "occupied-warning" ? "warning" : status === "occupied-overdue" ? "overdue" : null,
-    occupant,
-    serviceLog: makeServiceLog(),
-    serviceFrequencyMonths: pick([3, 6, 12]),
-    nextServiceDue: fmt(addDays(TODAY, Math.floor(rand() * 200) - 40)),
-    purchaseDate: installDate,
-    purchaseCost: Math.round(between(2400, 16500)),
-    warrantyExpiry: fmt(addDays(new Date(installDate), 365 * (2 + Math.floor(rand() * 3)))),
-    photoDataUrl: null,
-  };
-  unit.documents = makeDocuments(unit);
-  return unit;
-}
-
-function makeReftechRoom(index, floor, room) {
-  const id = `RTR-${String(index).padStart(2, "0")}`;
-  const outOfService = rand() < 0.08;
-  const numBookings = Math.floor(rand() * 3); // 0-2 bookings, can overlap different rooms but not itself
-  const bookings = [];
-  let cursor = addDays(TODAY, -20 - Math.floor(rand() * 40));
-  for (let i = 0; i < numBookings; i++) {
-    const discipline = rand() < 0.6 ? "plant" : "insect";
-    const start = addDays(cursor, 2 + Math.floor(rand() * 8));
-    const end = addDays(start, 3 + Math.floor(rand() * 18));
-    const o = makeOccupant(discipline);
-    bookings.push({ id: `${id}-B${i + 1}`, ...o, startDate: fmt(start), endDate: fmt(end) });
-    cursor = addDays(end, 3 + Math.floor(rand() * 12));
-  }
-  const installDate = fmt(addDays(TODAY, -Math.floor(rand() * 2000) - 200));
-  const unit = {
-    id, type: "reftech", floor, room,
-    manufacturer: pick(MANUFACTURERS),
-    model: pick(MODELS),
-    serialNumber: `SN-${String(Math.floor(rand() * 90000) + 10000)}`,
-    assetNumber: `AST-${String(Math.floor(rand() * 9000) + 1000)}`,
-    tscanId: `TSC-R${String(index).padStart(2, "0")}`,
-    shelves: null,
-    lightingType: pick(LIGHTING_TYPES),
-    ballasts: pick(BALLAST_TYPES),
-    co2Control: rand() < 0.5,
-    dimmingControl: rand() < 0.5,
-    lastBulbFitting: fmt(addDays(TODAY, -Math.floor(rand() * 900) - 30)),
-    availableLightCycles: LIGHT_CYCLES,
-    installDate,
-    tempRange: [4, 32],
-    humidityRange: [30, 90],
-    status: outOfService ? "service" : "auto",
-    bookings,
-    serviceLog: makeServiceLog(),
-    serviceFrequencyMonths: pick([3, 6, 12]),
-    nextServiceDue: fmt(addDays(TODAY, Math.floor(rand() * 200) - 40)),
-    purchaseDate: installDate,
-    purchaseCost: Math.round(between(3200, 22000)),
-    warrantyExpiry: fmt(addDays(new Date(installDate), 365 * (2 + Math.floor(rand() * 3)))),
-    photoDataUrl: null,
-  };
-  unit.documents = makeDocuments(unit);
-  return unit;
-}
-
-function generateUnits() {
-  const units = [];
-  for (let i = 1; i <= 60; i++) units.push(makeCabinet(i));
-  let ri = 1;
-  FLOORS.forEach((f) => {
-    REFTECH_ROOMS_BY_FLOOR[f].forEach((room) => {
-      units.push(makeReftechRoom(ri, f, room));
-      ri++;
-    });
-  });
-  return units;
-}
 
 /* ---------------------------------------------------------------------- */
 /* Status helpers — unify cabinet (single occupant) & reftech (bookings)  */
 /* ---------------------------------------------------------------------- */
 function daysUntil(dateStr) { return Math.round((new Date(dateStr) - TODAY) / 86400000); }
 
+/* For reftech rooms: a booking counts as "current" once it's started,
+   regardless of whether its end date has passed — it only stops being
+   current when its requisition is completed (which is enforced upstream,
+   in src/lib/api.js's fetchAdminData: unit.bookings only ever contains
+   bookings from status='approved' requisitions). This is what lets a
+   lapsed-but-uncompleted booking show up as overdue instead of the room
+   silently reading as free — see supabase/schema.sql's design note 5. */
 function currentBooking(unit) {
   if (unit.type !== "reftech") return null;
-  return unit.bookings.find((b) => new Date(b.startDate) <= TODAY && new Date(b.endDate) >= TODAY) || null;
+  return unit.bookings.find((b) => new Date(b.startDate) <= TODAY) || null;
 }
 function upcomingBookings(unit) {
   if (unit.type !== "reftech") return [];
@@ -952,7 +753,7 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
   const occupied = units.filter((u) => displayStatus(u).key === "occupied" || displayStatus(u).key === "warning" || displayStatus(u).key === "overdue").length;
   const free = units.filter((u) => displayStatus(u).key === "free").length;
   const overdue = units.filter((u) => displayStatus(u).key === "overdue");
-  const utilisation = Math.round((occupied / total) * 100);
+  const utilisation = total === 0 ? 0 : Math.round((occupied / total) * 100);
   const pending = requests.filter((r) => r.status === "pending");
 
   const activity = useMemo(() => buildActivityFeed(units, requests), [units, requests]);
@@ -1669,7 +1470,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
             <div className="rounded-lg p-2.5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {categories.map((c) => {
-                  const col = categoryColors[c] || MAINTENANCE_CATEGORIES["Routine Maintenance"];
+                  const col = categoryColors[c] || FALLBACK_CATEGORY_COLOR;
                   return (
                     <span key={c} className="gc-tag" style={{ background: col.bg, color: col.ink, borderColor: col.border }}>
                       {c}
@@ -1723,7 +1524,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
         </thead>
         <tbody>
           {unit.serviceLog.map((entry) => {
-            const cat = categoryColors[entry.category] || MAINTENANCE_CATEGORIES["Routine Maintenance"];
+            const cat = categoryColors[entry.category] || FALLBACK_CATEGORY_COLOR;
             const isScheduled = entry.status === "scheduled";
             return (
               <tr key={entry.id} className="group" style={{ borderTop: "1px solid rgba(22,33,29,0.07)" }}>
@@ -2033,7 +1834,7 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
             e.preventDefault();
             onSave({
               ...form,
-              id: isEdit ? unit.id : form.id || `GC-NEW-${Math.floor(rand() * 900 + 100)}`,
+              id: isEdit ? unit.id : form.id || `GC-NEW-${Math.floor(Math.random() * 900 + 100)}`,
               shelves: form.type === "reftech" ? null : Number(form.shelves),
               tempRange: [Number(form.tempMin), Number(form.tempMax)],
               humidityRange: [Number(form.humMin), Number(form.humMax)],
@@ -2148,84 +1949,6 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
       </div>
     </div>
   );
-}
-
-/* ---------------------------------------------------------------------- */
-/* Fake seed requisitions                                                 */
-/* ---------------------------------------------------------------------- */
-function generateFakeRequisitions() {
-  const base = [
-    { researcher: "A. Reyes", email: "a.reyes@university.ac.uk", labGroup: "Okafor Lab", pi: "Prof. Okafor", unitType: "cabinet", discipline: "plant", projectTitle: "Arabidopsis salt-stress trial", daysAgo: 2, status: "pending" },
-    { researcher: "T. Nakamura", email: "t.nakamura@university.ac.uk", labGroup: "Chen Lab", pi: "Dr. Chen", unitType: "reftech", discipline: "insect", projectTitle: "Drosophila temperature response", daysAgo: 1, status: "pending" },
-    { researcher: "S. Kowalski", email: "s.kowalski@university.ac.uk", labGroup: "Whitfield Lab", pi: "Dr. Whitfield", unitType: "cabinet", discipline: "plant", projectTitle: "Moss desiccation study", daysAgo: 4, status: "pending" },
-    { researcher: "L. Boateng", email: "l.boateng@university.ac.uk", labGroup: "Singh Lab", pi: "Prof. Singh", unitType: "cabinet", discipline: "plant", projectTitle: "Barley drought-tolerance panel", daysAgo: 25, status: "approved", assignedUnitId: "GC-014" },
-    { researcher: "H. Ibrahim", email: "h.ibrahim@university.ac.uk", labGroup: "Al-Farsi Lab", pi: "Dr. Al-Farsi", unitType: "reftech", discipline: "insect", projectTitle: "Insect diapause induction", daysAgo: 40, status: "approved", assignedUnitId: "RTR-03" },
-    { researcher: "P. Duarte", email: "p.duarte@university.ac.uk", labGroup: "Martins Lab", pi: "Prof. Martins", unitType: "cabinet", discipline: "insect", projectTitle: "Fungal growth-rate assay", daysAgo: 60, status: "declined" },
-    { researcher: "E. Larsen", email: "e.larsen@university.ac.uk", labGroup: "Novak Lab", pi: "Dr. Novak", unitType: "cabinet", discipline: "plant", projectTitle: "Seedling photoperiod trial", daysAgo: 15, status: "approved", assignedUnitId: "GC-032" },
-    { researcher: "K. Nowak", email: "k.nowak@university.ac.uk", labGroup: "Petrova Lab", pi: "Dr. Petrova", unitType: "cabinet", discipline: "plant", projectTitle: "Wheat vernalisation series", daysAgo: 80, status: "declined" },
-    { researcher: "M. Fischer", email: "m.fischer@university.ac.uk", labGroup: "Okafor Lab", pi: "Prof. Okafor", unitType: "reftech", discipline: "plant", projectTitle: "Root architecture imaging series", daysAgo: 0, status: "pending" },
-    { researcher: "S. Kowalski", email: "s.kowalski@university.ac.uk", labGroup: "Whitfield Lab", pi: "Dr. Whitfield", unitType: "cabinet", discipline: "plant", projectTitle: "Salt-tolerance seed bank trial", daysAgo: 130, status: "completed" },
-    { researcher: "H. Ibrahim", email: "h.ibrahim@university.ac.uk", labGroup: "Al-Farsi Lab", pi: "Dr. Al-Farsi", unitType: "cabinet", discipline: "insect", projectTitle: "Larval density pilot study", daysAgo: 95, status: "completed" },
-  ];
-  return base.map((b) => {
-    const submitted = addDays(TODAY, -b.daysAgo);
-    const start = addDays(submitted, 7);
-    const end = addDays(start, 45);
-    const decided = b.status !== "pending" ? fmt(addDays(submitted, 2 + Math.floor(rand() * 4))) : null;
-    return {
-      researcher: b.researcher, email: b.email, phone: "", pi: b.pi, department: "Biosciences",
-      labGroup: b.labGroup, discipline: b.discipline, unitType: b.unitType,
-      projectTitle: b.projectTitle, projectDesc: "Details supplied at submission — see project description.",
-      setTemp: between(4, 26), setHumidity: Math.round(between(40, 80)), lightCycle: pick(LIGHT_CYCLES), co2: "",
-      preferredFloor: "any", startDate: fmt(start), endDate: fmt(end),
-      hazardNotes: "", notes: "",
-      status: b.status, assignedUnitId: b.assignedUnitId || null,
-      submittedDate: fmt(submitted),
-      decidedDate: decided,
-      completedDate: b.status === "completed" ? fmt(addDays(new Date(end), Math.floor(rand() * 10))) : null,
-    };
-  });
-}
-
-/* The seeded units and the seeded requisitions above are generated independently, so a currently
-   occupied/booked unit usually has no matching requisition record — which is why clicking a booking
-   on the timeline could find nothing to open. This synthesises a matching "approved" requisition for
-   every current/upcoming/past occupant so every booking always has something real to link to. */
-function backfillRequisitionsFromUnits(units, existingRequests) {
-  const extra = [];
-  const emailFor = (name) => `${name.toLowerCase().replace(/[^a-z ]/g, "").trim().replace(/\s+/g, ".")}@university.ac.uk`;
-  const makeReq = (unit, o) => {
-    const discipline = o.discipline || unit.discipline || "plant";
-    const isPlant = discipline === "plant";
-    return {
-      researcher: o.researcher, role: o.role || pick(ROLES), email: emailFor(o.researcher),
-      emergencyNumber: `07${Math.floor(100000000 + rand() * 899999999)}`,
-      phone: "", pi: PI_BY_LAB[o.labGroup] || "", department: "Biosciences",
-      labGroup: o.labGroup, discipline, unitType: unit.type,
-      species: [pick(isPlant ? PLANT_SPECIES : INSECT_SPECIES)],
-      numberOfPlants: isPlant ? Math.floor(between(8, 60)) : undefined,
-      containmentLevel: isPlant ? pick(CONTAINMENT_LEVELS) : undefined,
-      spaceDescription: unit.type === "reftech" ? "Full room booking." : `${unit.shelves || 2} shelves required.`,
-      projectTitle: o.project, projectDesc: "Details supplied at submission — see project description.",
-      setTemp: o.setTemp, setHumidity: o.setHumidity, lightCycle: o.lightCycle, co2: "",
-      pestConsent: isPlant ? rand() < 0.5 : undefined,
-      dimmingRequired: !isPlant ? rand() < 0.5 : undefined,
-      safetyCompliance: true,
-      preferredFloor: unit.floor, startDate: o.startDate, endDate: o.endDate,
-      hazardNotes: "", notes: "",
-      status: "approved", assignedUnitId: unit.id,
-      submittedDate: fmt(addDays(new Date(o.startDate), -14)),
-      decidedDate: fmt(addDays(new Date(o.startDate), -10)),
-    };
-  };
-  const allRequests = () => [...existingRequests, ...extra];
-  units.forEach((unit) => {
-    const occupants = unit.type === "reftech" ? (unit.bookings || []) : (unit.occupant ? [unit.occupant] : []);
-    occupants.forEach((o) => {
-      if (findRequisitionIndex(allRequests(), o) === null) extra.push(makeReq(unit, o));
-    });
-  });
-  return [...existingRequests, ...extra];
 }
 
 /* ---------------------------------------------------------------------- */
@@ -2822,7 +2545,7 @@ function FormSectionTitle({ children }) {
   );
 }
 
-function RequestSpacePage({ onSubmit, onAmend, requests }) {
+function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
   const [mode, setMode] = useState(null); // 'new' | 'amend'
   const [spaceType, setSpaceType] = useState(null); // 'cabinet' | 'reftech'
   const [discipline, setDiscipline] = useState(null); // 'plant' | 'insect'
@@ -2879,7 +2602,9 @@ function RequestSpacePage({ onSubmit, onAmend, requests }) {
     return (
       <WizardShell step={0} totalSteps={steps.length} title="What would you like to do?" subtitle="Let's get you to the right form.">
         <WizardChoice icon={PlusCircle} title="Submit a new requisition" subtitle="Request space in a growth cabinet or Reftech Room" onClick={() => { setMode("new"); goNext(); }} />
-        <WizardChoice icon={Pencil} title="Amend an existing requisition" subtitle="Change the dates or details on a request you've already submitted" onClick={() => { setMode("amend"); goNext(); }} />
+        {allowAmend && (
+          <WizardChoice icon={Pencil} title="Amend an existing requisition" subtitle="Change the dates or details on a request you've already submitted" onClick={() => { setMode("amend"); goNext(); }} />
+        )}
       </WizardShell>
     );
   }
@@ -3113,23 +2838,74 @@ function RequestSpacePage({ onSubmit, onAmend, requests }) {
 /* ---------------------------------------------------------------------- */
 /* App shell                                                              */
 /* ---------------------------------------------------------------------- */
-function seedUnitsWithRecentAdds(units) {
-  // Mark a couple of units as "recently added" so the activity feed has something to show.
-  const targets = [units[2], units[37]].filter(Boolean);
-  targets.forEach((u, i) => { u.addedRecently = true; u.installDate = fmt(addDays(TODAY, -(i + 1))); });
-  return units;
+function LoadingScreen({ message = "Loading…", isError = false }) {
+  return (
+    <div className="gc-app min-h-screen flex items-center justify-center">
+      <style>{TOKENS}</style>
+      <p className="text-sm" style={{ color: isError ? "var(--overdue)" : "var(--ink-faint)" }}>{message}</p>
+    </div>
+  );
+}
+
+/* Minimal email/password sign-in — the temporary stand-in for Entra ID SSO
+   until that's wired up for this org. Not styled beyond matching the
+   existing gc-* utility classes. */
+function AdminLoginForm({ onDone }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setBusy(false);
+    if (error) setError(error.message);
+    else onDone();
+  };
+
+  return (
+    <form onSubmit={submit} className="gc-card p-4 space-y-2.5" style={{ maxWidth: 320, marginLeft: "auto" }}>
+      <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Admin sign in</div>
+      <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="gc-input" />
+      <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="gc-input" />
+      {error && <div className="text-xs" style={{ color: "var(--overdue)" }}>{error}</div>}
+      <button type="submit" disabled={busy} className="text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+        {busy ? "Signing in…" : "Sign in"}
+      </button>
+    </form>
+  );
 }
 
 export default function GrowthCabinetApp() {
-  const [initialData] = useState(() => {
-    const seededUnits = seedScheduledMaintenance(seedUnitsWithRecentAdds(generateUnits()));
-    const seededRequests = backfillRequisitionsFromUnits(seededUnits, generateFakeRequisitions());
-    return { units: seededUnits, requests: seededRequests };
-  });
-  const [units, setUnits] = useState(initialData.units);
-  const [categories, setCategories] = useState(() => MAINTENANCE_CATEGORY_KEYS.slice());
-  const [categoryColors, setCategoryColors] = useState(() => ({ ...MAINTENANCE_CATEGORIES }));
-  const [requests, setRequests] = useState(initialData.requests);
+  const { session, profile, authLoading } = useSession();
+  const isAdmin = profile?.role === "admin";
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+
+  // appData is null until an admin session's data has loaded. Everything
+  // the old mock generators produced now comes from src/lib/api.js instead.
+  const [appData, setAppData] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+
+  const reload = async () => {
+    try {
+      const data = await api.fetchAdminData();
+      setAppData(data);
+      setLoadError(null);
+    } catch (err) {
+      console.error(err);
+      setLoadError(err.message || String(err));
+    }
+  };
+
+  useEffect(() => {
+    if (isAdmin) reload();
+    else setAppData(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
+
   const [page, setPage] = useState("dashboard");
   const [selected, setSelected] = useState(null);
   const [editingUnit, setEditingUnit] = useState(undefined); // undefined = closed, null = add-new, object = edit
@@ -3141,114 +2917,88 @@ export default function GrowthCabinetApp() {
   const [returnUnitId, setReturnUnitId] = useState(null); // set when navigating to a requisition from a unit's drawer
   const [previewReqIndex, setPreviewReqIndex] = useState(null); // requisition shown in the timeline's preview side panel
 
-  const handleSaveUnit = (data) => {
-    setUnits((prev) => {
-      const exists = prev.some((u) => u.id === data.id);
-      if (exists) {
-        return prev.map((u) => (u.id === data.id ? { ...u, ...data, status: data.status || u.status } : u));
-      }
-      return [
-        ...prev,
-        {
-          ...data,
-          status: "free",
-          urgency: null,
-          occupant: null,
-          bookings: data.type === "reftech" ? [] : undefined,
-          serviceLog: [],
-          serviceFrequencyMonths: 6,
-          nextServiceDue: fmt(addDays(TODAY, 180)),
-          purchaseDate: fmt(TODAY),
-          purchaseCost: null,
-          warrantyExpiry: fmt(addDays(TODAY, 365 * 2)),
-          photoDataUrl: null,
-          documents: [],
-          addedRecently: true,
-        },
-      ];
-    });
+  const units = appData ? appData.units : [];
+  const requests = appData ? appData.requests : [];
+  const categories = appData ? appData.categories : [];
+  const categoryColors = appData ? appData.categoryColors : {};
+  const categoryIdByName = appData ? appData.categoryIdByName : {};
+
+  // Wraps a mutation so a failed Supabase call (RLS denial, constraint
+  // violation, network error) surfaces to the admin instead of failing
+  // silently — the old mock handlers never had a failure path to handle.
+  const withErrorAlert = (fn) => async (...args) => {
+    try {
+      await fn(...args);
+    } catch (err) {
+      console.error(err);
+      window.alert(err.message || "Something went wrong saving that — see the console for details.");
+    }
+  };
+
+  const handleSaveUnit = withErrorAlert(async (data) => {
+    await api.saveUnit(data);
     setEditingUnit(undefined);
     setSelected(null);
-  };
+    await reload();
+  });
 
-  const handleUpdateServiceLog = (unitId, log) => {
-    setUnits((prev) => prev.map((u) => (u.id === unitId ? { ...u, serviceLog: log } : u)));
-    setSelected((prev) => (prev && prev.id === unitId ? { ...prev, serviceLog: log } : prev));
-  };
+  const handleUpdateServiceLog = withErrorAlert(async (unitId, log) => {
+    const oldLog = (units.find((u) => u.id === unitId) || {}).serviceLog || [];
+    await api.saveServiceLog(unitId, log, oldLog, categoryIdByName, session?.user?.id);
+    await reload();
+  });
 
+  // Documents/photo stay local-only for this pass — no Supabase Storage
+  // bucket wired up yet, so these intentionally don't persist to the DB.
+  // See the final report for why this was descoped rather than half-built.
   const handleUpdateDocuments = (unitId, documents) => {
-    setUnits((prev) => prev.map((u) => (u.id === unitId ? { ...u, documents } : u)));
+    setAppData((prev) => (prev ? { ...prev, units: prev.units.map((u) => (u.id === unitId ? { ...u, documents } : u)) } : prev));
     setSelected((prev) => (prev && prev.id === unitId ? { ...prev, documents } : prev));
   };
-
   const handleUpdatePhoto = (unitId, photoDataUrl) => {
-    setUnits((prev) => prev.map((u) => (u.id === unitId ? { ...u, photoDataUrl } : u)));
+    setAppData((prev) => (prev ? { ...prev, units: prev.units.map((u) => (u.id === unitId ? { ...u, photoDataUrl } : u)) } : prev));
     setSelected((prev) => (prev && prev.id === unitId ? { ...prev, photoDataUrl } : prev));
   };
 
-  const handleAddCategory = (name) => {
-    setCategories((prev) => (prev.includes(name) ? prev : [...prev, name]));
-    setCategoryColors((prev) => (prev[name] ? prev : { ...prev, [name]: CATEGORY_COLOR_PALETTE[Object.keys(prev).length % CATEGORY_COLOR_PALETTE.length] }));
-  };
-  const handleRemoveCategory = (name) => setCategories((prev) => prev.filter((c) => c !== name));
+  const handleAddCategory = withErrorAlert(async (name) => {
+    await api.addMaintenanceCategory(name, categories.length);
+    await reload();
+  });
+  const handleRemoveCategory = withErrorAlert(async (name) => {
+    await api.removeMaintenanceCategory(name);
+    await reload();
+  });
 
-  const handleEditRequisition = (index, updates) => {
-    setRequests((prev) => prev.map((r, i) => (i === index ? { ...r, ...updates } : r)));
-  };
+  const handleEditRequisition = withErrorAlert(async (index, updates) => {
+    // `updates` is already the full edited requisition (RequisitionEditForm's
+    // local form state starts as a spread of the original), not a partial patch.
+    await api.editRequisition(requests[index].id, updates);
+    await reload();
+  });
 
-  const handleDecideRequisition = (index, decision, unitId) => {
-    setRequests((prev) => prev.map((r, i) => (i === index ? { ...r, status: decision, assignedUnitId: unitId || null, decidedDate: fmt(TODAY) } : r)));
-    if (decision === "approved" && unitId) {
-      const req = requests[index];
-      setUnits((prev) =>
-        prev.map((u) => {
-          if (u.id !== unitId) return u;
-          if (u.type === "reftech") {
-            const booking = {
-              id: `${u.id}-B${u.bookings.length + 1}`,
-              researcher: req.researcher, labGroup: req.labGroup, role: req.role || "Researcher", project: req.projectTitle,
-              discipline: req.discipline, setTemp: req.setTemp || "—", setHumidity: req.setHumidity || "—",
-              lightCycle: req.lightCycle, startDate: req.startDate, endDate: req.endDate,
-            };
-            return { ...u, bookings: [...u.bookings, booking] };
-          }
-          return {
-            ...u,
-            status: "occupied",
-            urgency: null,
-            occupant: {
-              researcher: req.researcher, labGroup: req.labGroup, role: req.role || "Researcher", project: req.projectTitle, discipline: req.discipline,
-              setTemp: req.setTemp || "—", setHumidity: req.setHumidity || "—",
-              lightCycle: req.lightCycle, startDate: req.startDate, endDate: req.endDate,
-            },
-          };
-        })
-      );
-    }
-  };
+  const handleDecideRequisition = withErrorAlert(async (index, decision, unitId) => {
+    await api.decideRequisition(requests[index], decision, unitId, session?.user?.id);
+    await reload();
+  });
 
-  /* Admin manually confirms an ongoing (approved) requisition has finished. This both closes the
-     requisition out to "completed" and frees the physical unit it was assigned to — otherwise the
-     unit would stay stuck showing "occupied" forever even after the booking's admin-side wrap-up. */
-  const handleCompleteRequisition = (index) => {
-    const req = requests[index];
-    setRequests((prev) => prev.map((r, i) => (i === index ? { ...r, status: "completed", completedDate: fmt(TODAY) } : r)));
-    if (req.assignedUnitId) {
-      setUnits((prev) =>
-        prev.map((u) => {
-          if (u.id !== req.assignedUnitId) return u;
-          if (u.type === "reftech") {
-            return { ...u, bookings: u.bookings.filter((b) => !(b.researcher === req.researcher && b.startDate === req.startDate && b.endDate === req.endDate)) };
-          }
-          return { ...u, status: "free", urgency: null, occupant: null };
-        })
-      );
-    }
-  };
+  /* Admin manually confirms an ongoing (approved) requisition has finished. This closes the
+     requisition out to "completed" — the booking row is kept as history, not deleted, and simply
+     stops counting as active occupancy because fetchAdminData only pulls bookings whose requisition
+     is still 'approved'. */
+  const handleCompleteRequisition = withErrorAlert(async (index) => {
+    await api.completeRequisition(requests[index].id, session?.user?.id);
+    await reload();
+  });
 
-  const handleAmendRequisition = (index, payload) => {
-    setRequests((prev) => prev.map((r, i) => (i === index ? { ...r, ...payload, decidedDate: null } : r)));
-  };
+  const handleAmendRequisition = withErrorAlert(async (index, payload) => {
+    await api.amendRequisition(requests[index].id, payload);
+    await reload();
+  });
+
+  const handleSubmitRequisition = withErrorAlert(async (payload) => {
+    await api.submitRequisition(payload, session ? session.user.id : null);
+    if (isAdmin) await reload();
+  });
 
   const goInventory = (filter) => {
     setInventoryFilter(filter || {});
@@ -3277,6 +3027,50 @@ export default function GrowthCabinetApp() {
   };
 
   const pendingCount = requests.filter((r) => r.status === "pending").length;
+
+  if (authLoading) return <LoadingScreen />;
+
+  // Non-admin — including signed out — only ever sees the request form.
+  // This matches the real end-state design for researchers once Entra ID
+  // SSO is live (see supabase/schema.sql's design notes and CLAUDE.md): the
+  // request-submission INSERT works anonymously today via a temporary RLS
+  // policy, everything else requires being an admin.
+  if (!isAdmin) {
+    return (
+      <div className="gc-app min-h-screen">
+        <style>{TOKENS}</style>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+        <div className="max-w-2xl mx-auto p-8">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--gradient)" }}>
+                <Leaf size={15} color="#fff" />
+              </div>
+              <span className="gc-display font-extrabold text-[14px]">Growth Space Admin</span>
+            </div>
+            {session ? (
+              <button onClick={() => supabase.auth.signOut()} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Sign out</button>
+            ) : showAdminLogin ? (
+              <button onClick={() => setShowAdminLogin(false)} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Cancel</button>
+            ) : (
+              <button onClick={() => setShowAdminLogin(true)} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Admin sign in</button>
+            )}
+          </div>
+          {!session && showAdminLogin && (
+            <div className="mb-4 flex justify-end">
+              <AdminLoginForm onDone={() => setShowAdminLogin(false)} />
+            </div>
+          )}
+          <RequestSpacePage requests={requests} onSubmit={handleSubmitRequisition} onAmend={handleAmendRequisition} allowAmend={!!session} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!appData) {
+    return loadError ? <LoadingScreen message={`Couldn't load data: ${loadError}`} isError /> : <LoadingScreen />;
+  }
 
   return (
     <div className="gc-app min-h-screen flex">
@@ -3308,7 +3102,7 @@ export default function GrowthCabinetApp() {
           />
         )}
         {page === "request" && (
-          <RequestSpacePage requests={requests} onSubmit={(r) => setRequests((prev) => [...prev, r])} onAmend={handleAmendRequisition} />
+          <RequestSpacePage requests={requests} onSubmit={handleSubmitRequisition} onAmend={handleAmendRequisition} />
         )}
       </main>
 
