@@ -194,12 +194,14 @@ const TODAY = new Date(new Date().toISOString().slice(0, 10));
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return new Date(aStart) <= new Date(bEnd) && new Date(bStart) <= new Date(aEnd);
 }
-/* Is a unit available for a given requested date window — even if it's not free "right now" */
+/* Is a unit available for a given requested date window — even if it's not free "right now".
+   Reftech rooms are multi-occupancy by design (see canAssign/isClash in
+   UnitDetailContent, which never restrict or flag reftech on overlap) — so
+   an existing overlapping booking never makes one unavailable, only being
+   out of service does. Cabinets are single-occupancy: any overlap blocks. */
 function unitAvailableForWindow(unit, startDate, endDate) {
   if (unit.status === "service") return false;
-  if (unit.type === "reftech") {
-    return !unit.bookings.some((b) => rangesOverlap(b.startDate, b.endDate, startDate, endDate));
-  }
+  if (unit.type === "reftech") return true;
   if (!unit.occupant) return true;
   return !rangesOverlap(unit.occupant.startDate, unit.occupant.endDate, startDate, endDate);
 }
