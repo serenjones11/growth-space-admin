@@ -699,8 +699,15 @@ function LabUsageTrend({ units, labUsageHistory }) {
 
   return (
     <div className={isFullScreen ? "fixed inset-0 z-50 p-6 gc-scroll overflow-y-auto" : ""} style={isFullScreen ? { background: "var(--bg)" } : undefined}>
-    <div className="gc-card p-5">
-      <div className="flex items-center justify-between mb-1 flex-wrap gap-3">
+    <div className="gc-card p-5" style={{ position: "relative" }}>
+      <button
+        onClick={() => setIsFullScreen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl flex-shrink-0"
+        style={{ position: "absolute", top: 14, right: 14, color: "var(--ink-soft)", background: "var(--surface-soft)" }}
+      >
+        {isFullScreen ? <><Minimize2 size={12} /> Close</> : <><Maximize2 size={12} /> Full screen</>}
+      </button>
+      <div className="flex items-center justify-between mb-1 flex-wrap gap-3" style={{ paddingRight: 110 }}>
         <div>
           <h3 className="gc-display font-bold text-sm">Space usage by lab group</h3>
           <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units occupied per month · hover a line for details, click a legend entry to isolate it</p>
@@ -709,13 +716,6 @@ function LabUsageTrend({ units, labUsageHistory }) {
           <MonthPickerButton label="From" value={fromKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleFrom} align="left" />
           <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
           <MonthPickerButton label="To" value={toKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleTo} align="right" />
-          <button
-            onClick={() => setIsFullScreen((v) => !v)}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl flex-shrink-0"
-            style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }}
-          >
-            {isFullScreen ? <><Minimize2 size={12} /> Close</> : <><Maximize2 size={12} /> Full screen</>}
-          </button>
         </div>
       </div>
 
@@ -854,7 +854,8 @@ function PendingPIsPanel({ pendingLabGroups, verifiedLabGroups, onApprove, onMer
   );
 }
 
-function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory, labGroups, onApproveLabGroup, onMergeLabGroup }) {
+function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory, labGroups, onApproveLabGroup, onMergeLabGroup, onAddLabGroup, onUpdateLabGroup, onDeleteLabGroup }) {
+  const [managingPIs, setManagingPIs] = useState(false);
   const [timelineFull, setTimelineFull] = useState(false);
   const [activityExpanded, setActivityExpanded] = useState(false);
 
@@ -997,11 +998,11 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
                 <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units currently held, by group — click one to filter inventory</p>
               </div>
               <button
-                onClick={() => goInventory({})}
+                onClick={() => setManagingPIs(true)}
                 className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full text-white flex-shrink-0"
                 style={{ background: "var(--accent-dark)" }}
               >
-                View all <ChevronRight size={13} />
+                <Pencil size={12} /> Edit PIs
               </button>
             </div>
             <div className="flex flex-wrap gap-3">
@@ -1042,6 +1043,145 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
           <LabUsageTrend units={units} labUsageHistory={labUsageHistory} />
         </div>
       </div>
+
+      {managingPIs && (
+        <PIManagementModal
+          labGroups={labGroups}
+          onAdd={onAddLabGroup}
+          onUpdate={onUpdateLabGroup}
+          onDelete={onDeleteLabGroup}
+          onClose={() => setManagingPIs(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* Add/edit/delete PIs directly — distinct from the Pending PIs approve/
+   merge flow above (self-registrations awaiting review); this is for
+   ongoing maintenance of the PI list itself, e.g. removing someone who's
+   left or fixing a name change without creating a whole new PI. */
+function PIManagementModal({ labGroups, onAdd, onUpdate, onDelete, onClose }) {
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newLab, setNewLab] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editLab, setEditLab] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const surnameLab = (name) => {
+    const parts = name.trim().split(/\s+/);
+    return parts.length ? `${parts[parts.length - 1]} Lab` : "";
+  };
+
+  const startAdd = () => { setAdding(true); setNewName(""); setNewLab(""); setNewEmail(""); };
+  const submitAdd = async () => {
+    if (!newName.trim() || !newLab.trim() || busy) return;
+    setBusy(true);
+    try { await onAdd(newLab.trim(), newName.trim(), newEmail.trim()); setAdding(false); }
+    finally { setBusy(false); }
+  };
+
+  const startEdit = (g) => { setEditingId(g.id); setEditName(g.piName); setEditLab(g.name); setEditEmail(g.piEmail || ""); };
+  const submitEdit = async () => {
+    if (!editName.trim() || !editLab.trim() || busy) return;
+    setBusy(true);
+    try { await onUpdate(editingId, { name: editLab.trim(), piName: editName.trim(), piEmail: editEmail.trim() }); setEditingId(null); }
+    finally { setBusy(false); }
+  };
+
+  const confirmDelete = async () => {
+    setBusy(true);
+    try { await onDelete(confirmingDeleteId); setConfirmingDeleteId(null); }
+    finally { setBusy(false); }
+  };
+
+  const sorted = labGroups.slice().sort((a, b) => a.piName.localeCompare(b.piName));
+  const deletingGroup = confirmingDeleteId ? labGroups.find((g) => g.id === confirmingDeleteId) : null;
+
+  return (
+    <div className="flex items-center justify-center p-6" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, background: "rgba(22,33,29,0.4)" }} onClick={onClose}>
+      <div className="gc-scroll rounded-3xl shadow-2xl" style={{ background: "var(--surface)", width: "100%", maxWidth: 560, maxHeight: "82vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-4 px-6 py-5" style={{ position: "sticky", top: 0, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+          <h2 className="gc-display text-lg font-extrabold">Manage PIs</h2>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Close"><X size={16} /></button>
+        </div>
+
+        <div className="px-6 py-5 space-y-3">
+          {!adding ? (
+            <button onClick={startAdd} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+              <PlusCircle size={13} /> Add PI
+            </button>
+          ) : (
+            <div className="rounded-xl p-3.5 space-y-2.5" style={{ border: "1px solid var(--border)", background: "var(--surface-soft)" }}>
+              <Field label="PI name">
+                <input
+                  className="gc-input"
+                  value={newName}
+                  onChange={(e) => { setNewName(e.target.value); if (!newLab || newLab === surnameLab(newName)) setNewLab(surnameLab(e.target.value)); }}
+                  placeholder="e.g. James Okafor"
+                />
+              </Field>
+              <Field label="Lab name"><input className="gc-input" value={newLab} onChange={(e) => setNewLab(e.target.value)} placeholder="e.g. Okafor Lab" /></Field>
+              <Field label="Email (optional)"><input className="gc-input" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="j.okafor@bristol.ac.uk" /></Field>
+              <div className="flex gap-2 pt-1">
+                <button disabled={!newName.trim() || !newLab.trim() || busy} onClick={submitAdd} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--accent-dark)" }}>
+                  {busy ? "Adding…" : "Add"}
+                </button>
+                <button disabled={busy} onClick={() => setAdding(false)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2 pt-1">
+            {sorted.map((g) => (
+              <div key={g.id} className="rounded-xl p-3" style={{ background: "var(--surface-soft)" }}>
+                {editingId === g.id ? (
+                  <div className="space-y-2.5">
+                    <Field label="PI name"><input className="gc-input" value={editName} onChange={(e) => setEditName(e.target.value)} /></Field>
+                    <Field label="Lab name"><input className="gc-input" value={editLab} onChange={(e) => setEditLab(e.target.value)} /></Field>
+                    <Field label="Email"><input className="gc-input" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} /></Field>
+                    <div className="flex gap-2">
+                      <button disabled={!editName.trim() || !editLab.trim() || busy} onClick={submitEdit} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--accent-dark)" }}>
+                        {busy ? "Saving…" : "Save"}
+                      </button>
+                      <button disabled={busy} onClick={() => setEditingId(null)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold truncate flex items-center gap-1.5">
+                        {g.piName}
+                        {!g.isVerified && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--warning-soft)", color: "var(--warning)" }}>Pending</span>}
+                      </div>
+                      <div className="text-xs truncate" style={{ color: "var(--ink-faint)" }}>{g.name}{g.piEmail ? ` · ${g.piEmail}` : ""}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button onClick={() => startEdit(g)} className="w-8 h-8 flex items-center justify-center rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }} title="Edit"><Pencil size={13} /></button>
+                      <button onClick={() => setConfirmingDeleteId(g.id)} className="w-8 h-8 flex items-center justify-center rounded-lg" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }} title="Delete"><Trash2 size={13} /></button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+            {sorted.length === 0 && <p className="text-sm py-2 text-center" style={{ color: "var(--ink-faint)" }}>No PIs yet.</p>}
+          </div>
+        </div>
+      </div>
+
+      {deletingGroup && (
+        <ConfirmDialog
+          title={`Delete ${deletingGroup.piName}?`}
+          message={`This removes ${deletingGroup.piName} (${deletingGroup.name}) from the PI list. Their existing requisitions and bookings keep their history but lose the PI reference. This can't be undone.`}
+          onCancel={() => setConfirmingDeleteId(null)}
+          onConfirm={confirmDelete}
+        />
+      )}
     </div>
   );
 }
@@ -3480,6 +3620,18 @@ export default function GrowthCabinetApp() {
     await api.mergeLabGroup(fromId, intoId);
     await reload();
   });
+  const handleAddLabGroup = withErrorAlert(async (name, piName, piEmail) => {
+    await api.addLabGroup(name, piName, piEmail);
+    await reload();
+  });
+  const handleUpdateLabGroup = withErrorAlert(async (id, fields) => {
+    await api.updateLabGroup(id, fields);
+    await reload();
+  });
+  const handleDeleteLabGroup = withErrorAlert(async (id) => {
+    await api.deleteLabGroup(id);
+    await reload();
+  });
 
   const handleEditRequisition = withErrorAlert(async (index, updates) => {
     // `updates` is already the full edited requisition (RequisitionEditForm's
@@ -3613,6 +3765,7 @@ export default function GrowthCabinetApp() {
             units={units} requests={requests} goInventory={goInventory} goRequisitions={goRequisitions}
             onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} labUsageHistory={labUsageHistory}
             labGroups={labGroups} onApproveLabGroup={handleApproveLabGroup} onMergeLabGroup={handleMergeLabGroup}
+            onAddLabGroup={handleAddLabGroup} onUpdateLabGroup={handleUpdateLabGroup} onDeleteLabGroup={handleDeleteLabGroup}
           />
         )}
         {page === "inventory" && (

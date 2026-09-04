@@ -94,7 +94,9 @@ create table profiles (
   id            uuid primary key references auth.users(id) on delete cascade,
   full_name     text not null,
   role          user_role not null default 'researcher',
-  lab_group_id  uuid references lab_groups(id),
+  -- ON DELETE SET NULL: deleting a lab group/PI (e.g. they've left) clears
+  -- this reference instead of being blocked by it.
+  lab_group_id  uuid references lab_groups(id) on delete set null,
   phone         text,
   created_at    timestamptz not null default now()
 );
@@ -214,7 +216,9 @@ create table requisitions (
   email             text not null,
   role              text,                                -- "PhD Student", "Postdoc", ...
   emergency_number  text,
-  lab_group_id      uuid references lab_groups(id),
+  -- ON DELETE SET NULL: deleting a PI/lab group clears this reference
+  -- rather than being blocked by it or losing the requisition's history.
+  lab_group_id      uuid references lab_groups(id) on delete set null,
   pi_name           text,
 
   -- what they need
@@ -283,7 +287,9 @@ create table bookings (
 
   researcher_name text not null,
   role            text,                                  -- "PhD Student", "Postdoc", ...
-  lab_group_id    uuid references lab_groups(id),
+  -- ON DELETE SET NULL: deleting a PI/lab group clears this reference
+  -- rather than being blocked by it or losing the booking's history.
+  lab_group_id    uuid references lab_groups(id) on delete set null,
   project_title   text,
   discipline      discipline_type,
 

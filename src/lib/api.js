@@ -68,10 +68,10 @@ export async function approveLabGroup(id) {
 
 /* Re-points every requisition/booking referencing the pending lab group to
    the chosen existing one, then deletes the now-unreferenced pending row.
-   There's no plain "reject" — a pending row always has at least one
-   referencing requisition (that's how it was created), and lab_groups has
-   no ON DELETE CASCADE from those tables, so an unmerged delete would just
-   fail on the foreign key. */
+   (lab_group_id is ON DELETE SET NULL on both tables, so a plain delete
+   wouldn't actually fail — this is still the right call for a duplicate
+   pending PI specifically, since merging keeps their history correctly
+   attributed to the real, existing lab group instead of just orphaning it.) */
 export async function mergeLabGroup(fromId, intoId) {
   let res = await supabase.from("requisitions").update({ lab_group_id: intoId }).eq("lab_group_id", fromId);
   if (res.error) throw res.error;
@@ -79,6 +79,30 @@ export async function mergeLabGroup(fromId, intoId) {
   if (res.error) throw res.error;
   res = await supabase.from("lab_groups").delete().eq("id", fromId);
   if (res.error) throw res.error;
+}
+
+/* Direct PI management (Dashboard's "Edit PIs" panel) — distinct from the
+   self-registration flow (find_or_create_lab_group): these are trusted
+   admin actions, so new entries are verified immediately, no pending
+   review needed. */
+export async function addLabGroup(name, piName, piEmail) {
+  const { error } = await supabase.from("lab_groups").insert({ name, pi_name: piName, pi_email: nullIfEmpty(piEmail), is_verified: true });
+  if (error) throw error;
+}
+
+export async function updateLabGroup(id, { name, piName, piEmail }) {
+  const { error } = await supabase.from("lab_groups").update({ name, pi_name: piName, pi_email: nullIfEmpty(piEmail) }).eq("id", id);
+  if (error) throw error;
+}
+
+/* lab_group_id is ON DELETE SET NULL on requisitions/bookings/profiles, so
+   this doesn't need a merge target — a departed PI can just be removed
+   directly, and their historical requisitions/bookings keep existing with
+   the reference cleared (see the ON DELETE SET NULL comments in
+   schema.sql). */
+export async function deleteLabGroup(id) {
+  const { error } = await supabase.from("lab_groups").delete().eq("id", id);
+  if (error) throw error;
 }
 
 const UNIT_FILES_BUCKET = "unit-files";
