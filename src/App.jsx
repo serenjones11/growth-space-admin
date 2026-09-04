@@ -505,7 +505,11 @@ function buildActivityFeed(units, requests) {
   units.forEach((u) => {
     if (u.type === "cabinet" && u.occupant) {
       items.push({
-        type: "booking", date: u.occupant.startDate, unitId: u.id,
+        // createdAt (when the booking was actually made), not startDate
+        // (when the occupancy period is scheduled for, which can be far in
+        // the future or past) — "recent activity" should reflect when
+        // things really happened, not what they're scheduled around.
+        type: "booking", date: u.occupant.createdAt, unitId: u.id,
         title: `${u.occupant.researcher} was assigned ${u.id}`,
         subtitle: `${piDisplay(u.occupant.labGroup)} · ${FLOOR_LABEL[u.floor]}, ${u.room}`,
       });
@@ -513,7 +517,7 @@ function buildActivityFeed(units, requests) {
     if (u.type === "reftech") {
       u.bookings.forEach((b) => {
         items.push({
-          type: "booking", date: b.startDate, unitId: u.id,
+          type: "booking", date: b.createdAt, unitId: u.id,
           title: `${b.researcher} was assigned ${u.room}`,
           subtitle: `${piDisplay(b.labGroup)} · ${u.id}`,
         });
@@ -846,7 +850,17 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
   const byLab = labsExpanded ? byLabAll : byLabAll.slice(0, 4);
 
   const handleActivityClick = (item) => {
-    if (item.type === "completed") { goRequisitions("completed", item.reqIndex); return; }
+    // item.type === "completed" is just this activity item's display/icon
+    // category (shared by approved/declined/completed requisition events —
+    // see buildActivityFeed) — NOT the requisition's actual status. Route
+    // by the real status via requisitionTab() instead, so a freshly
+    // approved (still-active) requisition opens on the Active tab rather
+    // than always landing on Completed.
+    if (item.type === "completed") {
+      const req = requests[item.reqIndex];
+      goRequisitions(req ? requisitionTab(req.status) : "completed", item.reqIndex);
+      return;
+    }
     const unit = units.find((u) => u.id === item.unitId);
     if (unit) onSelectUnit(unit);
   };
@@ -1335,9 +1349,9 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
       {/* segmented type tabs with live counts */}
       <div className="inline-flex items-center p-1 rounded-2xl mb-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
         {[
+          { key: "all", label: "All Units", count: units.length },
           { key: "cabinet", label: "Growth Cabinets", count: cabinetCount },
           { key: "reftech", label: "Reftech Rooms", count: reftechCount },
-          { key: "all", label: "All Units", count: units.length },
         ].map((t) => (
           <button
             key={t.key}
@@ -1809,7 +1823,7 @@ function BookingCard({ booking, status, onOpenRequisition }) {
 }
 
 function UnitDetailContent({
-  unit, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, requests = [], onOpenRequisition, goRequisitions,
+  unit, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, requests = [], onOpenRequisition, goRequisitions,
   categories, categoryColors, onAddCategory, onRemoveCategory,
 }) {
   const s = displayStatus(unit);
@@ -1819,7 +1833,14 @@ function UnitDetailContent({
   const pastBookings = isReftech ? unit.bookings.filter((b) => new Date(b.endDate) < TODAY) : [];
   // Cabinets are meant to only ever hold one current booking — more than
   // one means an admin's edit created an overlap that nothing blocked.
-  const isClash = !isReftech && current.length > 1;
+  // Acknowledging is per exact booking-id set: if the overlap later
+  // changes (a date moves, a third one joins), that's a different
+  // situation and the warning should come back rather than staying
+  // dismissed forever.
+  const currentIds = current.map((b) => b.id).slice().sort();
+  const acknowledgedIds = (unit.acknowledgedClashBookingIds || []).slice().sort();
+  const isAcknowledged = currentIds.length > 1 && currentIds.length === acknowledgedIds.length && currentIds.every((id, i) => id === acknowledgedIds[i]);
+  const isClash = !isReftech && current.length > 1 && !isAcknowledged;
   const [upcomingExpanded, setUpcomingExpanded] = useState(false);
   const shownUpcoming = upcomingExpanded ? upcoming : upcoming.slice(0, 2);
   const linkFor = (booking) => {
@@ -1836,14 +1857,23 @@ function UnitDetailContent({
         {isClash && (
           <div className="rounded-xl p-3 flex items-start gap-2" style={{ background: "var(--overdue-soft)", border: "1px solid var(--overdue)" }}>
             <AlertTriangle size={15} style={{ color: "var(--overdue)", flexShrink: 0, marginTop: 1 }} />
-            <div className="text-xs font-semibold" style={{ color: "var(--overdue)" }}>
-              {current.length} requisitions are overlapping on this cabinet right now — cabinets are meant to hold one at a time. Review and adjust the dates below.
+            <div className="text-xs flex-1">
+              <div className="font-semibold" style={{ color: "var(--overdue)" }}>
+                {current.length} requisitions are overlapping on this cabinet right now — cabinets are meant to hold one at a time. Review and adjust the dates below, or confirm below if this is genuinely intentional.
+              </div>
+              <button
+                onClick={() => onAcknowledgeClash(unit.id, currentIds)}
+                className="mt-2 text-xs font-bold px-3 py-1.5 rounded-lg"
+                style={{ background: "var(--surface)", border: "1px solid var(--overdue)", color: "var(--overdue)" }}
+              >
+                Confirm both are genuinely ongoing
+              </button>
             </div>
           </div>
         )}
         {current.length > 0 && (
           <div className="space-y-2">
-            {current.map((b) => <BookingCard key={b.id} booking={b} status={s} onOpenRequisition={linkFor(b)} />)}
+            {current.map((b) => <BookingCard key={b.id} booking={b} status={bookingStatus(b)} onOpenRequisition={linkFor(b)} />)}
           </div>
         )}
         {current.length === 0 && upcoming.length > 0 && (
@@ -1932,7 +1962,7 @@ function ConfirmDialog({ title, message, confirmLabel = "Delete", onConfirm, onC
   );
 }
 
-function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
+function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!unit) return null;
 
@@ -1976,7 +2006,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
         <div className="px-7 py-6">
           <UnitDetailContent
             unit={unit} onEdit={onEdit} onUpdateServiceLog={onUpdateServiceLog}
-            onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto} onUpdateNotes={onUpdateNotes}
+            onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto} onUpdateNotes={onUpdateNotes} onAcknowledgeClash={onAcknowledgeClash}
             requests={requests} onOpenRequisition={onOpenRequisition} goRequisitions={goRequisitions}
             categories={categories} categoryColors={categoryColors} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
           />
@@ -2279,7 +2309,12 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
           {isPlant && <Field label="Containment level"><select value={form.containmentLevel || CONTAINMENT_LEVELS[0]} onChange={set("containmentLevel")} className="gc-input">{CONTAINMENT_LEVELS.map((c) => <option key={c}>{c}</option>)}</select></Field>}
           <Field label="Set temp (°C)"><input type="number" min={0} max={60} value={form.setTemp || ""} onChange={setNum("setTemp")} className="gc-input" /></Field>
           <Field label="Set humidity (%)"><input type="number" min={0} max={100} value={form.setHumidity || ""} onChange={setNum("setHumidity")} className="gc-input" /></Field>
-          <Field label="Light cycle"><select value={form.lightCycle || LIGHT_CYCLES[0]} onChange={set("lightCycle")} className="gc-input">{LIGHT_CYCLES.map((l) => <option key={l}>{l}</option>)}</select></Field>
+          <Field label="Light cycle">
+            <select value={form.lightCycle || LIGHT_CYCLES[0]} onChange={set("lightCycle")} className="gc-input">
+              {/* Includes the current value even if it's a custom one entered via the request form's picker, so this never silently shows the wrong option. */}
+              {(form.lightCycle && !LIGHT_CYCLES.includes(form.lightCycle) ? [...LIGHT_CYCLES, form.lightCycle] : LIGHT_CYCLES).map((l) => <option key={l}>{l}</option>)}
+            </select>
+          </Field>
           {isPlant ? (
             <Field label="Pest outbreak consent"><label className="flex items-center gap-2 text-sm mt-2.5"><input type="checkbox" checked={!!form.pestConsent} onChange={setBool("pestConsent")} /> Consented</label></Field>
           ) : (
@@ -2326,10 +2361,12 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
   );
 }
 
-function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, startExpanded = false }) {
+function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, startExpanded = false }) {
   const [expanded, setExpanded] = useState(startExpanded);
   const [editing, setEditing] = useState(false);
   const [chosenUnit, setChosenUnit] = useState("");
+  const [reassigning, setReassigning] = useState(false);
+  const [reassignUnit, setReassignUnit] = useState("");
   // Any unit that matches type & discipline and is available across the *requested* date window —
   // not just units that happen to be free right now.
   const windowCandidates = units.filter((u) =>
@@ -2422,15 +2459,41 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
               )}
 
               {req.status === "approved" && (
-                <div className="rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap" style={{ background: "var(--surface-soft)" }}>
-                  <div>
+                <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>
                       {overdueForCompletion ? "Past its end date — still shown as active until you confirm it's finished." : "Still ongoing, assigned to " + (req.assignedUnitId || "a unit") + "."}
                     </div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button onClick={() => setReassigning((v) => !v)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
+                        <MapPin size={13} /> Change unit
+                      </button>
+                      <button onClick={() => onComplete(index)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+                        <CheckCircle2 size={13} /> Mark as completed
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={() => onComplete(index)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg text-white flex-shrink-0" style={{ background: "var(--accent-dark)" }}>
-                    <CheckCircle2 size={13} /> Mark as completed
-                  </button>
+                  {reassigning && (
+                    <div className="space-y-2 pt-1" style={{ borderTop: "1px solid var(--border)" }}>
+                      <select value={reassignUnit} onChange={(e) => setReassignUnit(e.target.value)} className="gc-input mt-2">
+                        <option value="">Select a different unit…</option>
+                        {windowCandidates.filter((u) => u.id !== req.assignedUnitId).map((u) => (
+                          <option key={u.id} value={u.id}>{u.id} — {FLOOR_LABEL[u.floor]}, {u.room}</option>
+                        ))}
+                      </select>
+                      {windowCandidates.filter((u) => u.id !== req.assignedUnitId).length === 0 && (
+                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units match this request's type & discipline for these dates.</p>
+                      )}
+                      <button
+                        disabled={!reassignUnit}
+                        onClick={() => { onReassign(index, reassignUnit); setReassigning(false); setReassignUnit(""); }}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
+                        style={{ background: "var(--free)" }}
+                      >
+                        <MapPin size={14} /> Move to selected unit
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2553,7 +2616,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   );
 }
 
-function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, initialTab = "pending", initialExpandIndex = null, returnUnitId = null, onBackToUnit }) {
+function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, initialTab = "pending", initialExpandIndex = null, returnUnitId = null, onBackToUnit }) {
   const [tab, setTab] = useState(initialTab);
   const [historyFilter, setHistoryFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all"); // "all" | "cabinet" | "reftech"
@@ -2574,8 +2637,15 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
     .filter(({ r }) => historyFilter === "all" || r.status === historyFilter)
     .sort((a, b) => new Date(b.r.decidedDate || 0) - new Date(a.r.decidedDate || 0)); // most recently approved/declined first
 
-  const cabinetCount = requests.filter((r) => r.unitType === "cabinet").length;
-  const reftechCount = requests.filter((r) => r.unitType === "reftech").length;
+  // Counts on the type-filter toggle reflect whichever tab is open — active
+  // counts on the Active tab, completed/declined counts on the Completed
+  // tab — rather than a blended total that doesn't match what's shown.
+  const relevantForCounts = tab === "pending"
+    ? requests.filter((r) => r.status === "pending" || r.status === "approved")
+    : requests.filter((r) => r.status === "completed" || r.status === "declined");
+  const allCount = relevantForCounts.length;
+  const cabinetCount = relevantForCounts.filter((r) => r.unitType === "cabinet").length;
+  const reftechCount = relevantForCounts.filter((r) => r.unitType === "reftech").length;
 
   return (
     <div>
@@ -2606,7 +2676,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
       {/* space-type filter — applies to both Active and Completed */}
       <div className="inline-flex items-center p-1 rounded-xl mb-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
         {[
-          { key: "all", label: "All", count: requests.length },
+          { key: "all", label: "All", count: allCount },
           { key: "cabinet", label: "Growth Cabinets", count: cabinetCount },
           { key: "reftech", label: "Reftech Rooms", count: reftechCount },
         ].map((t) => (
@@ -2630,7 +2700,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
             <SectionLabel>Pending review ({awaitingReview.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {awaitingReview.map(({ r, i }) => (
-                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} startExpanded={i === initialExpandIndex} />
+                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} startExpanded={i === initialExpandIndex} />
               ))}
               {awaitingReview.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>Nothing waiting on a decision right now.</p>}
             </div>
@@ -2640,7 +2710,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
             <SectionLabel>Ongoing ({ongoing.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {ongoing.map(({ r, i }) => (
-                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} startExpanded={i === initialExpandIndex} />
+                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} startExpanded={i === initialExpandIndex} />
               ))}
               {ongoing.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>No approved requisitions currently in progress.</p>}
             </div>
@@ -2667,7 +2737,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           </div>
           <div className="space-y-3">
             {filteredHistoric.map(({ r, i }) => (
-              <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} startExpanded={i === initialExpandIndex} />
+              <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} startExpanded={i === initialExpandIndex} />
             ))}
             {filteredHistoric.length === 0 && (
               <div className="text-center py-16" style={{ color: "var(--ink-faint)" }}>
@@ -2737,6 +2807,43 @@ function SliderField({ label, value, onChange, min, max, unit }) {
     </div>
   );
 }
+/* Single-value version of the species picker's "add custom" pattern — a
+   plain select plus a toggleable custom-entry input, for fields with a
+   fixed option list that still occasionally needs a one-off value (e.g. a
+   light cycle no preset covers). Always includes the current value as an
+   option even if it's a previously-entered custom one, so the select
+   never silently shows the wrong thing. */
+function SelectWithCustom({ value, onChange, options, label }) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customValue, setCustomValue] = useState("");
+  const allOptions = value && !options.includes(value) ? [...options, value] : options;
+  return (
+    <div>
+      <div className="flex gap-2">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="gc-input flex-1">
+          {allOptions.map((o) => <option key={o}>{o}</option>)}
+        </select>
+        <button type="button" onClick={() => setCustomOpen((v) => !v)} className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface)" }} title={`Add a custom ${label}`}>
+          <PlusCircle size={16} style={{ color: "var(--accent-ink)" }} />
+        </button>
+      </div>
+      {customOpen && (
+        <div className="flex gap-2 mt-2">
+          <input className="gc-input flex-1" placeholder={`Custom ${label}`} value={customValue} onChange={(e) => setCustomValue(e.target.value)} />
+          <button
+            type="button"
+            onClick={() => { if (customValue.trim()) { onChange(customValue.trim()); setCustomValue(""); setCustomOpen(false); } }}
+            className="px-3 rounded-xl text-sm font-semibold text-white flex-shrink-0"
+            style={{ background: "var(--gradient)" }}
+          >
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SpeciesPicker({ species, onChange, options }) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
@@ -3017,7 +3124,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Email"><input required type="email" value={form.email} onChange={set("email")} className="gc-input" placeholder="a.reyes@university.ac.uk" /></Field>
+            <Field label="Email *"><input required type="email" value={form.email} onChange={set("email")} className="gc-input" placeholder="a.reyes@university.ac.uk" /></Field>
             <Field label="Emergency Number *"><input required value={form.emergencyNumber} onChange={set("emergencyNumber")} className="gc-input" placeholder="Mobile number" /></Field>
           </div>
 
@@ -3089,7 +3196,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
           </div>
           <div className="grid grid-cols-2 gap-3 items-end">
             <Field label="Light Cycle">
-              <select value={form.lightCycle} onChange={set("lightCycle")} className="gc-input">{LIGHT_CYCLES.map((l) => <option key={l}>{l}</option>)}</select>
+              <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={LIGHT_CYCLES} label="light cycle" />
             </Field>
             {isPlant ? (
               <div className="rounded-xl p-3" style={{ background: "var(--overdue-soft)", border: "1px solid var(--overdue)" }}>
@@ -3288,6 +3395,11 @@ export default function GrowthCabinetApp() {
     await reload();
   });
 
+  const handleAcknowledgeClash = withErrorAlert(async (unitId, bookingIds) => {
+    await api.acknowledgeClash(unitId, bookingIds);
+    await reload();
+  });
+
   const handleAddCategory = withErrorAlert(async (name) => {
     await api.addMaintenanceCategory(name, categories.length);
     await reload();
@@ -3334,6 +3446,11 @@ export default function GrowthCabinetApp() {
 
   const handleUpdateAdminNotes = withErrorAlert(async (index, text) => {
     await api.updateAdminNotes(requests[index].id, text);
+    await reload();
+  });
+
+  const handleReassignRequisition = withErrorAlert(async (index, newUnitId) => {
+    await api.reassignRequisitionUnit(requests[index].id, newUnitId);
     await reload();
   });
 
@@ -3447,6 +3564,7 @@ export default function GrowthCabinetApp() {
             onComplete={handleCompleteRequisition}
             onRevert={handleRevertRequisition}
             onUpdateAdminNotes={handleUpdateAdminNotes}
+            onReassign={handleReassignRequisition}
             onEdit={handleEditRequisition}
             initialTab={requisitionsTab}
             initialExpandIndex={requisitionsExpandIndex}
@@ -3470,6 +3588,7 @@ export default function GrowthCabinetApp() {
           onRemoveDocument={handleRemoveDocument}
           onUpdatePhoto={handleUpdatePhoto}
           onUpdateNotes={handleUpdateUnitNotes}
+          onAcknowledgeClash={handleAcknowledgeClash}
           requests={requests}
           onOpenRequisition={openRequisitionFromUnit}
           goRequisitions={goRequisitions}

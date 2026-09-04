@@ -194,6 +194,7 @@ function mapUnitRow(u) {
     photoDataUrl: u.photo_url,
     isOutOfService: u.is_out_of_service,
     notes: u.notes || "",
+    acknowledgedClashBookingIds: u.acknowledged_clash_booking_ids || [],
     addedRecently: false,
   };
 }
@@ -219,6 +220,12 @@ function mapBookingRow(b) {
     adminNotes: b.requisitions?.admin_notes || "",
     startDate: b.start_date,
     endDate: b.end_date,
+    // When this booking row was actually created (i.e. when the
+    // requisition was approved) — used for "recent activity" sorting
+    // instead of startDate, which can be scheduled far in the future or
+    // past and would otherwise sort as more/less "recent" than a real
+    // action that just happened.
+    createdAt: b.created_at,
   };
 }
 
@@ -474,6 +481,14 @@ export async function updateUnitNotes(unitId, notes) {
   if (error) throw error;
 }
 
+/* bookingIds: the exact set of currently-overlapping booking ids being
+   dismissed — see the acknowledged_clash_booking_ids column comment for
+   why it's a specific set rather than a bare boolean. */
+export async function acknowledgeClash(unitId, bookingIds) {
+  const { error } = await supabase.from("units").update({ acknowledged_clash_booking_ids: bookingIds }).eq("id", unitId);
+  if (error) throw error;
+}
+
 /* bookings/service_log/documents cascade-delete with the unit. requisitions
    referencing it via assigned_unit_id keep existing (ON DELETE SET NULL) —
    see supabase/schema.sql's requisitions table comment. The caller is
@@ -665,6 +680,18 @@ export async function decideRequisition(req, decision, unitId, decidedByUserId) 
       .eq("id", req.id);
     if (error) throw error;
   }
+}
+
+/* Moves an already-approved requisition's booking to a different unit —
+   e.g. the originally assigned cabinet needs to go out of service, or was
+   simply the wrong pick. Updates both the requisition's assigned_unit_id
+   and its booking's unit_id together so occupancy correctly moves off the
+   old unit and onto the new one. */
+export async function reassignRequisitionUnit(reqId, newUnitId) {
+  const { error: reqError } = await supabase.from("requisitions").update({ assigned_unit_id: newUnitId }).eq("id", reqId);
+  if (reqError) throw reqError;
+  const { error: bookingError } = await supabase.from("bookings").update({ unit_id: newUnitId }).eq("requisition_id", reqId);
+  if (bookingError) throw bookingError;
 }
 
 /* Does NOT delete the booking row — completing a requisition is what makes
