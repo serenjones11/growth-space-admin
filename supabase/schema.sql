@@ -18,6 +18,29 @@
 -- 3. Enums are used for fields with a fixed, known set of values (status,
 --    discipline, unit type). Everything else that might reasonably grow
 --    over time (light cycles, document types) is left as free text.
+-- 4. `units.is_out_of_service` is the ONLY independently-set occupancy fact
+--    stored on a unit. "Free" vs "occupied" is never stored — it's always
+--    computed at query time from `bookings`, via the `unit_current_bookings`
+--    / `unit_current_occupancy` views below (section 8). Storing a
+--    free/occupied column invites drift between it and the actual booking
+--    rows; the old prototype had exactly this problem and had to patch over
+--    it with a "backfill" reconciliation hack.
+-- 5. "Overdue" is not just "booking end_date has passed" — a booking only
+--    counts as overdue if its end date has passed AND its linked
+--    requisition hasn't been marked `completed` yet. A booking whose date
+--    range ended but whose requisition was already completed is just
+--    history, not something an admin needs to chase. See
+--    `unit_current_bookings` in section 8.
+-- 6. CO2 is a property of a *unit* (`units.co2_control`, already modelled),
+--    not something duplicated onto a requisition. A future "CO2 required"
+--    field on the request form should filter/match against
+--    `units.co2_control` when picking a candidate unit — it should not
+--    become its own column on `requisitions`.
+-- 7. Auth: real login (Microsoft Entra ID SSO) isn't wired up yet — that's
+--    a later piece of work for this org. Until it lands, the public Request
+--    Space form needs to be submittable without a logged-in user. See the
+--    RLS note in section 11 for exactly how that's handled, and what to
+--    tighten once Entra ID is live.
 -- ============================================================================
 
 
@@ -33,9 +56,11 @@ create extension if not exists pgcrypto;   -- gives us gen_random_uuid()
 create type user_role        as enum ('admin', 'researcher');
 create type unit_type        as enum ('cabinet', 'reftech');
 create type discipline_type  as enum ('plant', 'insect');
-create type unit_status      as enum ('free', 'occupied', 'service');
 create type requisition_status as enum ('pending', 'approved', 'declined', 'completed');
 create type maintenance_status as enum ('completed', 'scheduled');
+
+-- Note: there is deliberately no `unit_status` enum. A unit's free/occupied
+-- state is never stored — see design note 4 above and section 8.
 
 
 -- ----------------------------------------------------------------------------
@@ -57,6 +82,9 @@ create table lab_groups (
 -- ----------------------------------------------------------------------------
 -- Supabase Auth already stores login identity in auth.users. This table adds
 -- the app-specific bits: role, and (for researchers) which lab they're in.
+-- Not wired up to real SSO yet (Entra ID, later) — this table and the trigger
+-- below are ready and waiting for that, but nothing in the app creates
+-- logged-in users today.
 create table profiles (
   id            uuid primary key references auth.users(id) on delete cascade,
   full_name     text not null,
@@ -75,7 +103,11 @@ begin
   values (new.id, coalesce(new.raw_user_meta_data->>'full_name', new.email), 'researcher');
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
+
+-- Only the trigger itself ever needs to run this — never a direct client
+-- call — so it doesn't need to be reachable via the public RPC endpoint.
+revoke execute on function handle_new_user() from public, anon, authenticated;
 
 create trigger on_auth_user_created
   after insert on auth.users
@@ -133,7 +165,10 @@ create table units (
   humidity_min           numeric not null default 20,
   humidity_max           numeric not null default 95,
 
-  status                 unit_status not null default 'free',
+  -- The only occupancy fact ever stored on a unit — see design note 4.
+  -- Free vs occupied is always computed, never stored (section 8).
+  is_out_of_service      boolean not null default false,
+
   install_date           date,
   service_frequency_months int not null default 6,
   next_service_due       date,
@@ -146,7 +181,7 @@ create table units (
 
 create index idx_units_floor on units(floor);
 create index idx_units_type on units(type);
-create index idx_units_status on units(status);
+create index idx_units_out_of_service on units(is_out_of_service) where is_out_of_service;
 
 
 -- ----------------------------------------------------------------------------
@@ -156,7 +191,9 @@ create table requisitions (
   id                uuid primary key default gen_random_uuid(),
 
   -- who's asking
-  researcher_id     uuid references profiles(id),       -- who submitted it, if logged in
+  researcher_id     uuid references profiles(id),       -- who submitted it, IF logged in.
+                                                          -- Null for now — no SSO yet, see
+                                                          -- section 11's RLS note.
   researcher_name   text not null,
   email             text not null,
   role              text,                                -- "PhD Student", "Postdoc", ...
@@ -175,6 +212,8 @@ create table requisitions (
   project_desc      text,
 
   -- environment
+  -- Note: no `co2` column here on purpose — CO2 is a unit property
+  -- (units.co2_control). See design note 6.
   set_temp          numeric,
   set_humidity      numeric,
   light_cycle       text,
@@ -221,6 +260,7 @@ create table bookings (
   requisition_id  uuid references requisitions(id),      -- always set once created via the app
 
   researcher_name text not null,
+  role            text,                                  -- "PhD Student", "Postdoc", ...
   lab_group_id    uuid references lab_groups(id),
   project_title   text,
   discipline      discipline_type,
@@ -239,6 +279,7 @@ create table bookings (
 
 create index idx_bookings_unit on bookings(unit_id);
 create index idx_bookings_dates on bookings(start_date, end_date);
+create index idx_bookings_requisition on bookings(requisition_id);
 
 -- A cabinet can only hold one booking whose date range overlaps another —
 -- Reftech rooms are allowed to stack multiple bookings, cabinets are not.
@@ -248,7 +289,56 @@ create index idx_bookings_dates on bookings(start_date, end_date);
 
 
 -- ----------------------------------------------------------------------------
--- 8. SERVICE LOG  (Maintenance History)
+-- 8. COMPUTED OCCUPANCY  (views — nothing here is stored; see design notes
+--    4 and 5)
+-- ----------------------------------------------------------------------------
+-- A booking counts as "current" once its requisition has been approved and
+-- its start date has arrived — and it STAYS current (even past its end
+-- date) until the requisition is marked completed. That's what lets a
+-- lapsed booking show up as overdue instead of silently freeing the unit.
+create or replace view unit_current_bookings
+with (security_invoker = true)
+as
+select
+  b.*,
+  r.status as requisition_status,
+  (b.end_date < current_date) as is_overdue,
+  (b.end_date >= current_date and b.end_date <= current_date + 2) as is_ending_soon
+from bookings b
+join requisitions r on r.id = b.requisition_id
+where r.status = 'approved'
+  and b.start_date <= current_date;
+
+comment on view unit_current_bookings is
+  'Bookings that currently occupy their unit: requisition approved (not yet completed) and already started. is_overdue means the end date has passed but nobody has completed the requisition yet — see design note 5 in this file.';
+
+-- One row per unit with a single computed status — this is the direct
+-- equivalent of the old prototype's `unit.status` ('free'/'occupied'/
+-- 'service'), just computed instead of stored.
+create or replace view unit_current_occupancy
+with (security_invoker = true)
+as
+select
+  u.id as unit_id,
+  case
+    when u.is_out_of_service then 'service'
+    when exists (select 1 from unit_current_bookings b where b.unit_id = u.id) then 'occupied'
+    else 'free'
+  end as computed_status,
+  exists (
+    select 1 from unit_current_bookings b where b.unit_id = u.id and b.is_overdue
+  ) as has_overdue_booking,
+  exists (
+    select 1 from unit_current_bookings b where b.unit_id = u.id and b.is_ending_soon
+  ) as has_ending_soon_booking
+from units u;
+
+comment on view unit_current_occupancy is
+  'Computed free/occupied/service status per unit. Never read units.is_out_of_service directly to answer "is this unit free" — always go through this view (or unit_current_bookings) so occupancy reflects live booking data.';
+
+
+-- ----------------------------------------------------------------------------
+-- 9. SERVICE LOG  (Maintenance History)
 -- ----------------------------------------------------------------------------
 create table service_log (
   id           uuid primary key default gen_random_uuid(),
@@ -267,7 +357,7 @@ create index idx_service_log_unit on service_log(unit_id);
 
 
 -- ----------------------------------------------------------------------------
--- 9. DOCUMENTS  (PDFs attached to a unit)
+-- 10. DOCUMENTS  (PDFs attached to a unit)
 -- ----------------------------------------------------------------------------
 create table documents (
   id          uuid primary key default gen_random_uuid(),
@@ -284,7 +374,7 @@ create index idx_documents_unit on documents(unit_id);
 
 
 -- ----------------------------------------------------------------------------
--- 10. keep updated_at fresh
+-- 11. keep updated_at fresh
 -- ----------------------------------------------------------------------------
 create function set_updated_at()
 returns trigger as $$
@@ -292,7 +382,7 @@ begin
   new.updated_at = now();
   return new;
 end;
-$$ language plpgsql;
+$$ language plpgsql set search_path = public;
 
 create trigger trg_units_updated_at
   before update on units for each row execute procedure set_updated_at();
@@ -302,12 +392,25 @@ create trigger trg_requisitions_updated_at
 
 
 -- ----------------------------------------------------------------------------
--- 11. ROW LEVEL SECURITY
+-- 12. ROW LEVEL SECURITY
 -- ----------------------------------------------------------------------------
--- Everything is readable by any logged-in user (researchers need to see
--- availability too), but only admins can write to inventory/maintenance
--- data. Requisitions are the one place researchers can write — but only
--- their own, and only while still pending.
+-- Everything except requisitions is readable by any logged-in user
+-- (researchers need to see availability too, once they log in), but only
+-- admins can write to inventory/maintenance data.
+--
+-- *** Temporary, pre-SSO note ***
+-- Entra ID SSO isn't wired up yet (see design note 7). Until it is, the
+-- Request Space form is the one page non-admin users touch, and they have
+-- no session at all — so `requisitions` gets an extra INSERT policy for the
+-- `anon` role, with `researcher_id` required to be null (there's no
+-- authenticated user to attach it to). Everything else stays locked to
+-- `authenticated`/admin as before; the public form only ever needs to
+-- create a requisition, never read or write anything else.
+--
+-- >>> Once Entra ID is live: drop the "public can submit a requisition"
+-- policy below, require `researcher_id = auth.uid()` unconditionally on
+-- insert, and start scoping the "amend my requisition" flow in the wizard
+-- by the logged-in user. <<<
 
 alter table lab_groups             enable row level security;
 alter table profiles               enable row level security;
@@ -324,16 +427,33 @@ returns boolean as $$
   select exists (
     select 1 from profiles where id = auth.uid() and role = 'admin'
   );
-$$ language sql security definer stable;
+$$ language sql security definer stable set search_path = public;
 
--- --- read access: any authenticated user, for the shared reference data ---
+-- Only `authenticated` needs to call this (it's evaluated as part of RLS
+-- policies on their own queries). Revoke the default PUBLIC grant so it
+-- isn't reachable by `anon` at all, then re-grant to `authenticated` only.
+-- (`authenticated` being able to invoke it directly via the public RPC
+-- endpoint is an accepted, low-risk tradeoff of this pattern — it only
+-- returns a boolean, no row data.)
+revoke execute on function is_admin() from public;
+grant execute on function is_admin() to authenticated;
+
+-- --- read access ---
+-- lab_groups is readable by any authenticated user — the request form's
+-- lab-group dropdown needs it, and it isn't sensitive data. Everything
+-- else here is admin/inventory data that a researcher never needs (they
+-- only ever touch the request form), so it's gated on is_admin() rather
+-- than just "authenticated" — see the note above requisitions' pre-SSO
+-- insert policy for why this distinction matters once researchers also
+-- log in via Entra ID. profiles is admin-or-self, so a user can still
+-- read their own profile (role/lab group) to drive frontend routing.
 create policy "read lab_groups"             on lab_groups             for select using (auth.role() = 'authenticated');
-create policy "read profiles"               on profiles               for select using (auth.role() = 'authenticated');
-create policy "read maintenance_categories" on maintenance_categories for select using (auth.role() = 'authenticated');
-create policy "read units"                  on units                  for select using (auth.role() = 'authenticated');
-create policy "read bookings"               on bookings               for select using (auth.role() = 'authenticated');
-create policy "read service_log"            on service_log            for select using (auth.role() = 'authenticated');
-create policy "read documents"              on documents              for select using (auth.role() = 'authenticated');
+create policy "read profiles"               on profiles               for select using (is_admin() or id = auth.uid());
+create policy "read maintenance_categories" on maintenance_categories for select using (is_admin());
+create policy "read units"                  on units                  for select using (is_admin());
+create policy "read bookings"               on bookings               for select using (is_admin());
+create policy "read service_log"            on service_log            for select using (is_admin());
+create policy "read documents"              on documents              for select using (is_admin());
 
 -- --- write access: admins only, for inventory/maintenance data ---
 create policy "admin write lab_groups"             on lab_groups             for all using (is_admin()) with check (is_admin());
@@ -343,9 +463,18 @@ create policy "admin write bookings"               on bookings               for
 create policy "admin write service_log"            on service_log            for all using (is_admin()) with check (is_admin());
 create policy "admin write documents"              on documents              for all using (is_admin()) with check (is_admin());
 
--- profiles: a user can update their own row; only admins can change roles
+-- profiles: a user can update their own row, but the RLS policy alone only
+-- restricts which ROW they can touch — not which COLUMNS. Without a
+-- column-level grant too, a researcher could set their own `role` to
+-- 'admin' via a direct API call. Revoke UPDATE entirely and grant it back
+-- only on the columns a user should be able to change about themselves;
+-- role and lab_group_id can then only be changed by an admin (via the
+-- Supabase dashboard/SQL editor, which bypasses table grants and RLS as
+-- the service role).
 create policy "update own profile" on profiles for update
   using (id = auth.uid()) with check (id = auth.uid());
+revoke update on profiles from authenticated;
+grant update (full_name, phone) on profiles to authenticated;
 
 -- --- requisitions: the one researcher-writable table ---
 create policy "read own or all requisitions" on requisitions for select using (
@@ -354,6 +483,12 @@ create policy "read own or all requisitions" on requisitions for select using (
 create policy "researcher creates own requisition" on requisitions for insert with check (
   researcher_id = auth.uid()
 );
+-- Temporary (pre-SSO): let an unauthenticated visitor submit the public
+-- Request Space form. researcher_id must be null — there's no session to
+-- attach it to yet. Remove once Entra ID SSO is live (see note above).
+create policy "public can submit a requisition (pre-SSO)" on requisitions for insert
+  to anon
+  with check (researcher_id is null);
 create policy "admin updates any requisition" on requisitions for update using (
   is_admin()
 ) with check (is_admin());
@@ -365,7 +500,7 @@ create policy "researcher amends own pending requisition" on requisitions for up
 
 
 -- ----------------------------------------------------------------------------
--- 12. SEED DATA — your 8 lab groups from the prototype, so the app has
+-- 13. SEED DATA — your 8 lab groups from the prototype, so the app has
 --     something real to point at on day one. Replace/extend freely.
 -- ----------------------------------------------------------------------------
 insert into lab_groups (name, pi_name) values
@@ -380,8 +515,11 @@ insert into lab_groups (name, pi_name) values
 
 -- ============================================================================
 -- End of schema. Next steps once this has run cleanly:
---   1. Supabase → Authentication → add your 4-6 users (magic link is easiest).
---   2. Manually set one of them to role = 'admin' in the profiles table.
+--   1. Supabase → Authentication → add your 4-6 admin users for now (magic
+--      link is easiest); Entra ID SSO for researchers comes later.
+--   2. Manually set the admin user(s) to role = 'admin' in the profiles table.
 --   3. Supabase → Storage → create a bucket called "unit-files" for photos/PDFs.
---   4. Swap the React app's mock generators for real Supabase queries.
+--   4. Swap the React app's mock generators for real Supabase queries —
+--      remember to read occupancy through unit_current_occupancy /
+--      unit_current_bookings, never units.is_out_of_service alone.
 -- ============================================================================
