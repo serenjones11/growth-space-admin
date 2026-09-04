@@ -22,11 +22,79 @@ export const LAB_GROUP_NAME_BY_ID = Object.fromEntries(
   Object.entries(LAB_GROUP_ID_BY_NAME).map(([name, id]) => [id, name])
 );
 
+const UNIT_FILES_BUCKET = "unit-files";
+
+/* Signed URLs (not public ones — the bucket is private, admin-only). Swallows
+   errors so one stale/missing storage object can't break the whole fetch. */
+async function trySignedUrl(path, expiresIn = 3600) {
+  if (!path) return null;
+  try {
+    const { data, error } = await supabase.storage.from(UNIT_FILES_BUCKET).createSignedUrl(path, expiresIn);
+    if (error) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}
+
 function nullIfEmpty(v) {
   return v === "" || v === undefined ? null : v;
 }
 function numOrNull(v) {
   return v === "" || v === undefined || v === null ? null : Number(v);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Historical lab usage (dashboard trend chart)                           */
+/* ---------------------------------------------------------------------- */
+
+const LAB_USAGE_WINDOW_START = new Date(2022, 8, 1); // Sep 2022
+const LAB_USAGE_WINDOW_MONTHS = 48;
+
+function labUsageWindow() {
+  const labels = [], fullLabels = [], keys = [];
+  for (let i = 0; i < LAB_USAGE_WINDOW_MONTHS; i++) {
+    const d = new Date(LAB_USAGE_WINDOW_START.getFullYear(), LAB_USAGE_WINDOW_START.getMonth() + i, 1);
+    labels.push(d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }));
+    fullLabels.push(d.toLocaleDateString("en-GB", { month: "short", year: "numeric" }));
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return { labels, fullLabels, keys };
+}
+
+/* Real per-lab-group, per-month occupied-unit counts, computed from actual
+   booking history — replaces the old mock generator's random series. A lab
+   group's count for a month is the number of distinct units it had a
+   booking in that overlaps any day of that month (regardless of the
+   linked requisition's status — history stays history even once a
+   requisition is completed). On a freshly-live database most months will
+   legitimately show near-zero until real usage accumulates; that's
+   correct, not a bug. */
+export async function fetchLabUsageHistory() {
+  const { labels, fullLabels, keys } = labUsageWindow();
+  const { data, error } = await supabase.from("bookings").select("unit_id, lab_group_id, start_date, end_date");
+  if (error) throw error;
+
+  const series = {};
+  Object.keys(LAB_GROUP_ID_BY_NAME).forEach((lab) => { series[lab] = new Array(keys.length).fill(0); });
+
+  keys.forEach((key, i) => {
+    const [y, m] = key.split("-").map(Number);
+    const monthStart = new Date(y, m - 1, 1);
+    const monthEnd = new Date(y, m, 0); // last day of the month
+    const unitsByLab = {};
+    data.forEach((b) => {
+      const lab = LAB_GROUP_NAME_BY_ID[b.lab_group_id];
+      if (!lab) return;
+      if (new Date(b.start_date) > monthEnd || new Date(b.end_date) < monthStart) return;
+      (unitsByLab[lab] ||= new Set()).add(b.unit_id);
+    });
+    Object.entries(unitsByLab).forEach(([lab, unitSet]) => {
+      if (series[lab]) series[lab][i] = unitSet.size;
+    });
+  });
+
+  return { labels, fullLabels, keys, series };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -87,6 +155,19 @@ function mapBookingRow(b) {
   };
 }
 
+function mapDocumentRow(d) {
+  return {
+    id: d.id,
+    unitId: d.unit_id,
+    name: d.name,
+    type: d.type,
+    addedBy: d.profiles ? d.profiles.full_name : "Admin",
+    date: d.date,
+    storagePath: d.storage_path,
+    url: null, // filled in after a signed-url pass in fetchAdminData
+  };
+}
+
 function mapServiceLogRow(s) {
   return {
     id: s.id,
@@ -143,14 +224,16 @@ function mapRequisitionRow(r) {
    occupancy the moment its requisition is completed (or if it was never
    approved), matching the unit_current_bookings view's semantics. */
 export async function fetchAdminData() {
-  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes] = await Promise.all([
+  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory] = await Promise.all([
     supabase.from("units").select("*"),
     supabase.from("bookings").select("*, requisitions!inner(status)").eq("requisitions.status", "approved"),
     supabase.from("service_log").select("*, maintenance_categories(name)"),
     supabase.from("requisitions").select("*").order("submitted_date", { ascending: true }),
     fetchMaintenanceCategories(),
+    supabase.from("documents").select("*, profiles(full_name)").order("date", { ascending: false }),
+    fetchLabUsageHistory(),
   ]);
-  for (const res of [unitsRes, bookingsRes, serviceRes, reqRes]) {
+  for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes]) {
     if (res.error) throw res.error;
   }
 
@@ -164,6 +247,11 @@ export async function fetchAdminData() {
     const s = mapServiceLogRow(row);
     (serviceByUnit[s.unitId] ||= []).push(s);
   });
+  const documentsByUnit = {};
+  docsRes.data.forEach((row) => {
+    const d = mapDocumentRow(row);
+    (documentsByUnit[d.unitId] ||= []).push(d);
+  });
 
   // Truncated to midnight, matching App.jsx's TODAY constant — kept as a
   // local calculation (rather than importing TODAY from App.jsx) to avoid
@@ -175,8 +263,10 @@ export async function fetchAdminData() {
     const bookings = bookingsByUnit[base.id] || [];
     const serviceLog = (serviceByUnit[base.id] || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
 
+    const documents = documentsByUnit[base.id] || [];
+
     if (base.type === "reftech") {
-      return { ...base, status: base.isOutOfService ? "service" : "auto", bookings, serviceLog, documents: [] };
+      return { ...base, status: base.isOutOfService ? "service" : "auto", bookings, serviceLog, documents };
     }
 
     // Cabinet: at most one active (approved, started) booking is the
@@ -193,8 +283,21 @@ export async function fetchAdminData() {
     } else {
       status = "free";
     }
-    return { ...base, status, urgency, occupant: current, serviceLog, documents: [] };
+    return { ...base, status, urgency, occupant: current, serviceLog, documents };
   });
+
+  // photoDataUrl holds a raw storage path from mapUnitRow (units.photo_url)
+  // until here — the bucket is private, so what the UI actually needs is a
+  // signed URL. Same for each document's storage_path. Resolved in one
+  // batch after the main fetch rather than during it, so a slow/failing
+  // signed-url call can't hold up everything else.
+  const unitsWithFiles = await Promise.all(
+    units.map(async (u) => ({
+      ...u,
+      photoDataUrl: await trySignedUrl(u.photoDataUrl),
+      documents: await Promise.all(u.documents.map(async (d) => ({ ...d, url: await trySignedUrl(d.storagePath) }))),
+    }))
+  );
 
   const requests = reqRes.data.map(mapRequisitionRow);
 
@@ -206,7 +309,55 @@ export async function fetchAdminData() {
     categoryIdByName[c.name] = c.id;
   });
 
-  return { units, requests, categories, categoryColors, categoryIdByName };
+  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory };
+}
+
+/* ---------------------------------------------------------------------- */
+/* Storage (unit photos, requisition/unit documents)                      */
+/* ---------------------------------------------------------------------- */
+
+/* Replacing a photo uploads a new object under a fresh timestamped path
+   (rather than overwriting the old one in place) then deletes the old
+   object — this way a failed upload never leaves the unit's existing
+   photo half-overwritten. */
+export async function uploadUnitPhoto(unitId, file) {
+  const { data: existing } = await supabase.from("units").select("photo_url").eq("id", unitId).single();
+  const oldPath = existing?.photo_url || null;
+
+  const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+  const path = `photos/${unitId}/${Date.now()}.${ext}`;
+  const { error: uploadError } = await supabase.storage.from(UNIT_FILES_BUCKET).upload(path, file, { upsert: true });
+  if (uploadError) throw uploadError;
+
+  const { error } = await supabase.from("units").update({ photo_url: path }).eq("id", unitId);
+  if (error) throw error;
+
+  if (oldPath && oldPath !== path) {
+    await supabase.storage.from(UNIT_FILES_BUCKET).remove([oldPath]);
+  }
+}
+
+export async function addUnitDocument(unitId, file, name, type, addedByUserId) {
+  const path = `documents/${unitId}/${Date.now()}-${file.name}`;
+  const { error: uploadError } = await supabase.storage.from(UNIT_FILES_BUCKET).upload(path, file, { upsert: true });
+  if (uploadError) throw uploadError;
+  const { error } = await supabase
+    .from("documents")
+    .insert({ unit_id: unitId, name, type, storage_path: path, added_by: addedByUserId });
+  if (error) throw error;
+}
+
+/* Removes both the DB row and the underlying storage object — leaving an
+   orphaned file in the bucket would be silently wasted storage with no way
+   to find it again once its only reference (the row) is gone. */
+export async function removeUnitDocument(docId) {
+  const { data, error: selectError } = await supabase.from("documents").select("storage_path").eq("id", docId).single();
+  if (selectError) throw selectError;
+  const { error } = await supabase.from("documents").delete().eq("id", docId);
+  if (error) throw error;
+  if (data?.storage_path) {
+    await supabase.storage.from(UNIT_FILES_BUCKET).remove([data.storage_path]);
+  }
 }
 
 /* ---------------------------------------------------------------------- */

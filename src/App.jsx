@@ -123,23 +123,6 @@ const TOKENS = `
   .gc-tag { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid transparent; display: inline-flex; align-items: center; gap: 4px; }
 `;
 
-/* ---------------------------------------------------------------------- */
-/* Mock data generation (deterministic)                                   */
-/* ---------------------------------------------------------------------- */
-/* Only used by generateLabUsageHistory() below — the 48-month lab-usage
-   chart is still synthetic (real historical analytics is a separate, larger
-   piece of work), so this deterministic PRNG stays around just for that. */
-function mulberry32(seed) {
-  return function () {
-    seed |= 0;
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-const rand = mulberry32(42);
-
 const LAB_GROUPS = ["Okafor Lab", "Petrova Lab", "Chen Lab", "Singh Lab", "Martins Lab", "Whitfield Lab", "Al-Farsi Lab", "Novak Lab"];
 const PI_BY_LAB = {
   "Okafor Lab": "James Okafor", "Petrova Lab": "Elena Petrova", "Chen Lab": "Wei Chen", "Singh Lab": "Amrit Singh",
@@ -528,40 +511,6 @@ const OKABE_ITO = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E
 // except the yellow, which needs dark text to stay readable.
 const OKABE_ITO_TEXT = ["#fff", "#fff", "#fff", "#16211D", "#fff", "#fff", "#fff", "#fff"];
 
-/* 24 months of mock CER usage history per lab group, so the dashboard can toggle between a 1-year
-   and a 2-year view. The most recent month is overwritten with the real current unit count (see
-   LabUsageTrend below) so the chart's "now" always matches the rest of the live dashboard. */
-/* 48 months of mock CER usage history per lab group (Sep 2022 → Aug 2026), so the dashboard's date
-   pickers have a realistic multi-year range to choose from. The most recent month is overwritten with
-   the real current unit count (see LabUsageTrend below) so the chart's "now" always matches the rest
-   of the live dashboard. */
-function generateLabUsageHistory() {
-  const start = new Date(2022, 8, 1);
-  const months = 48;
-  const labels = [];
-  const fullLabels = [];
-  const keys = [];
-  for (let i = 0; i < months; i++) {
-    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-    labels.push(d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }));
-    fullLabels.push(d.toLocaleDateString("en-GB", { month: "short", year: "numeric" }));
-    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-  }
-  const drifts = [0.09, 0.025, -0.025, 0.05, 0, 0.045, -0.015, 0.06];
-  const series = {};
-  LAB_GROUPS.forEach((lab, idx) => {
-    let v = 2 + (idx % 4);
-    const vals = [];
-    for (let i = 0; i < months; i++) {
-      v = Math.max(0, v + drifts[idx] + (rand() - 0.5) * 1.2);
-      vals.push(Math.round(Math.min(14, Math.max(0, v))));
-    }
-    series[lab] = vals;
-  });
-  return { labels, fullLabels, keys, series };
-}
-const LAB_USAGE_HISTORY = generateLabUsageHistory();
-
 function LineMarker({ cx, cy, color, r = 4 }) {
   return <circle cx={cx} cy={cy} r={r} fill={color} />;
 }
@@ -618,8 +567,8 @@ function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "
   );
 }
 
-function LabUsageTrend({ units }) {
-  const allKeys = LAB_USAGE_HISTORY.keys;
+function LabUsageTrend({ units, labUsageHistory }) {
+  const allKeys = labUsageHistory.keys;
   const [fromKey, setFromKey] = useState(allKeys[allKeys.length - 13]); // default: last 12 months
   const [toKey, setToKey] = useState(allKeys[allKeys.length - 1]);
   const [hoveredLab, setHoveredLab] = useState(null);
@@ -630,7 +579,7 @@ function LabUsageTrend({ units }) {
   const fromIdx = Math.max(0, allKeys.indexOf(fromKey));
   const toIdxRaw = allKeys.indexOf(toKey);
   const toIdx = Math.max(fromIdx, toIdxRaw === -1 ? allKeys.length - 1 : toIdxRaw);
-  const labels = LAB_USAGE_HISTORY.labels.slice(fromIdx, toIdx + 1);
+  const labels = labUsageHistory.labels.slice(fromIdx, toIdx + 1);
 
   const handleFrom = (key) => { setFromKey(key); if (allKeys.indexOf(key) > allKeys.indexOf(toKey)) setToKey(key); };
   const handleTo = (key) => { setToKey(key); if (allKeys.indexOf(key) < allKeys.indexOf(fromKey)) setFromKey(key); };
@@ -641,7 +590,7 @@ function LabUsageTrend({ units }) {
   }, {});
 
   const series = LAB_GROUPS.map((lab, idx) => {
-    const full = LAB_USAGE_HISTORY.series[lab].slice();
+    const full = (labUsageHistory.series[lab] || []).slice();
     full[full.length - 1] = currentCounts[lab]; // latest real month = live count
     return { lab, color: OKABE_ITO[idx], values: full.slice(fromIdx, toIdx + 1) };
   });
@@ -665,9 +614,9 @@ function LabUsageTrend({ units }) {
           <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units occupied per month · hover a line for details, click a legend entry to isolate it</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <MonthPickerButton label="From" value={fromKey} keys={allKeys} fullLabels={LAB_USAGE_HISTORY.fullLabels} onSelect={handleFrom} align="left" />
+          <MonthPickerButton label="From" value={fromKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleFrom} align="left" />
           <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
-          <MonthPickerButton label="To" value={toKey} keys={allKeys} fullLabels={LAB_USAGE_HISTORY.fullLabels} onSelect={handleTo} align="right" />
+          <MonthPickerButton label="To" value={toKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleTo} align="right" />
         </div>
       </div>
 
@@ -745,7 +694,7 @@ function LabUsageTrend({ units }) {
   );
 }
 
-function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition }) {
+function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory }) {
   const [timelineFull, setTimelineFull] = useState(false);
   const [activityExpanded, setActivityExpanded] = useState(false);
 
@@ -909,7 +858,7 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
           </div>
 
           {/* occupancy trend */}
-          <LabUsageTrend units={units} />
+          <LabUsageTrend units={units} labUsageHistory={labUsageHistory} />
         </div>
       </div>
     </div>
@@ -1558,11 +1507,12 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
   );
 }
 
-function DocumentsSection({ unit, onUpdate }) {
+function DocumentsSection({ unit, onAdd, onRemove }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [type, setType] = useState(DOCUMENT_TYPES[0]);
   const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleFile = (e) => {
@@ -1572,13 +1522,17 @@ function DocumentsSection({ unit, onUpdate }) {
     if (!name.trim()) setName(f.name.replace(/\.pdf$/i, ""));
   };
 
-  const addDoc = () => {
+  const addDoc = async () => {
     if (!name.trim() || !file) return;
-    const url = URL.createObjectURL(file);
-    onUpdate([{ id: `doc-${Date.now()}`, name: name.trim(), type, addedBy: "You", date: fmt(TODAY), url }, ...unit.documents]);
-    setName(""); setType(DOCUMENT_TYPES[0]); setFile(null); setAdding(false);
+    setBusy(true);
+    try {
+      await onAdd(file, name.trim(), type);
+      setName(""); setType(DOCUMENT_TYPES[0]); setFile(null); setAdding(false);
+    } finally {
+      setBusy(false);
+    }
   };
-  const removeDoc = (id) => onUpdate(unit.documents.filter((d) => d.id !== id));
+  const removeDoc = (id) => onRemove(id);
   const openDoc = (d) => { if (d.url) window.open(d.url, "_blank", "noopener,noreferrer"); };
 
   return (
@@ -1600,8 +1554,8 @@ function DocumentsSection({ unit, onUpdate }) {
           <Field label="Document name"><input value={name} onChange={(e) => setName(e.target.value)} className="gc-input" placeholder="e.g. Calibration Certificate 2027" /></Field>
           <Field label="Type"><select value={type} onChange={(e) => setType(e.target.value)} className="gc-input">{DOCUMENT_TYPES.map((t) => <option key={t}>{t}</option>)}</select></Field>
           <div className="flex gap-2 pt-1">
-            <button disabled={!file || !name.trim()} onClick={addDoc} className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--accent-dark)" }}><Save size={13} /> Save</button>
-            <button onClick={() => { setAdding(false); setFile(null); }} className="text-sm font-semibold px-3 py-2 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+            <button disabled={!file || !name.trim() || busy} onClick={addDoc} className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--accent-dark)" }}><Save size={13} /> {busy ? "Uploading…" : "Save"}</button>
+            <button disabled={busy} onClick={() => { setAdding(false); setFile(null); }} className="text-sm font-semibold px-3 py-2 rounded-lg disabled:opacity-40" style={{ color: "var(--ink-soft)" }}>Cancel</button>
           </div>
         </div>
       )}
@@ -1624,17 +1578,24 @@ function DocumentsSection({ unit, onUpdate }) {
 
 function PhotoCard({ unit, onUpdate }) {
   const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
   const openPicker = () => inputRef.current && inputRef.current.click();
-  const handleFile = (e) => {
+  const handleFile = async (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    onUpdate(URL.createObjectURL(file));
+    setBusy(true);
+    try {
+      await onUpdate(file);
+    } finally {
+      setBusy(false);
+      e.target.value = "";
+    }
   };
   return (
     <>
       <div className="flex items-center justify-between mb-3">
         <SectionLabel>Photo</SectionLabel>
-        <button onClick={openPicker} className="text-xs font-bold" style={{ color: "var(--accent-dark)" }}>{unit.photoDataUrl ? "Replace" : "Add photo"}</button>
+        <button disabled={busy} onClick={openPicker} className="text-xs font-bold disabled:opacity-40" style={{ color: "var(--accent-dark)" }}>{busy ? "Uploading…" : unit.photoDataUrl ? "Replace" : "Add photo"}</button>
         <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
       </div>
       <button
@@ -1689,7 +1650,7 @@ function BookingCard({ booking, status, onOpenRequisition }) {
 }
 
 function UnitDetailContent({
-  unit, onEdit, onUpdateServiceLog, onUpdateDocuments, onUpdatePhoto, requests = [], onOpenRequisition, goRequisitions,
+  unit, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, requests = [], onOpenRequisition, goRequisitions,
   categories, categoryColors, onAddCategory, onRemoveCategory,
 }) {
   const s = displayStatus(unit);
@@ -1752,13 +1713,17 @@ function UnitDetailContent({
         unit={unit} onUpdate={(log) => onUpdateServiceLog(unit.id, log)}
         categories={categories} categoryColors={categoryColors} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
       />
-      <DocumentsSection unit={unit} onUpdate={(docs) => onUpdateDocuments(unit.id, docs)} />
-      <PhotoCard unit={unit} onUpdate={(url) => onUpdatePhoto(unit.id, url)} />
+      <DocumentsSection
+        unit={unit}
+        onAdd={(file, name, type) => onAddDocument(unit.id, file, name, type)}
+        onRemove={(docId) => onRemoveDocument(unit.id, docId)}
+      />
+      <PhotoCard unit={unit} onUpdate={(file) => onUpdatePhoto(unit.id, file)} />
     </div>
   );
 }
 
-function UnitModal({ unit, onClose, onEdit, onUpdateServiceLog, onUpdateDocuments, onUpdatePhoto, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
+function UnitModal({ unit, onClose, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
   if (!unit) return null;
 
   return (
@@ -1791,7 +1756,7 @@ function UnitModal({ unit, onClose, onEdit, onUpdateServiceLog, onUpdateDocument
         <div className="px-7 py-6">
           <UnitDetailContent
             unit={unit} onEdit={onEdit} onUpdateServiceLog={onUpdateServiceLog}
-            onUpdateDocuments={onUpdateDocuments} onUpdatePhoto={onUpdatePhoto}
+            onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto}
             requests={requests} onOpenRequisition={onOpenRequisition} goRequisitions={goRequisitions}
             categories={categories} categoryColors={categoryColors} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
           />
@@ -2922,6 +2887,7 @@ export default function GrowthCabinetApp() {
   const categories = appData ? appData.categories : [];
   const categoryColors = appData ? appData.categoryColors : {};
   const categoryIdByName = appData ? appData.categoryIdByName : {};
+  const labUsageHistory = appData ? appData.labUsageHistory : { labels: [], fullLabels: [], keys: [], series: {} };
 
   // Wraps a mutation so a failed Supabase call (RLS denial, constraint
   // violation, network error) surfaces to the admin instead of failing
@@ -2948,17 +2914,18 @@ export default function GrowthCabinetApp() {
     await reload();
   });
 
-  // Documents/photo stay local-only for this pass — no Supabase Storage
-  // bucket wired up yet, so these intentionally don't persist to the DB.
-  // See the final report for why this was descoped rather than half-built.
-  const handleUpdateDocuments = (unitId, documents) => {
-    setAppData((prev) => (prev ? { ...prev, units: prev.units.map((u) => (u.id === unitId ? { ...u, documents } : u)) } : prev));
-    setSelected((prev) => (prev && prev.id === unitId ? { ...prev, documents } : prev));
-  };
-  const handleUpdatePhoto = (unitId, photoDataUrl) => {
-    setAppData((prev) => (prev ? { ...prev, units: prev.units.map((u) => (u.id === unitId ? { ...u, photoDataUrl } : u)) } : prev));
-    setSelected((prev) => (prev && prev.id === unitId ? { ...prev, photoDataUrl } : prev));
-  };
+  const handleAddDocument = withErrorAlert(async (unitId, file, name, type) => {
+    await api.addUnitDocument(unitId, file, name, type, session?.user?.id);
+    await reload();
+  });
+  const handleRemoveDocument = withErrorAlert(async (unitId, docId) => {
+    await api.removeUnitDocument(docId);
+    await reload();
+  });
+  const handleUpdatePhoto = withErrorAlert(async (unitId, file) => {
+    await api.uploadUnitPhoto(unitId, file);
+    await reload();
+  });
 
   const handleAddCategory = withErrorAlert(async (name) => {
     await api.addMaintenanceCategory(name, categories.length);
@@ -3082,7 +3049,7 @@ export default function GrowthCabinetApp() {
 
       <main className="flex-1 p-8 max-w-[1400px]">
         {page === "dashboard" && (
-          <DashboardPage units={units} requests={requests} goInventory={goInventory} goRequisitions={goRequisitions} onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} />
+          <DashboardPage units={units} requests={requests} goInventory={goInventory} goRequisitions={goRequisitions} onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} labUsageHistory={labUsageHistory} />
         )}
         {page === "inventory" && (
           <InventoryPage key={inventoryKey} units={units} onSelect={setSelected} onAddNew={() => setEditingUnit(null)} initialFilter={inventoryFilter} />
@@ -3112,7 +3079,8 @@ export default function GrowthCabinetApp() {
           onClose={() => setSelected(null)}
           onEdit={(u) => { setEditingUnit(u); }}
           onUpdateServiceLog={handleUpdateServiceLog}
-          onUpdateDocuments={handleUpdateDocuments}
+          onAddDocument={handleAddDocument}
+          onRemoveDocument={handleRemoveDocument}
           onUpdatePhoto={handleUpdatePhoto}
           requests={requests}
           onOpenRequisition={openRequisitionFromUnit}

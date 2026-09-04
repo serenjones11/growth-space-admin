@@ -500,7 +500,30 @@ create policy "researcher amends own pending requisition" on requisitions for up
 
 
 -- ----------------------------------------------------------------------------
--- 13. SEED DATA — your 8 lab groups from the prototype, so the app has
+-- 13. STORAGE  (unit photos and requisition/unit documents)
+-- ----------------------------------------------------------------------------
+-- Private bucket — photos/documents are inventory data, same access tier as
+-- units/service_log/documents under the permission model above, not public.
+insert into storage.buckets (id, name, public)
+values ('unit-files', 'unit-files', false)
+on conflict (id) do nothing;
+
+create policy "admin read unit-files" on storage.objects
+  for select using (bucket_id = 'unit-files' and is_admin());
+
+create policy "admin write unit-files" on storage.objects
+  for insert with check (bucket_id = 'unit-files' and is_admin());
+
+create policy "admin update unit-files" on storage.objects
+  for update using (bucket_id = 'unit-files' and is_admin())
+  with check (bucket_id = 'unit-files' and is_admin());
+
+create policy "admin delete unit-files" on storage.objects
+  for delete using (bucket_id = 'unit-files' and is_admin());
+
+
+-- ----------------------------------------------------------------------------
+-- 14. SEED DATA — your 8 lab groups from the prototype, so the app has
 --     something real to point at on day one. Replace/extend freely.
 -- ----------------------------------------------------------------------------
 insert into lab_groups (name, pi_name) values
