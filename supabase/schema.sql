@@ -283,7 +283,11 @@ create index idx_requisitions_unit on requisitions(assigned_unit_id);
 create table bookings (
   id              uuid primary key default gen_random_uuid(),
   unit_id         text not null references units(id) on delete cascade,
-  requisition_id  uuid references requisitions(id),      -- always set once created via the app
+  -- ON DELETE CASCADE (unlike unit/lab_group references elsewhere): a
+  -- booking only exists as a direct consequence of the requisition that
+  -- got it approved, so if the requisition itself is deleted there's
+  -- nothing left for the booking to be a record of.
+  requisition_id  uuid references requisitions(id) on delete cascade,      -- always set once created via the app
 
   researcher_name text not null,
   role            text,                                  -- "PhD Student", "Postdoc", ...
@@ -531,6 +535,7 @@ create policy "researcher amends own pending requisition" on requisitions for up
 ) with check (
   researcher_id = auth.uid() and status = 'pending'
 );
+create policy "admin deletes any requisition" on requisitions for delete using (is_admin());
 
 
 -- ----------------------------------------------------------------------------

@@ -2037,7 +2037,7 @@ function BookingCard({ booking, status, onOpenRequisition }) {
 }
 
 function UnitDetailContent({
-  unit, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, requests = [], onOpenRequisition, goRequisitions,
+  unit, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, onAssignRequisition, requests = [], onOpenRequisition, goRequisitions,
   categories, categoryColors, onAddCategory, onRemoveCategory,
 }) {
   const s = displayStatus(unit);
@@ -2045,6 +2045,14 @@ function UnitDetailContent({
   const current = currentBookingsList(unit);
   const upcoming = upcomingBookings(unit);
   const pastBookings = isReftech ? unit.bookings.filter((b) => new Date(b.endDate) < TODAY) : [];
+  // A cabinet can only take a new assignment while free; a reftech room
+  // can always take another, even with requisitions already ongoing.
+  const canAssign = isReftech || current.length === 0;
+  const pendingCandidates = requests
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.status === "pending" && r.unitType === unit.type && unitAvailableForWindow(unit, r.startDate, r.endDate));
+  const [assigning, setAssigning] = useState(false);
+  const [chosenReqIndex, setChosenReqIndex] = useState("");
   // Cabinets are meant to only ever hold one current booking — more than
   // one means an admin's edit created an overlap that nothing blocked.
   // Acknowledging is per exact booking-id set: if the overlap later
@@ -2108,6 +2116,45 @@ function UnitDetailContent({
           </div>
         )}
       </div>
+
+      {canAssign && (
+        <div className="mt-4">
+          {!assigning ? (
+            <button
+              onClick={() => setAssigning(true)}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold text-white"
+              style={{ background: "var(--gradient)" }}
+            >
+              <Send size={14} /> Assign requisition
+            </button>
+          ) : (
+            <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
+              <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Assign a pending requisition to this unit</div>
+              {pendingCandidates.length === 0 ? (
+                <p className="text-xs" style={{ color: "var(--overdue)" }}>No pending requisitions match this unit's type and are available for their requested dates.</p>
+              ) : (
+                <select value={chosenReqIndex} onChange={(e) => setChosenReqIndex(e.target.value)} className="gc-input">
+                  <option value="">Select a pending requisition…</option>
+                  {pendingCandidates.map(({ r, i }) => (
+                    <option key={i} value={i}>{r.researcher} — {r.projectTitle} ({fmtGB(r.startDate)} → {fmtGB(r.endDate)})</option>
+                  ))}
+                </select>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  disabled={chosenReqIndex === ""}
+                  onClick={() => { onAssignRequisition(Number(chosenReqIndex), unit.id); setAssigning(false); setChosenReqIndex(""); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
+                  style={{ background: "var(--free)" }}
+                >
+                  <CheckCircle2 size={14} /> Assign
+                </button>
+                <button onClick={() => { setAssigning(false); setChosenReqIndex(""); }} className="text-sm font-semibold px-4 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {pastBookings.length > 0 && (
         <div className="mt-4">
@@ -2174,7 +2221,7 @@ function ConfirmDialog({ title, message, confirmLabel = "Delete", onConfirm, onC
   );
 }
 
-function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
+function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, onAssignRequisition, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!unit) return null;
 
@@ -2218,7 +2265,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
         <div className="px-7 py-6">
           <UnitDetailContent
             unit={unit} onEdit={onEdit} onUpdateServiceLog={onUpdateServiceLog}
-            onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto} onUpdateNotes={onUpdateNotes} onAcknowledgeClash={onAcknowledgeClash}
+            onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto} onUpdateNotes={onUpdateNotes} onAcknowledgeClash={onAcknowledgeClash} onAssignRequisition={onAssignRequisition}
             requests={requests} onOpenRequisition={onOpenRequisition} goRequisitions={goRequisitions}
             categories={categories} categoryColors={categoryColors} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
           />
@@ -2563,12 +2610,13 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
   );
 }
 
-function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, startExpanded = false }) {
+function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, onDelete, startExpanded = false }) {
   const [expanded, setExpanded] = useState(startExpanded);
   const [editing, setEditing] = useState(false);
   const [chosenUnit, setChosenUnit] = useState("");
   const [reassigning, setReassigning] = useState(false);
   const [reassignUnit, setReassignUnit] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Any unit that matches type and is available across the *requested*
   // date window — not just units that happen to be free right now.
   // Discipline isn't a unit property: any cabinet can be assigned
@@ -2621,9 +2669,12 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
             <RequisitionEditForm req={req} units={units} onSave={saveEdit} onCancel={() => setEditing(false)} />
           ) : (
             <>
-              <div className="flex justify-end -mb-1">
+              <div className="flex justify-end gap-4 -mb-1">
                 <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
                   <Pencil size={12} /> Edit details
+                </button>
+                <button onClick={() => setConfirmingDelete(true)} className="flex items-center gap-1.5 text-xs font-bold" style={{ color: "var(--overdue)" }}>
+                  <Trash2 size={12} /> Delete
                 </button>
               </div>
               <RequisitionDetailFields req={req} />
@@ -2713,6 +2764,14 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
             </>
           )}
         </div>
+      )}
+      {confirmingDelete && (
+        <ConfirmDialog
+          title="Delete this requisition?"
+          message={`This permanently deletes ${req.researcher}'s "${req.projectTitle}" requisition${req.status === "approved" ? " and its booking" : ""}. This cannot be undone.`}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => { setConfirmingDelete(false); onDelete(index); }}
+        />
       )}
     </div>
   );
@@ -2819,7 +2878,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   );
 }
 
-function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, initialTab = "pending", initialExpandIndex = null, returnUnitId = null, onBackToUnit }) {
+function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, onDelete, initialTab = "pending", initialExpandIndex = null, returnUnitId = null, onBackToUnit }) {
   const [tab, setTab] = useState(initialTab);
   const [historyFilter, setHistoryFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all"); // "all" | "cabinet" | "reftech"
@@ -2903,7 +2962,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
             <SectionLabel>Pending review ({awaitingReview.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {awaitingReview.map(({ r, i }) => (
-                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} startExpanded={i === initialExpandIndex} />
+                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
               ))}
               {awaitingReview.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>Nothing waiting on a decision right now.</p>}
             </div>
@@ -2913,7 +2972,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
             <SectionLabel>Ongoing ({ongoing.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {ongoing.map(({ r, i }) => (
-                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} startExpanded={i === initialExpandIndex} />
+                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
               ))}
               {ongoing.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>No approved requisitions currently in progress.</p>}
             </div>
@@ -2940,7 +2999,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           </div>
           <div className="space-y-3">
             {filteredHistoric.map(({ r, i }) => (
-              <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} startExpanded={i === initialExpandIndex} />
+              <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
             ))}
             {filteredHistoric.length === 0 && (
               <div className="text-center py-16" style={{ color: "var(--ink-faint)" }}>
@@ -3669,6 +3728,11 @@ export default function GrowthCabinetApp() {
     await reload();
   });
 
+  const handleDeleteRequisition = withErrorAlert(async (index) => {
+    await api.deleteRequisition(requests[index].id);
+    await reload();
+  });
+
   const handleAmendRequisition = withErrorAlert(async (index, payload) => {
     await api.amendRequisition(requests[index].id, payload);
     await reload();
@@ -3781,6 +3845,7 @@ export default function GrowthCabinetApp() {
             onRevert={handleRevertRequisition}
             onUpdateAdminNotes={handleUpdateAdminNotes}
             onReassign={handleReassignRequisition}
+            onDelete={handleDeleteRequisition}
             onEdit={handleEditRequisition}
             initialTab={requisitionsTab}
             initialExpandIndex={requisitionsExpandIndex}
@@ -3805,6 +3870,7 @@ export default function GrowthCabinetApp() {
           onUpdatePhoto={handleUpdatePhoto}
           onUpdateNotes={handleUpdateUnitNotes}
           onAcknowledgeClash={handleAcknowledgeClash}
+          onAssignRequisition={(reqIndex, unitId) => handleDecideRequisition(reqIndex, "approved", unitId)}
           requests={requests}
           onOpenRequisition={openRequisitionFromUnit}
           goRequisitions={goRequisitions}

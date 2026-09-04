@@ -738,3 +738,12 @@ export async function revertRequisitionToActive(reqId) {
     .eq("id", reqId);
   if (error) throw error;
 }
+
+/* bookings.requisition_id is ON DELETE CASCADE, so this also removes the
+   requisition's booking (if any) — unlike deleting a unit or PI, there's
+   nothing left for that booking to be a record of once its requisition is
+   gone. */
+export async function deleteRequisition(reqId) {
+  const { error } = await supabase.from("requisitions").delete().eq("id", reqId);
+  if (error) throw error;
+}
