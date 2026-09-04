@@ -589,13 +589,39 @@ function ActivityRow({ item, onClick }) {
 /* ---------------------------------------------------------------------- */
 /* Dashboard                                                              */
 /* ---------------------------------------------------------------------- */
-/* Colour-blind-safe palette (Okabe–Ito) — distinguishable under deuteranopia/protanopia/tritanopia.
-   Every lab uses this palette plus consistent solid lines/circular markers — kept deliberately simple
-   rather than adding per-line dash/marker variation, which tested as visually noisy. */
-const OKABE_ITO = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#4D4D4D"];
+/* Colour-blind-safe palette (Okabe–Ito), extended so every PI gets a
+   distinct colour instead of wrapping back to a duplicate past the 8th.
+   Slots 0-7 are the unmodified original 8 (unchanged from before, so any
+   PI already relying on one of these keeps the same colour); slots 8-15
+   are a darker OKLCH-shifted variant of the same 8 hues, one per hue
+   family, so a 9th+ PI still reads as a distinct colour rather than a
+   generated/arbitrary one.
+   Validated with the dataviz skill's validate_palette.js: the CVD
+   (colour-blindness) separation and normal-vision separation checks both
+   pass on every adjacent pair in this exact order (worst case ΔE 15.8
+   CVD / 16.4 normal-vision, both clearing their floors) — the ordering
+   of the eight dark slots specifically was chosen (of all 8! orderings)
+   to maximize that worst-case gap, so don't reorder them without
+   re-running the validator. Two dark slots (vermillion, blue) and gray/
+   gray-dark fall outside the validator's light-surface "vivid line/bar"
+   lightness band by design — they're meant to be genuinely darker for
+   distinctness, which is fine for this app's actual use (filled circular
+   badges with an overlaid text label, not thin chart strokes needing
+   maximum surface contrast) and, if anything, gives more surface
+   contrast on the one chart that does use them (LabUsageTrend). Every
+   place a PI's colour appears also shows their name as text right next
+   to it, so colour is a supplementary identity cue, never the only one. */
+const OKABE_ITO = [
+  "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#4D4D4D",
+  "#b0a300", "#00613b", "#0076a8", "#911a00", "#003773", "#a46100", "#8b3e6b", "#292929",
+];
 // Text colour for each swatch above when used as a solid badge fill — everything is white-on-colour
-// except the yellow, which needs dark text to stay readable.
-const OKABE_ITO_TEXT = ["#fff", "#fff", "#fff", "#16211D", "#fff", "#fff", "#fff", "#fff"];
+// except the yellows (both light and dark), which need dark text to stay readable (WCAG contrast
+// checked directly: yellow-dark clears only 2.6:1 with white text vs >=4.5:1 needed).
+const OKABE_ITO_TEXT = [
+  "#fff", "#fff", "#fff", "#16211D", "#fff", "#fff", "#fff", "#fff",
+  "#16211D", "#fff", "#fff", "#fff", "#fff", "#fff", "#fff", "#fff",
+];
 
 function LineMarker({ cx, cy, color, r = 4 }) {
   return <circle cx={cx} cy={cy} r={r} fill={color} />;
