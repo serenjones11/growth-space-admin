@@ -589,9 +589,36 @@ export async function submitRequisition(payload, researcherId) {
   if (error) throw error;
 }
 
+/* Bookings denormalize a snapshot of these fields off their requisition at
+   approval time (see decideRequisition below) — occupancy, the dashboard
+   timeline, and everything else that reads unit.occupant/unit.bookings
+   reads that snapshot, not the requisition directly. Shared here so
+   editing a requisition's dates (or researcher/temp/etc.) after approval
+   actually propagates instead of silently going stale. */
+function bookingFieldsFromRequisition(req) {
+  return {
+    researcher_name: req.researcher,
+    role: nullIfEmpty(req.role),
+    lab_group_id: req.labGroupId ?? null,
+    project_title: req.projectTitle,
+    discipline: req.discipline,
+    set_temp: numOrNull(req.setTemp),
+    set_humidity: numOrNull(req.setHumidity),
+    light_cycle: nullIfEmpty(req.lightCycle),
+    start_date: req.startDate,
+    end_date: req.endDate,
+  };
+}
+
 export async function editRequisition(reqId, updates) {
   const { error } = await supabase.from("requisitions").update(requisitionFieldsToRow(updates)).eq("id", reqId);
   if (error) throw error;
+  // No-op (updates zero rows) if this requisition was never approved.
+  const { error: bookingError } = await supabase
+    .from("bookings")
+    .update(bookingFieldsFromRequisition(updates))
+    .eq("requisition_id", reqId);
+  if (bookingError) throw bookingError;
 }
 
 /* Deliberately separate from requisitionFieldsToRow/editRequisition — this
@@ -622,16 +649,7 @@ export async function decideRequisition(req, decision, unitId, decidedByUserId) 
     const { error: bookingError } = await supabase.from("bookings").insert({
       unit_id: unitId,
       requisition_id: req.id,
-      researcher_name: req.researcher,
-      role: nullIfEmpty(req.role),
-      lab_group_id: req.labGroupId ?? null,
-      project_title: req.projectTitle,
-      discipline: req.discipline,
-      set_temp: numOrNull(req.setTemp),
-      set_humidity: numOrNull(req.setHumidity),
-      light_cycle: nullIfEmpty(req.lightCycle),
-      start_date: req.startDate,
-      end_date: req.endDate,
+      ...bookingFieldsFromRequisition(req),
     });
     if (bookingError) throw bookingError;
 

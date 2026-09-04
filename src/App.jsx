@@ -202,6 +202,15 @@ function unitAvailableForWindow(unit, startDate, endDate) {
 /* Find the requisition index matching a booking/occupant record, so timeline & drawer bookings can link back */
 function findRequisitionIndex(requests, o) {
   if (!o) return null;
+  // Match by the real FK when we have it (every booking created via
+  // decideRequisition carries one) — matching by researcher+dates instead
+  // breaks the moment an admin edits a requisition's dates after
+  // approval, since the booking's denormalized dates no longer line up
+  // with the requisition's current ones.
+  if (o.requisitionId) {
+    const idx = requests.findIndex((r) => r.id === o.requisitionId);
+    return idx === -1 ? null : idx;
+  }
   const idx = requests.findIndex((r) => r.researcher === o.researcher && r.startDate === o.startDate && r.endDate === o.endDate);
   return idx === -1 ? null : idx;
 }
@@ -2179,12 +2188,21 @@ function RequisitionDetailFields({ req }) {
 
 /* Full edit form for a requisition — mirrors the same section grouping as RequisitionDetailFields,
    but with editable inputs. Used from both the Requisitions page and the timeline preview panel. */
-function RequisitionEditForm({ req, onSave, onCancel }) {
+function RequisitionEditForm({ req, units, onSave, onCancel }) {
   const [form, setForm] = useState({ ...req });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setBool = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
   const setNum = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value === "" ? "" : Number(e.target.value) }));
   const isPlant = form.discipline === "plant";
+
+  // Warns (doesn't block) if the edited dates would overlap another active
+  // booking already on this requisition's assigned unit — e.g. a reftech
+  // room genuinely can hold overlapping bookings by design, so this is
+  // informational, letting the admin judge whether it's actually a problem.
+  const assignedUnit = req.assignedUnitId ? units.find((u) => u.id === req.assignedUnitId) : null;
+  const clashes = assignedUnit && form.startDate && form.endDate
+    ? (assignedUnit.bookings || []).filter((b) => b.requisitionId !== req.id && rangesOverlap(form.startDate, form.endDate, b.startDate, b.endDate))
+    : [];
 
   return (
     <div className="space-y-4">
@@ -2249,6 +2267,15 @@ function RequisitionEditForm({ req, onSave, onCancel }) {
             </select>
           </Field>
         </div>
+        {clashes.length > 0 && (
+          <div className="mt-3 rounded-xl p-3 flex items-start gap-2" style={{ background: "var(--warning-soft)", border: "1px solid var(--warning)" }}>
+            <AlertTriangle size={15} style={{ color: "var(--warning)", flexShrink: 0, marginTop: 1 }} />
+            <div className="text-xs" style={{ color: "var(--accent-ink)" }}>
+              <strong>These dates clash with {clashes.length} other booking{clashes.length !== 1 ? "s" : ""} on {assignedUnit.id}:</strong>{" "}
+              {clashes.map((c) => `${c.researcher} (${fmtGB(c.startDate)} → ${fmtGB(c.endDate)})`).join(", ")}
+            </div>
+          </div>
+        )}
       </InfoBox>
 
       <Field label="Space required"><textarea value={form.spaceDescription || ""} onChange={set("spaceDescription")} rows={2} className="gc-input" /></Field>
@@ -2317,7 +2344,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
       {expanded && (
         <div className="px-4 pb-4 space-y-4 border-t pt-4" style={{ borderColor: "var(--border)" }}>
           {editing ? (
-            <RequisitionEditForm req={req} onSave={saveEdit} onCancel={() => setEditing(false)} />
+            <RequisitionEditForm req={req} units={units} onSave={saveEdit} onCancel={() => setEditing(false)} />
           ) : (
             <>
               <div className="flex justify-end -mb-1">
@@ -2328,10 +2355,10 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
               <RequisitionDetailFields req={req} />
 
               <NotesEditor
-                label="Admin notes (internal — shown subtly on the unit's Inventory card)"
+                label="Admin notes"
                 value={req.adminNotes}
                 onSave={(text) => onUpdateAdminNotes(index, text)}
-                placeholder="e.g. TH may want to extend by 2 weeks"
+                placeholder="e.g. student may need to extend project by 2 weeks"
               />
 
               {req.status === "pending" && (
@@ -2440,7 +2467,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
 
         <div className="px-7 py-6 space-y-4">
           {editing ? (
-            <RequisitionEditForm req={req} onSave={saveEdit} onCancel={() => setEditing(false)} />
+            <RequisitionEditForm req={req} units={units} onSave={saveEdit} onCancel={() => setEditing(false)} />
           ) : (
             <>
               <RequisitionDetailFields req={req} />
