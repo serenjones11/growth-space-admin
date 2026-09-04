@@ -251,6 +251,16 @@ function upcomingBookings(unit) {
 function unitOccupant(unit) {
   return unit.type === "cabinet" ? unit.occupant : currentBooking(unit);
 }
+/* Every currently-active booking on a unit, not just the first. A cabinet
+   is meant to only ever have one (unit.occupant/currentBooking() reflect
+   that assumption), but nothing in the schema enforces it — an admin can
+   edit a requisition's dates into overlapping another approved booking on
+   the same cabinet. This is what lets the unit detail page detect that
+   and show both instead of silently hiding whichever one currentBooking()
+   didn't pick. */
+function currentBookingsList(unit) {
+  return (unit.bookings || []).filter((b) => new Date(b.startDate) <= TODAY);
+}
 function unitDiscipline(unit) {
   if (unit.type === "cabinet") return unit.discipline;
   const b = currentBooking(unit) || unit.bookings[0];
@@ -1151,6 +1161,10 @@ function UnitCard({ unit, onClick }) {
   const occupant = unitOccupant(unit);
   const upcoming = upcomingBookings(unit);
   const dm = DISCIPLINE_META[unitDiscipline(unit)];
+  // Cabinets are meant to only hold one booking at a time — more than one
+  // active means an admin edit created an overlap. Surfaced here too (not
+  // just on the unit detail page) so it's visible without opening it.
+  const hasClash = !isReftech && currentBookingsList(unit).length > 1;
 
   // occupant / availability box colour follows the same status language used everywhere else
   const boxStyle =
@@ -1168,7 +1182,14 @@ function UnitCard({ unit, onClick }) {
     >
       <div className="flex items-start justify-between mb-2 gap-2">
         <div className="gc-display text-lg font-extrabold leading-none">{unit.id}</div>
-        <StatusTag unit={unit} />
+        <div className="flex items-center gap-1.5">
+          {hasClash && (
+            <span className="inline-flex items-center gap-1 rounded-full font-bold px-2 py-0.5 text-[10px]" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }} title="Overlapping requisitions on this cabinet">
+              <AlertTriangle size={10} /> Clash
+            </span>
+          )}
+          <StatusTag unit={unit} />
+        </div>
       </div>
       <div className="text-[12px] mb-2.5" style={{ color: "var(--ink-soft)" }}>
         {isReftech ? "Reftech Room · " : ""}{unit.manufacturer} {unit.model}
@@ -1793,9 +1814,14 @@ function UnitDetailContent({
 }) {
   const s = displayStatus(unit);
   const isReftech = unit.type === "reftech";
-  const cb = currentBooking(unit);
+  const current = currentBookingsList(unit);
   const upcoming = upcomingBookings(unit);
   const pastBookings = isReftech ? unit.bookings.filter((b) => new Date(b.endDate) < TODAY) : [];
+  // Cabinets are meant to only ever hold one current booking — more than
+  // one means an admin's edit created an overlap that nothing blocked.
+  const isClash = !isReftech && current.length > 1;
+  const [upcomingExpanded, setUpcomingExpanded] = useState(false);
+  const shownUpcoming = upcomingExpanded ? upcoming : upcoming.slice(0, 2);
   const linkFor = (booking) => {
     if (!onOpenRequisition) return undefined;
     const idx = findRequisitionIndex(requests, booking);
@@ -1805,31 +1831,39 @@ function UnitDetailContent({
 
   const requisitionSection = (
     <section id="booking-section">
-      <SectionLabel>Current Requisition</SectionLabel>
+      <SectionLabel>Current Requisition{current.length > 1 ? "s" : ""}</SectionLabel>
       <div className="space-y-3 mt-3">
-        {isReftech ? (
-          <>
-            {cb && <BookingCard booking={cb} status={s} onOpenRequisition={linkFor(cb)} />}
-            {upcoming.length > 0 && (
-              <div>
-                <div className="text-[11px] mb-1.5 font-bold uppercase tracking-wide" style={{ color: "var(--ink-faint)" }}>Upcoming</div>
-                <div className="space-y-2">{upcoming.map((b) => <BookingCard key={b.id} booking={b} onOpenRequisition={linkFor(b)} />)}</div>
-              </div>
+        {isClash && (
+          <div className="rounded-xl p-3 flex items-start gap-2" style={{ background: "var(--overdue-soft)", border: "1px solid var(--overdue)" }}>
+            <AlertTriangle size={15} style={{ color: "var(--overdue)", flexShrink: 0, marginTop: 1 }} />
+            <div className="text-xs font-semibold" style={{ color: "var(--overdue)" }}>
+              {current.length} requisitions are overlapping on this cabinet right now — cabinets are meant to hold one at a time. Review and adjust the dates below.
+            </div>
+          </div>
+        )}
+        {current.length > 0 && (
+          <div className="space-y-2">
+            {current.map((b) => <BookingCard key={b.id} booking={b} status={s} onOpenRequisition={linkFor(b)} />)}
+          </div>
+        )}
+        {current.length === 0 && upcoming.length > 0 && (
+          <p className="text-sm" style={{ color: "var(--ink-soft)" }}>Currently free.</p>
+        )}
+        {current.length === 0 && upcoming.length === 0 && (
+          <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
+            {unit.status === "service" ? "Marked out of service — no active requisition." : isReftech ? "No current or upcoming requisitions for this room." : "Currently free."}
+          </p>
+        )}
+        {upcoming.length > 0 && (
+          <div>
+            <div className="text-[11px] mt-2 mb-1.5 font-bold uppercase tracking-wide" style={{ color: "var(--ink-faint)" }}>Upcoming ({upcoming.length})</div>
+            <div className="space-y-2">{shownUpcoming.map((b) => <BookingCard key={b.id} booking={b} onOpenRequisition={linkFor(b)} />)}</div>
+            {upcoming.length > 2 && (
+              <button onClick={() => setUpcomingExpanded((v) => !v)} className="mt-2 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
+                {upcomingExpanded ? "Show fewer" : `Show ${upcoming.length - 2} more`}
+              </button>
             )}
-            {!cb && upcoming.length === 0 && (
-              <p className="text-sm" style={{ color: "var(--ink-soft)" }}>No current or upcoming requisitions for this room.</p>
-            )}
-          </>
-        ) : unit.occupant ? (
-          <BookingCard booking={unit.occupant} status={s} onOpenRequisition={linkFor(unit.occupant)} />
-        ) : upcoming.length > 0 ? (
-          <>
-            <p className="text-sm" style={{ color: "var(--ink-soft)" }}>Currently free.</p>
-            <div className="text-[11px] mt-2 mb-1.5 font-bold uppercase tracking-wide" style={{ color: "var(--ink-faint)" }}>Upcoming</div>
-            <div className="space-y-2">{upcoming.map((b) => <BookingCard key={b.id} booking={b} onOpenRequisition={linkFor(b)} />)}</div>
-          </>
-        ) : (
-          <p className="text-sm" style={{ color: "var(--ink-soft)" }}>{unit.status === "service" ? "Marked out of service — no active requisition." : "Currently free."}</p>
+          </div>
         )}
       </div>
 
