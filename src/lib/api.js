@@ -185,7 +185,6 @@ function mapUnitRow(u) {
     ballasts: u.ballasts,
     co2Control: u.co2_control,
     dimmingControl: u.dimming_control,
-    lastBulbFitting: u.last_bulb_fitting,
     availableLightCycles: u.available_light_cycles,
     installDate: u.install_date,
     tempRange: [Number(u.temp_min), Number(u.temp_max)],
@@ -194,6 +193,7 @@ function mapUnitRow(u) {
     nextServiceDue: u.next_service_due,
     photoDataUrl: u.photo_url,
     isOutOfService: u.is_out_of_service,
+    notes: u.notes || "",
     addedRecently: false,
   };
 }
@@ -211,6 +211,12 @@ function mapBookingRow(b) {
     setTemp: b.set_temp,
     setHumidity: b.set_humidity,
     lightCycle: b.light_cycle,
+    // Denormalized read-only from the linked requisition (b.requisitions is
+    // the join added purely to scope the fetch to status='approved' rows —
+    // see the query above), so the occupant bar can show it without a
+    // separate lookup. Never written back from here — admin_notes is only
+    // ever set via updateAdminNotes() directly on requisitions.
+    adminNotes: b.requisitions?.admin_notes || "",
     startDate: b.start_date,
     endDate: b.end_date,
   };
@@ -257,7 +263,6 @@ function mapRequisitionRow(r) {
     unitType: r.unit_type,
     discipline: r.discipline,
     species: r.species || [],
-    numberOfPlants: r.number_of_plants,
     containmentLevel: r.containment_level || "",
     spaceDescription: r.space_description || "",
     projectTitle: r.project_title,
@@ -273,6 +278,7 @@ function mapRequisitionRow(r) {
     endDate: r.end_date,
     hazardNotes: r.hazard_notes || "",
     notes: r.notes || "",
+    adminNotes: r.admin_notes || "",
     status: r.status,
     assignedUnitId: r.assigned_unit_id,
     submittedDate: r.submitted_date ? r.submitted_date.slice(0, 10) : null,
@@ -293,7 +299,7 @@ export async function fetchAdminData() {
 
   const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory] = await Promise.all([
     supabase.from("units").select("*"),
-    supabase.from("bookings").select("*, requisitions!inner(status)").eq("requisitions.status", "approved"),
+    supabase.from("bookings").select("*, requisitions!inner(status, admin_notes)").eq("requisitions.status", "approved"),
     supabase.from("service_log").select("*, maintenance_categories(name)"),
     supabase.from("requisitions").select("*").order("submitted_date", { ascending: true }),
     fetchMaintenanceCategories(),
@@ -451,7 +457,6 @@ export async function saveUnit(data) {
     ballasts: data.ballasts,
     co2_control: !!data.co2Control,
     dimming_control: !!data.dimmingControl,
-    last_bulb_fitting: nullIfEmpty(data.lastBulbFitting),
     available_light_cycles: data.availableLightCycles || null,
     install_date: nullIfEmpty(data.installDate),
     temp_min: data.tempRange[0],
@@ -461,6 +466,11 @@ export async function saveUnit(data) {
   };
   if (data.status !== undefined) row.is_out_of_service = data.status === "service";
   const { error } = await supabase.from("units").upsert(row);
+  if (error) throw error;
+}
+
+export async function updateUnitNotes(unitId, notes) {
+  const { error } = await supabase.from("units").update({ notes: nullIfEmpty(notes) }).eq("id", unitId);
   if (error) throw error;
 }
 
@@ -555,7 +565,6 @@ function requisitionFieldsToRow(payload) {
     unit_type: payload.unitType,
     discipline: payload.discipline,
     species: payload.species || [],
-    number_of_plants: numOrNull(payload.numberOfPlants),
     containment_level: nullIfEmpty(payload.containmentLevel),
     space_description: nullIfEmpty(payload.spaceDescription),
     project_title: payload.projectTitle,
@@ -582,6 +591,15 @@ export async function submitRequisition(payload, researcherId) {
 
 export async function editRequisition(reqId, updates) {
   const { error } = await supabase.from("requisitions").update(requisitionFieldsToRow(updates)).eq("id", reqId);
+  if (error) throw error;
+}
+
+/* Deliberately separate from requisitionFieldsToRow/editRequisition — this
+   is the only code path that ever writes admin_notes, so the anonymous
+   Request Space submission path can never include it (there's no shared
+   column list for a crafted request to piggyback on). */
+export async function updateAdminNotes(reqId, adminNotes) {
+  const { error } = await supabase.from("requisitions").update({ admin_notes: nullIfEmpty(adminNotes) }).eq("id", reqId);
   if (error) throw error;
 }
 
@@ -638,6 +656,18 @@ export async function completeRequisition(reqId, completedByUserId) {
   const { error } = await supabase
     .from("requisitions")
     .update({ status: "completed", completed_date: new Date().toISOString(), completed_by: completedByUserId })
+    .eq("id", reqId);
+  if (error) throw error;
+}
+
+/* Undoes completeRequisition — for an accidental "Complete" click. No
+   booking needs recreating: completing never deleted it, only the
+   requisition's status controlled whether it counted as active (see the
+   bookings fetch above), so flipping status back is sufficient. */
+export async function revertRequisitionToActive(reqId) {
+  const { error } = await supabase
+    .from("requisitions")
+    .update({ status: "approved", completed_date: null, completed_by: null })
     .eq("id", reqId);
   if (error) throw error;
 }

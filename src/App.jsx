@@ -150,7 +150,7 @@ const LIGHT_CYCLES = ["8/16 h (L/D)", "12/12 h (L/D)", "16/8 h (L/D)", "24 h dar
 const LIGHTING_TYPES = ["LED", "Fluorescent", "LED + Fluorescent"];
 const BALLAST_TYPES = ["Electronic", "Magnetic"];
 const ROLES = ["PhD Student", "Postdoc", "Technician", "Masters Student", "PI / Academic Staff"];
-const CONTAINMENT_LEVELS = ["Wild Type", "GM Contained (CL1)", "GM Contained (CL2)"];
+const CONTAINMENT_LEVELS = ["Wild-Type", "GMO", "DEFRA"];
 const PLANT_SPECIES = ["Arabidopsis thaliana", "Triticum aestivum (Wheat)", "Hordeum vulgare (Barley)", "Physcomitrella patens (Moss)", "Nicotiana benthamiana"];
 const INSECT_SPECIES = ["Drosophila melanogaster", "Tribolium castaneum", "Bombyx mori", "Apis mellifera", "Tenebrio molitor"];
 
@@ -274,6 +274,18 @@ function displayStatus(unit) {
   return { key: unit.status, ...m };
 }
 
+/* Same overdue/warning/occupied colour language as displayStatus(), but for
+   a single booking rather than a unit's current occupant — used by the
+   dashboard timeline, which (unlike displayStatus) needs to plot upcoming
+   bookings too, not just whichever one is current right now. */
+function bookingStatus(booking) {
+  if (new Date(booking.startDate) > TODAY) return { key: "upcoming", label: "Upcoming", color: "var(--accent-dark)", soft: "var(--accent-soft)" };
+  const left = daysUntil(booking.endDate);
+  if (left < 0) return { key: "overdue", label: "Overdue", color: "var(--overdue)", soft: "var(--overdue-soft)" };
+  if (left <= 2) return { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" };
+  return { key: "occupied", ...STATUS_META.occupied };
+}
+
 /* ---------------------------------------------------------------------- */
 /* Shared bits                                                            */
 /* ---------------------------------------------------------------------- */
@@ -328,6 +340,34 @@ function Field({ label, children }) {
       <span className="text-xs font-medium block mb-1" style={{ color: "var(--ink-soft)" }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+/* Small inline-editable textarea with a save button that only appears once
+   the text actually changes — used for both a requisition's admin notes
+   and a unit's notes. onSave is expected to already handle its own errors
+   (the withErrorAlert-wrapped handlers this is given elsewhere do). */
+function NotesEditor({ label, value, onSave, placeholder }) {
+  const [text, setText] = useState(value || "");
+  const [saving, setSaving] = useState(false);
+  const dirty = text !== (value || "");
+  return (
+    <Field label={label}>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} className="gc-input" rows={3} placeholder={placeholder} />
+      {dirty && (
+        <div className="flex gap-2 mt-2">
+          <button
+            disabled={saving}
+            onClick={async () => { setSaving(true); try { await onSave(text); } finally { setSaving(false); } }}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40"
+            style={{ background: "var(--accent-dark)" }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button onClick={() => setText(value || "")} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+        </div>
+      )}
+    </Field>
   );
 }
 function RoomChip({ unit, size = "md" }) {
@@ -961,22 +1001,23 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
   const shortDate = (d) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   const axisMarks = [rangeStart, addDays(TODAY, 30), addDays(TODAY, 60), addDays(TODAY, 90), rangeEnd].map((d) => ({ label: shortDate(d), pct: pct(d) }));
 
-  const occupied = units
-    .filter((u) => {
-      const o = unitOccupant(u);
-      if (!o) return false;
-      const s = displayStatus(u);
-      if (floorFilter !== "all" && u.floor !== floorFilter) return false;
-      if (urgencyFilter !== "all" && s.key !== urgencyFilter) return false;
-      if (disciplineFilter !== "all" && unitDiscipline(u) !== disciplineFilter) return false;
-      return true;
-    })
-    .map((u) => {
-      const o = unitOccupant(u);
-      const start = new Date(o.startDate);
-      const end = new Date(o.endDate);
-      return { u, o, start: start < rangeStart ? rangeStart : start, end };
-    });
+  // One row per booking (not per unit) — a unit can have both a current
+  // and an upcoming booking, and unitOccupant() only ever returns the
+  // current one, which previously meant upcoming bookings never appeared
+  // here even though they'd already show as "upcoming" in Inventory.
+  const occupied = units.flatMap((u) => {
+    if (floorFilter !== "all" && u.floor !== floorFilter) return [];
+    if (disciplineFilter !== "all" && unitDiscipline(u) !== disciplineFilter) return [];
+    return (u.bookings || [])
+      .map((o) => {
+        const start = new Date(o.startDate);
+        const end = new Date(o.endDate);
+        const s = bookingStatus(o);
+        if (urgencyFilter !== "all" && s.key !== urgencyFilter) return null;
+        return { u, o, s, start: start < rangeStart ? rangeStart : start, end };
+      })
+      .filter(Boolean);
+  });
 
   const groups = FLOORS.map((f) => ({ floor: f, items: occupied.filter((o) => o.u.floor === f).sort((a, b) => a.end - b.end) }))
     .filter((g) => g.items.length)
@@ -1006,6 +1047,7 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
           <option value="occupied">Occupied</option>
           <option value="warning">Ending soon</option>
           <option value="overdue">Overdue</option>
+          <option value="upcoming">Upcoming</option>
         </select>
       </div>
 
@@ -1027,8 +1069,7 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
                 <span className="text-[13px] font-extrabold gc-display">{FLOOR_LABEL[g.floor]}</span>
               </div>
               <div className="space-y-1.5">
-                {(compact ? g.items.slice(0, 3) : g.items).map(({ u, o, start, end }) => {
-                  const s = displayStatus(u);
+                {(compact ? g.items.slice(0, 3) : g.items).map(({ u, o, s, start, end }) => {
                   const left = pct(start);
                   const width = Math.max(1.2, pct(end) - left);
                   const dm = DISCIPLINE_META[unitDiscipline(u)];
@@ -1165,6 +1206,11 @@ function UnitCard({ unit, onClick }) {
             <div className="text-[11px] font-bold mt-2" style={{ color: boxStyle.ink, opacity: 0.9 }}>
               {s.key === "overdue" ? `Was due back ${fmtGB(occupant.endDate)}` : `Until ${fmtGB(occupant.endDate)}`}
             </div>
+            {occupant.adminNotes && (
+              <div className="text-[10px] italic truncate mt-1" style={{ color: boxStyle.ink, opacity: 0.55 }} title={occupant.adminNotes}>
+                {occupant.adminNotes}
+              </div>
+            )}
             {upcoming.length > 0 && (
               <div className="text-[11px] font-bold mt-1" style={{ color: "var(--accent-dark)" }}>+{upcoming.length} more requisition{upcoming.length !== 1 ? "s" : ""} ahead →</div>
             )}
@@ -1414,7 +1460,6 @@ function EnvironmentControlsCard({ unit }) {
         <FieldPair label="Ballasts" value={unit.ballasts} />
         <FieldPair label="CO₂ control" value={unit.co2Control ? "Yes" : "No"} />
         <FieldPair label="Dimming control" value={unit.dimmingControl ? "Yes" : "No"} />
-        <FieldPair label="Last bulb fitting" value={fmtGB(unit.lastBulbFitting)} />
         <FieldPair label="Next service due" value={fmtGB(unit.nextServiceDue)} />
       </FieldGrid>
     </InfoBox>
@@ -1734,7 +1779,7 @@ function BookingCard({ booking, status, onOpenRequisition }) {
 }
 
 function UnitDetailContent({
-  unit, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, requests = [], onOpenRequisition, goRequisitions,
+  unit, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, requests = [], onOpenRequisition, goRequisitions,
   categories, categoryColors, onAddCategory, onRemoveCategory,
 }) {
   const s = displayStatus(unit);
@@ -1799,6 +1844,7 @@ function UnitDetailContent({
       {requisitionSection}
       <AssetInfoCard unit={unit} />
       <EnvironmentControlsCard unit={unit} />
+      <NotesEditor label="Notes" value={unit.notes} onSave={(text) => onUpdateNotes(unit.id, text)} placeholder="General notes about this unit…" />
       <ServiceLogEditor
         unit={unit} onUpdate={(log) => onUpdateServiceLog(unit.id, log)}
         categories={categories} categoryColors={categoryColors} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
@@ -1843,7 +1889,7 @@ function ConfirmDialog({ title, message, confirmLabel = "Delete", onConfirm, onC
   );
 }
 
-function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
+function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!unit) return null;
 
@@ -1887,7 +1933,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
         <div className="px-7 py-6">
           <UnitDetailContent
             unit={unit} onEdit={onEdit} onUpdateServiceLog={onUpdateServiceLog}
-            onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto}
+            onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto} onUpdateNotes={onUpdateNotes}
             requests={requests} onOpenRequisition={onOpenRequisition} goRequisitions={goRequisitions}
             categories={categories} categoryColors={categoryColors} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
           />
@@ -1918,8 +1964,8 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
           id: "", type: "cabinet", floor: "L1", room: ROOMS_BY_FLOOR.L1[0], discipline: "plant",
           manufacturer: MANUFACTURERS[0], model: "", serialNumber: "", assetNumber: "", tscanId: "",
           shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: BALLAST_TYPES[0],
-          co2Control: false, dimmingControl: false, lastBulbFitting: fmt(TODAY),
-          installDate: fmt(TODAY), tempMin: 4, tempMax: 30, humMin: 30, humMax: 85, status: "free",
+          co2Control: false, dimmingControl: false,
+          installDate: "", tempMin: 4, tempMax: 30, humMin: 30, humMax: 85, status: "free",
         }
   );
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -2009,16 +2055,16 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
           <div className="grid grid-cols-2 gap-3">
             <Field label="Temp range (°C)">
               <div className="flex items-center gap-2">
-                <input type="number" value={form.tempMin} onChange={set("tempMin")} className="gc-input" />
+                <input type="number" min={0} max={60} value={form.tempMin} onChange={set("tempMin")} className="gc-input" />
                 <span style={{ color: "var(--ink-faint)" }}>–</span>
-                <input type="number" value={form.tempMax} onChange={set("tempMax")} className="gc-input" />
+                <input type="number" min={0} max={60} value={form.tempMax} onChange={set("tempMax")} className="gc-input" />
               </div>
             </Field>
             <Field label="Humidity range (%)">
               <div className="flex items-center gap-2">
-                <input type="number" value={form.humMin} onChange={set("humMin")} className="gc-input" />
+                <input type="number" min={0} max={100} value={form.humMin} onChange={set("humMin")} className="gc-input" />
                 <span style={{ color: "var(--ink-faint)" }}>–</span>
-                <input type="number" value={form.humMax} onChange={set("humMax")} className="gc-input" />
+                <input type="number" min={0} max={100} value={form.humMax} onChange={set("humMax")} className="gc-input" />
               </div>
             </Field>
           </div>
@@ -2035,7 +2081,6 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
               </select>
             </Field>
           </div>
-          <Field label="Last bulb fitting"><input type="date" value={form.lastBulbFitting} onChange={set("lastBulbFitting")} className="gc-input" /></Field>
           <div className="flex items-center gap-5">
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.co2Control} onChange={setBool("co2Control")} /> CO₂ control</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!form.dimmingControl} onChange={setBool("dimmingControl")} /> Dimming control</label>
@@ -2083,7 +2128,6 @@ function RequisitionDetailFields({ req }) {
           <FieldPair label="Space type" value={req.unitType === "reftech" ? "Reftech Room" : "Growth cabinet"} />
           <FieldPair label="Research area" value={DISCIPLINE_META[req.discipline].label} />
           <FieldPair label="Species" value={req.species && req.species.length ? req.species.join(", ") : "—"} />
-          {isPlant && <FieldPair label="Number of plants" value={req.numberOfPlants || "—"} />}
           {isPlant && <FieldPair label="Containment level" value={req.containmentLevel || "—"} />}
           <FieldPair label="Set temp / humidity" value={`${req.setTemp || "—"}°C / ${req.setHumidity || "—"}%`} />
           <FieldPair label="Light cycle" value={req.lightCycle || "—"} />
@@ -2180,10 +2224,9 @@ function RequisitionEditForm({ req, onSave, onCancel }) {
               className="gc-input"
             />
           </Field>
-          {isPlant && <Field label="Number of plants"><input type="number" min={0} value={form.numberOfPlants || ""} onChange={setNum("numberOfPlants")} className="gc-input" /></Field>}
           {isPlant && <Field label="Containment level"><select value={form.containmentLevel || CONTAINMENT_LEVELS[0]} onChange={set("containmentLevel")} className="gc-input">{CONTAINMENT_LEVELS.map((c) => <option key={c}>{c}</option>)}</select></Field>}
-          <Field label="Set temp (°C)"><input type="number" value={form.setTemp || ""} onChange={setNum("setTemp")} className="gc-input" /></Field>
-          <Field label="Set humidity (%)"><input type="number" value={form.setHumidity || ""} onChange={setNum("setHumidity")} className="gc-input" /></Field>
+          <Field label="Set temp (°C)"><input type="number" min={0} max={60} value={form.setTemp || ""} onChange={setNum("setTemp")} className="gc-input" /></Field>
+          <Field label="Set humidity (%)"><input type="number" min={0} max={100} value={form.setHumidity || ""} onChange={setNum("setHumidity")} className="gc-input" /></Field>
           <Field label="Light cycle"><select value={form.lightCycle || LIGHT_CYCLES[0]} onChange={set("lightCycle")} className="gc-input">{LIGHT_CYCLES.map((l) => <option key={l}>{l}</option>)}</select></Field>
           {isPlant ? (
             <Field label="Pest outbreak consent"><label className="flex items-center gap-2 text-sm mt-2.5"><input type="checkbox" checked={!!form.pestConsent} onChange={setBool("pestConsent")} /> Consented</label></Field>
@@ -2222,7 +2265,7 @@ function RequisitionEditForm({ req, onSave, onCancel }) {
   );
 }
 
-function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, startExpanded = false }) {
+function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, startExpanded = false }) {
   const [expanded, setExpanded] = useState(startExpanded);
   const [editing, setEditing] = useState(false);
   const [chosenUnit, setChosenUnit] = useState("");
@@ -2284,6 +2327,13 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, star
               </div>
               <RequisitionDetailFields req={req} />
 
+              <NotesEditor
+                label="Admin notes (internal — shown subtly on the unit's Inventory card)"
+                value={req.adminNotes}
+                onSave={(text) => onUpdateAdminNotes(index, text)}
+                placeholder="e.g. TH may want to extend by 2 weeks"
+              />
+
               {req.status === "pending" && (
                 <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
                   <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Assign a unit to approve</div>
@@ -2322,6 +2372,17 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, star
                   </button>
                 </div>
               )}
+
+              {req.status === "completed" && (
+                <div className="rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap" style={{ background: "var(--surface-soft)" }}>
+                  <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>
+                    Completed{req.completedDate ? ` ${fmtGB(req.completedDate)}` : ""}. Accidentally marked done?
+                  </div>
+                  <button onClick={() => onRevert(index)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
+                    <History size={13} /> Revert to active
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -2332,7 +2393,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, star
 
 /* Slide-over panel shown when clicking a bar on the dashboard timeline — lets the admin see the
    full requisition without leaving the dashboard, with an option to jump to the full Requisitions page. */
-function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComplete, onClose, onOpenFull }) {
+function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComplete, onRevert, onClose, onOpenFull }) {
   const [chosenUnit, setChosenUnit] = useState("");
   const [editing, setEditing] = useState(false);
   if (!req) return null;
@@ -2411,6 +2472,15 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                 </div>
               )}
 
+              {req.status === "completed" && (
+                <div className="rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap" style={{ background: "var(--surface-soft)" }}>
+                  <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Completed. Accidentally marked done?</div>
+                  <button onClick={() => { onRevert(index); onClose(); }} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
+                    <History size={13} /> Revert to active
+                  </button>
+                </div>
+              )}
+
               <button onClick={onOpenFull} className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold" style={{ background: "var(--surface-soft)", color: "var(--accent-dark)" }}>
                 Open in Requisitions page <ChevronRight size={14} />
               </button>
@@ -2422,7 +2492,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   );
 }
 
-function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, initialTab = "pending", initialExpandIndex = null, returnUnitId = null, onBackToUnit }) {
+function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, initialTab = "pending", initialExpandIndex = null, returnUnitId = null, onBackToUnit }) {
   const [tab, setTab] = useState(initialTab);
   const [historyFilter, setHistoryFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all"); // "all" | "cabinet" | "reftech"
@@ -2499,7 +2569,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, initi
             <SectionLabel>Pending review ({awaitingReview.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {awaitingReview.map(({ r, i }) => (
-                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} startExpanded={i === initialExpandIndex} />
+                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} startExpanded={i === initialExpandIndex} />
               ))}
               {awaitingReview.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>Nothing waiting on a decision right now.</p>}
             </div>
@@ -2509,7 +2579,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, initi
             <SectionLabel>Ongoing ({ongoing.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {ongoing.map(({ r, i }) => (
-                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} startExpanded={i === initialExpandIndex} />
+                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} startExpanded={i === initialExpandIndex} />
               ))}
               {ongoing.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>No approved requisitions currently in progress.</p>}
             </div>
@@ -2536,7 +2606,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, initi
           </div>
           <div className="space-y-3">
             {filteredHistoric.map(({ r, i }) => (
-              <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} startExpanded={i === initialExpandIndex} />
+              <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} startExpanded={i === initialExpandIndex} />
             ))}
             {filteredHistoric.length === 0 && (
               <div className="text-center py-16" style={{ color: "var(--ink-faint)" }}>
@@ -2685,7 +2755,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
     researcher: "", email: "", phone: "", department: "",
     labGroupId: "", notListedPiName: "", notListedPiEmail: "",
     role: ROLES[0], emergencyNumber: "",
-    species: [], numberOfPlants: "", containmentLevel: CONTAINMENT_LEVELS[0], spaceDescription: "",
+    species: [], containmentLevel: CONTAINMENT_LEVELS[0], spaceDescription: "",
     projectTitle: "", projectDesc: "",
     setTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0], co2: "",
     pestConsent: false, dimmingRequired: false, safetyCompliance: false,
@@ -2801,7 +2871,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
                   notListedPiName: matchingGroup ? "" : (r.pi || ""),
                   notListedPiEmail: "",
                   role: r.role || ROLES[0], emergencyNumber: r.emergencyNumber || "",
-                  species: r.species || [], numberOfPlants: r.numberOfPlants || "", containmentLevel: r.containmentLevel || CONTAINMENT_LEVELS[0],
+                  species: r.species || [], containmentLevel: r.containmentLevel || CONTAINMENT_LEVELS[0],
                   spaceDescription: r.spaceDescription || "",
                   projectTitle: r.projectTitle, projectDesc: r.projectDesc || "",
                   setTemp: r.setTemp || (discipline === "insect" ? 25 : 22), setHumidity: r.setHumidity || (discipline === "insect" ? 65 : 60),
@@ -2921,12 +2991,9 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
           </Field>
 
           {isPlant && (
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Number of Plants"><input type="number" min={0} value={form.numberOfPlants} onChange={set("numberOfPlants")} className="gc-input" /></Field>
-              <Field label="Containment Level">
-                <select value={form.containmentLevel} onChange={set("containmentLevel")} className="gc-input">{CONTAINMENT_LEVELS.map((c) => <option key={c}>{c}</option>)}</select>
-              </Field>
-            </div>
+            <Field label="Containment Level">
+              <select value={form.containmentLevel} onChange={set("containmentLevel")} className="gc-input">{CONTAINMENT_LEVELS.map((c) => <option key={c}>{c}</option>)}</select>
+            </Field>
           )}
 
           <Field label="Describe Space Required">
@@ -2956,8 +3023,8 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
         <section className="space-y-4">
           <FormSectionTitle>{isPlant ? "Growth Conditions" : "Conditions"}</FormSectionTitle>
           <div className="grid grid-cols-2 gap-5">
-            <SliderField label="Temperature" value={form.setTemp} onChange={setNum("setTemp")} min={4} max={40} unit="°C" />
-            <SliderField label="Humidity" value={form.setHumidity} onChange={setNum("setHumidity")} min={10} max={95} unit="%" />
+            <SliderField label="Temperature" value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" />
+            <SliderField label="Humidity" value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" />
           </div>
           <div className="grid grid-cols-2 gap-3 items-end">
             <Field label="Light Cycle">
@@ -3087,7 +3154,11 @@ export default function GrowthCabinetApp() {
   }, [isAdmin]);
 
   const [page, setPage] = useState("dashboard");
-  const [selected, setSelected] = useState(null);
+  // Holds only the id, not a snapshot of the unit object — so the drawer
+  // always reflects the freshly-reloaded unit after any mutation (add/
+  // remove a document, update service log, etc.) instead of showing stale
+  // data until it's closed and reopened.
+  const [selectedUnitId, setSelectedUnitId] = useState(null);
   const [editingUnit, setEditingUnit] = useState(undefined); // undefined = closed, null = add-new, object = edit
   const [inventoryFilter, setInventoryFilter] = useState(null);
   const [inventoryKey, setInventoryKey] = useState(0);
@@ -3099,6 +3170,8 @@ export default function GrowthCabinetApp() {
 
   const units = appData ? appData.units : [];
   const requests = appData ? appData.requests : [];
+  const selected = units.find((u) => u.id === selectedUnitId) || null;
+  const setSelected = (unit) => setSelectedUnitId(unit ? unit.id : null);
   const categories = appData ? appData.categories : [];
   const categoryColors = appData ? appData.categoryColors : {};
   const categoryIdByName = appData ? appData.categoryIdByName : {};
@@ -3149,6 +3222,11 @@ export default function GrowthCabinetApp() {
     await reload();
   });
 
+  const handleUpdateUnitNotes = withErrorAlert(async (unitId, notes) => {
+    await api.updateUnitNotes(unitId, notes);
+    await reload();
+  });
+
   const handleAddCategory = withErrorAlert(async (name) => {
     await api.addMaintenanceCategory(name, categories.length);
     await reload();
@@ -3185,6 +3263,16 @@ export default function GrowthCabinetApp() {
      is still 'approved'. */
   const handleCompleteRequisition = withErrorAlert(async (index) => {
     await api.completeRequisition(requests[index].id, session?.user?.id);
+    await reload();
+  });
+
+  const handleRevertRequisition = withErrorAlert(async (index) => {
+    await api.revertRequisitionToActive(requests[index].id);
+    await reload();
+  });
+
+  const handleUpdateAdminNotes = withErrorAlert(async (index, text) => {
+    await api.updateAdminNotes(requests[index].id, text);
     await reload();
   });
 
@@ -3296,6 +3384,8 @@ export default function GrowthCabinetApp() {
             units={units}
             onDecide={handleDecideRequisition}
             onComplete={handleCompleteRequisition}
+            onRevert={handleRevertRequisition}
+            onUpdateAdminNotes={handleUpdateAdminNotes}
             onEdit={handleEditRequisition}
             initialTab={requisitionsTab}
             initialExpandIndex={requisitionsExpandIndex}
@@ -3318,6 +3408,7 @@ export default function GrowthCabinetApp() {
           onAddDocument={handleAddDocument}
           onRemoveDocument={handleRemoveDocument}
           onUpdatePhoto={handleUpdatePhoto}
+          onUpdateNotes={handleUpdateUnitNotes}
           requests={requests}
           onOpenRequisition={openRequisitionFromUnit}
           goRequisitions={goRequisitions}
@@ -3335,6 +3426,7 @@ export default function GrowthCabinetApp() {
           units={units}
           onDecide={handleDecideRequisition}
           onComplete={handleCompleteRequisition}
+          onRevert={handleRevertRequisition}
           onEdit={handleEditRequisition}
           onClose={() => setPreviewReqIndex(null)}
           onOpenFull={() => {

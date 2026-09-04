@@ -160,7 +160,6 @@ create table units (
   ballasts               text,
   co2_control            boolean not null default false,
   dimming_control        boolean not null default false,
-  last_bulb_fitting      date,
   available_light_cycles text[] default array[
     '8/16 h (L/D)', '12/12 h (L/D)', '16/8 h (L/D)', '24 h dark', 'Continuous light'
   ],
@@ -179,6 +178,7 @@ create table units (
   next_service_due       date,
 
   photo_url              text,                          -- Supabase Storage path
+  notes                  text,                          -- freeform admin notes, shown above Maintenance History
 
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now()
@@ -210,7 +210,6 @@ create table requisitions (
   unit_type         unit_type not null,
   discipline        discipline_type not null,
   species           text[] default array[]::text[],
-  number_of_plants  int,
   containment_level text,
   space_description text,
   project_title     text not null,
@@ -234,6 +233,10 @@ create table requisitions (
   -- free text
   hazard_notes      text,
   notes             text,
+  -- Admin-only internal note (e.g. "TH may want to extend by 2 weeks"),
+  -- distinct from the researcher's own `notes` above. Shown in small,
+  -- deliberately understated text on the unit's occupant bar in Inventory.
+  admin_notes       text,
 
   -- lifecycle
   status            requisition_status not null default 'pending',
@@ -494,9 +497,15 @@ create policy "researcher creates own requisition" on requisitions for insert wi
 -- Temporary (pre-SSO): let an unauthenticated visitor submit the public
 -- Request Space form. researcher_id must be null — there's no session to
 -- attach it to yet. Remove once Entra ID SSO is live (see note above).
+-- admin_notes must also be null: it's meant to be admin-authored only
+-- (see its column comment), and RLS doesn't restrict individual column
+-- VALUES on its own — a raw request straight to the REST API, bypassing
+-- the app's own JS entirely, could otherwise plant fake admin-looking
+-- text there. This is enforced here, not just by app code, for exactly
+-- that reason.
 create policy "public can submit a requisition (pre-SSO)" on requisitions for insert
   to anon
-  with check (researcher_id is null);
+  with check (researcher_id is null and admin_notes is null);
 create policy "admin updates any requisition" on requisitions for update using (
   is_admin()
 ) with check (is_admin());
