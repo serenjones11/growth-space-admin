@@ -35,6 +35,9 @@ import {
   MapPin,
   Save,
   PackagePlus,
+  PackageMinus,
+  UserPlus,
+  UserMinus,
   FileText,
   ImagePlus,
   Trash2,
@@ -510,9 +513,21 @@ const ACTIVITY_META = {
   completed: { icon: CheckCircle2, color: "var(--free)", soft: "var(--free-soft)" },
   added: { icon: PackagePlus, color: "var(--accent)", soft: "var(--accent-soft)" },
   service: { icon: Wrench, color: "var(--service)", soft: "var(--service-soft)" },
+  unit_added: { icon: PackagePlus, color: "var(--accent)", soft: "var(--accent-soft)" },
+  unit_deleted: { icon: PackageMinus, color: "var(--critical, #b3261e)", soft: "var(--critical-soft, #fbe7e5)" },
+  lab_group_added: { icon: UserPlus, color: "var(--accent)", soft: "var(--accent-soft)" },
+  lab_group_deleted: { icon: UserMinus, color: "var(--critical, #b3261e)", soft: "var(--critical-soft, #fbe7e5)" },
+  requisition_deleted: { icon: Trash2, color: "var(--critical, #b3261e)", soft: "var(--critical-soft, #fbe7e5)" },
 };
 
-function buildActivityFeed(units, requests) {
+// `units`/`requests` still-live state gives us bookings, servicing, and
+// requisition status changes by inference (the row is still there to read).
+// `activityLog` covers what inference structurally can't: events whose row
+// is now gone (a deleted unit, a deleted PI, a deleted requisition) — see
+// supabase/schema.sql § 16. Booking-assigned and requisition status-change
+// events are NOT duplicated into activity_log, so merging the two here is
+// safe from double-counting.
+function buildActivityFeed(units, requests, activityLog = []) {
   const items = [];
   units.forEach((u) => {
     if (u.type === "cabinet" && u.occupant) {
@@ -542,29 +557,29 @@ function buildActivityFeed(units, requests) {
         subtitle: u.serviceLog[0].notes,
       });
     }
-    if (u.addedRecently) {
-      items.push({
-        type: "added", date: u.installDate, unitId: u.id,
-        title: `${u.id} added to inventory`,
-        subtitle: `${u.type === "reftech" ? "Reftech room" : "Growth cabinet"} · ${FLOOR_LABEL[u.floor]}, ${u.room}`,
-      });
-    }
   });
   requests.forEach((r, i) => {
     if (r.status === "approved" || r.status === "declined") {
       items.push({
-        type: "completed", date: r.decidedDate || r.submittedDate, reqIndex: i,
+        type: "completed", date: r.decidedAt || r.decidedDate || r.submittedAt || r.submittedDate, reqIndex: i,
         title: `Requisition ${r.status === "approved" ? "approved" : "declined"} — ${r.projectTitle}`,
         subtitle: `${r.researcher} · ${piDisplay(r.labGroup)}${r.assignedUnitId ? ` · assigned ${r.assignedUnitId}` : ""}`,
       });
     }
     if (r.status === "completed") {
       items.push({
-        type: "completed", date: r.completedDate || r.decidedDate, reqIndex: i,
+        type: "completed", date: r.completedAt || r.completedDate || r.decidedAt || r.decidedDate, reqIndex: i,
         title: `Requisition marked finished — ${r.projectTitle}`,
         subtitle: `${r.researcher} · ${piDisplay(r.labGroup)}${r.assignedUnitId ? ` · freed ${r.assignedUnitId}` : ""}`,
       });
     }
+  });
+  activityLog.forEach((a) => {
+    items.push({
+      type: a.type, date: a.createdAt, unitId: a.unitId,
+      title: a.title,
+      subtitle: a.subtitle,
+    });
   });
   return items.filter((it) => it.date).sort((a, b) => new Date(b.date) - new Date(a.date));
 }
@@ -880,10 +895,10 @@ function PendingPIsPanel({ pendingLabGroups, verifiedLabGroups, onApprove, onMer
   );
 }
 
-function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory, labGroups, onApproveLabGroup, onMergeLabGroup, onAddLabGroup, onUpdateLabGroup, onDeleteLabGroup }) {
+function DashboardPage({ units, requests, activityLog, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory, labGroups, onApproveLabGroup, onMergeLabGroup, onAddLabGroup, onUpdateLabGroup, onDeleteLabGroup }) {
   const [managingPIs, setManagingPIs] = useState(false);
   const [timelineFull, setTimelineFull] = useState(false);
-  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [activityExpanded, setActivityExpanded] = useState(true);
 
   const total = units.length;
   const occupied = units.filter((u) => displayStatus(u).key === "occupied" || displayStatus(u).key === "warning" || displayStatus(u).key === "overdue").length;
@@ -892,7 +907,7 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
   const utilisation = total === 0 ? 0 : Math.round((occupied / total) * 100);
   const pending = requests.filter((r) => r.status === "pending");
 
-  const activity = useMemo(() => buildActivityFeed(units, requests), [units, requests]);
+  const activity = useMemo(() => buildActivityFeed(units, requests, activityLog), [units, requests, activityLog]);
   const shownActivity = activityExpanded ? activity.slice(0, 20) : activity.slice(0, 4);
 
   const [labsExpanded, setLabsExpanded] = useState(false);
@@ -3633,6 +3648,7 @@ export default function GrowthCabinetApp() {
   const categoryIdByName = appData ? appData.categoryIdByName : {};
   const labUsageHistory = appData ? appData.labUsageHistory : { labels: [], fullLabels: [], keys: [], series: {} };
   const labGroups = appData ? appData.labGroups : [];
+  const activityLog = appData ? appData.activityLog : [];
 
   // Wraps a mutation so a failed Supabase call (RLS denial, constraint
   // violation, network error) surfaces to the admin instead of failing
@@ -3852,7 +3868,7 @@ export default function GrowthCabinetApp() {
       <main className="flex-1 p-8 max-w-[1400px]">
         {page === "dashboard" && (
           <DashboardPage
-            units={units} requests={requests} goInventory={goInventory} goRequisitions={goRequisitions}
+            units={units} requests={requests} activityLog={activityLog} goInventory={goInventory} goRequisitions={goRequisitions}
             onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} labUsageHistory={labUsageHistory}
             labGroups={labGroups} onApproveLabGroup={handleApproveLabGroup} onMergeLabGroup={handleMergeLabGroup}
             onAddLabGroup={handleAddLabGroup} onUpdateLabGroup={handleUpdateLabGroup} onDeleteLabGroup={handleDeleteLabGroup}

@@ -680,6 +680,104 @@ $$;
 revoke execute on function find_or_create_lab_group(text, text) from public;
 grant execute on function find_or_create_lab_group(text, text) to anon, authenticated;
 
+
+-- ----------------------------------------------------------------------------
+-- 16. ACTIVITY LOG  (durable events that live inference can't recover)
+-- ----------------------------------------------------------------------------
+-- The dashboard's "Recent activity" was entirely inferred from current table
+-- state (a unit's occupant, a requisition's status) — fine for anything
+-- still there, but it can never recover an event whose row is now gone: a
+-- deleted unit, a deleted PI, a deleted requisition. This table + triggers
+-- cover exactly those events, written automatically regardless of which
+-- code path caused the change (admin action or the anon self-registration
+-- RPC) rather than by scattering manual logging calls through the app.
+-- Booking-assigned and requisition status-change events are deliberately
+-- NOT logged here — those still work via live inference (the row is still
+-- there), so logging them too would just duplicate every entry.
+create table activity_log (
+  id          uuid primary key default gen_random_uuid(),
+  type        text not null,   -- 'unit_added' | 'unit_deleted' | 'lab_group_added' | 'lab_group_deleted' | 'requisition_deleted'
+  title       text not null,
+  subtitle    text,
+  -- Deliberately NOT a foreign key: this row must survive the referenced
+  -- unit being deleted (that's the entire point of this table).
+  unit_id     text,
+  created_at  timestamptz not null default now()
+);
+
+alter table activity_log enable row level security;
+create policy "read activity_log" on activity_log for select using (is_admin());
+-- No insert/update/delete policy for any client role — only the trigger
+-- functions below write to it, running as SECURITY DEFINER (bypassing RLS
+-- as the table owner, the same pattern as is_admin() itself).
+
+create or replace function log_unit_insert()
+returns trigger as $$
+begin
+  insert into activity_log (type, title, subtitle, unit_id, created_at)
+  values (
+    'unit_added',
+    new.id || ' added to inventory',
+    (case when new.type = 'reftech' then 'Reftech room' else 'Growth cabinet' end) || ' · ' || new.floor || ', ' || new.room,
+    new.id,
+    new.created_at
+  );
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+create trigger trg_log_unit_insert after insert on units for each row execute procedure log_unit_insert();
+
+create or replace function log_unit_delete()
+returns trigger as $$
+begin
+  insert into activity_log (type, title, subtitle, unit_id, created_at)
+  values (
+    'unit_deleted',
+    old.id || ' removed from inventory',
+    (case when old.type = 'reftech' then 'Reftech room' else 'Growth cabinet' end) || ' · was ' || old.floor || ', ' || old.room,
+    old.id,
+    now()
+  );
+  return old;
+end;
+$$ language plpgsql security definer set search_path = public;
+create trigger trg_log_unit_delete after delete on units for each row execute procedure log_unit_delete();
+
+create or replace function log_lab_group_insert()
+returns trigger as $$
+begin
+  insert into activity_log (type, title, subtitle, created_at)
+  values (
+    'lab_group_added',
+    new.pi_name || ' added as a PI',
+    new.name || (case when not new.is_verified then ' · pending review' else '' end),
+    new.created_at
+  );
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+create trigger trg_log_lab_group_insert after insert on lab_groups for each row execute procedure log_lab_group_insert();
+
+create or replace function log_lab_group_delete()
+returns trigger as $$
+begin
+  insert into activity_log (type, title, subtitle, created_at)
+  values ('lab_group_deleted', old.pi_name || ' removed from PI list', old.name, now());
+  return old;
+end;
+$$ language plpgsql security definer set search_path = public;
+create trigger trg_log_lab_group_delete after delete on lab_groups for each row execute procedure log_lab_group_delete();
+
+create or replace function log_requisition_delete()
+returns trigger as $$
+begin
+  insert into activity_log (type, title, subtitle, created_at)
+  values ('requisition_deleted', old.project_title || ' requisition deleted', old.researcher_name, now());
+  return old;
+end;
+$$ language plpgsql security definer set search_path = public;
+create trigger trg_log_requisition_delete after delete on requisitions for each row execute procedure log_requisition_delete();
+
 -- ============================================================================
 -- End of schema. Next steps once this has run cleanly:
 --   1. Supabase → Authentication → add your 4-6 admin users for now (magic

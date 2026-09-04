@@ -314,6 +314,13 @@ function mapRequisitionRow(r) {
     submittedDate: r.submitted_date ? r.submitted_date.slice(0, 10) : null,
     decidedDate: r.decided_date ? r.decided_date.slice(0, 10) : null,
     completedDate: r.completed_date ? r.completed_date.slice(0, 10) : null,
+    // Untruncated timestamps, kept alongside the date-only fields above
+    // (which exist for <input type="date"> compatibility) so activity-feed
+    // sorting can order same-day events correctly instead of treating every
+    // status change as happening at midnight.
+    submittedAt: r.submitted_date || null,
+    decidedAt: r.decided_date || null,
+    completedAt: r.completed_date || null,
   };
 }
 
@@ -327,7 +334,7 @@ export async function fetchAdminData() {
   // labGroupCache that this call populates.
   const labGroups = await fetchLabGroups();
 
-  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory] = await Promise.all([
+  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes] = await Promise.all([
     supabase.from("units").select("*"),
     supabase.from("bookings").select("*, requisitions!inner(status, admin_notes)").eq("requisitions.status", "approved"),
     supabase.from("service_log").select("*, maintenance_categories(name)"),
@@ -335,8 +342,9 @@ export async function fetchAdminData() {
     fetchMaintenanceCategories(),
     supabase.from("documents").select("*, profiles(full_name)").order("date", { ascending: false }),
     fetchLabUsageHistory(),
+    supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(200),
   ]);
-  for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes]) {
+  for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes, activityLogRes]) {
     if (res.error) throw res.error;
   }
 
@@ -415,7 +423,16 @@ export async function fetchAdminData() {
     categoryIdByName[c.name] = c.id;
   });
 
-  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups };
+  const activityLog = activityLogRes.data.map((row) => ({
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    subtitle: row.subtitle || "",
+    unitId: row.unit_id,
+    createdAt: row.created_at,
+  }));
+
+  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog };
 }
 
 /* ---------------------------------------------------------------------- */
