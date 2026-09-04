@@ -406,6 +406,7 @@ function Sidebar({ page, setPage, pendingCount }) {
       </nav>
 
       <button
+        onClick={() => supabase.auth.signOut()}
         className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm mt-4 pt-4"
         style={{ color: "var(--sidebar-text)", borderTop: "1px solid rgba(255,255,255,0.07)" }}
       >
