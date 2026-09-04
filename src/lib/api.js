@@ -172,7 +172,6 @@ function mapUnitRow(u) {
   return {
     id: u.id,
     type: u.type,
-    discipline: u.discipline,
     floor: u.floor,
     room: u.room,
     manufacturer: u.manufacturer,
@@ -451,7 +450,6 @@ export async function saveUnit(data) {
   const row = {
     id: data.id,
     type: data.type,
-    discipline: data.type === "cabinet" ? data.discipline : null,
     floor: data.floor,
     room: data.room,
     manufacturer: data.manufacturer,

@@ -143,10 +143,15 @@ insert into maintenance_categories (name, bg_hex, ink_hex, border_hex) values
 -- ----------------------------------------------------------------------------
 -- 5. UNITS  (growth cabinets & Reftech rooms)
 -- ----------------------------------------------------------------------------
+-- Discipline (plant/insect) is not a unit column — it's purely a
+-- requisition/booking-level concept (see requisitions and bookings below).
+-- A cabinet isn't permanently "a plant cabinet" or "an insect cabinet"; it
+-- grows whatever it's currently booked for, so any cabinet can be assigned
+-- to any requisition regardless of discipline. What a unit is "doing"
+-- right now is derived live from its current occupant/booking.
 create table units (
   id                     text primary key,             -- "GC-041", "RTR-03"
   type                   unit_type not null,
-  discipline             discipline_type,               -- cabinets only; null for reftech
   floor                  text not null,                 -- "LG","L1","L2A","L2B","L3"
   room                   text not null,
   manufacturer           text not null,

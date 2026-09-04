@@ -261,10 +261,22 @@ function unitOccupant(unit) {
 function currentBookingsList(unit) {
   return (unit.bookings || []).filter((b) => new Date(b.startDate) <= TODAY);
 }
+/* Whether the exact set of currently-overlapping bookings matches what was
+   last explicitly approved as intentional — not a bare boolean, so a
+   materially different overlap (a date moves, a third one joins) makes
+   this false again instead of staying dismissed forever. */
+function isClashAcknowledged(unit, currentList) {
+  const currentIds = currentList.map((b) => b.id).slice().sort();
+  const acknowledgedIds = (unit.acknowledgedClashBookingIds || []).slice().sort();
+  return currentIds.length > 1 && currentIds.length === acknowledgedIds.length && currentIds.every((id, i) => id === acknowledgedIds[i]);
+}
+/* Discipline is no longer a fixed unit property (any cabinet can be
+   assigned to any requisition) — it's derived from whoever's currently
+   using it, for both unit types. Returns null when free: there's nothing
+   to show discipline-wise for an unoccupied unit. */
 function unitDiscipline(unit) {
-  if (unit.type === "cabinet") return unit.discipline;
-  const b = currentBooking(unit) || unit.bookings[0];
-  return b ? b.discipline : "plant";
+  const o = unitOccupant(unit);
+  return o ? o.discipline : null;
 }
 
 const STATUS_META = {
@@ -648,6 +660,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
   const [hoveredLab, setHoveredLab] = useState(null);
   const [isolatedLab, setIsolatedLab] = useState(null);
   const [tooltip, setTooltip] = useState(null);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   const activeLab = isolatedLab || hoveredLab;
 
   const fromIdx = Math.max(0, allKeys.indexOf(fromKey));
@@ -658,8 +671,12 @@ function LabUsageTrend({ units, labUsageHistory }) {
   const handleFrom = (key) => { setFromKey(key); if (allKeys.indexOf(key) > allKeys.indexOf(toKey)) setToKey(key); };
   const handleTo = (key) => { setToKey(key); if (allKeys.indexOf(key) < allKeys.indexOf(fromKey)) setFromKey(key); };
 
+  // Counts every currently-active booking, not just one per unit —
+  // unitOccupant() only ever returns the first, which silently undercounts
+  // both a reftech room's normal multiple simultaneous occupants and a
+  // cabinet clash's second (unintended) booking.
   const currentCounts = LAB_GROUPS.reduce((acc, lab) => {
-    acc[lab] = units.filter((u) => { const o = unitOccupant(u); return o && o.labGroup === lab; }).length;
+    acc[lab] = units.reduce((sum, u) => sum + currentBookingsList(u).filter((b) => b.labGroup === lab).length, 0);
     return acc;
   }, {});
 
@@ -681,6 +698,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
   const avg = ranked.reduce((s, r) => s + r.current, 0) / ranked.length;
 
   return (
+    <div className={isFullScreen ? "fixed inset-0 z-50 p-6 gc-scroll overflow-y-auto" : ""} style={isFullScreen ? { background: "var(--bg)" } : undefined}>
     <div className="gc-card p-5">
       <div className="flex items-center justify-between mb-1 flex-wrap gap-3">
         <div>
@@ -691,6 +709,13 @@ function LabUsageTrend({ units, labUsageHistory }) {
           <MonthPickerButton label="From" value={fromKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleFrom} align="left" />
           <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
           <MonthPickerButton label="To" value={toKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleTo} align="right" />
+          <button
+            onClick={() => setIsFullScreen((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl flex-shrink-0"
+            style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }}
+          >
+            {isFullScreen ? <><Minimize2 size={12} /> Close</> : <><Maximize2 size={12} /> Full screen</>}
+          </button>
         </div>
       </div>
 
@@ -764,6 +789,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
           <button onClick={() => setIsolatedLab(null)} className="text-[11.5px] font-bold underline" style={{ color: "var(--accent-dark)" }}>Show all</button>
         )}
       </div>
+    </div>
     </div>
   );
 }
@@ -843,8 +869,10 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
   const shownActivity = activityExpanded ? activity.slice(0, 20) : activity.slice(0, 4);
 
   const [labsExpanded, setLabsExpanded] = useState(false);
+  // Counts every currently-active booking, not just one per unit — see the
+  // same fix/comment in LabUsageTrend's currentCounts above.
   const byLabAll = LAB_GROUPS
-    .map((lab) => ({ lab, count: units.filter((u) => { const o = unitOccupant(u); return o && o.labGroup === lab; }).length }))
+    .map((lab) => ({ lab, count: units.reduce((sum, u) => sum + currentBookingsList(u).filter((b) => b.labGroup === lab).length, 0) }))
     .filter((l) => l.count > 0)
     .sort((a, b) => b.count - a.count);
   const byLab = labsExpanded ? byLabAll : byLabAll.slice(0, 4);
@@ -1021,11 +1049,32 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
 /* ---------------------------------------------------------------------- */
 /* Timeline (used on dashboard, compact or full)                          */
 /* ---------------------------------------------------------------------- */
+const TIMELINE_STATUS_OPTIONS = [
+  { key: "occupied", label: "Occupied" },
+  { key: "warning", label: "Ending soon" },
+  { key: "overdue", label: "Overdue" },
+  { key: "upcoming", label: "Upcoming" },
+  { key: "completed", label: "Completed" },
+];
+
+/* Same colour language as bookingStatus(), plus a distinct grey for
+   completed requisitions (which bookingStatus never sees — completed
+   bookings are excluded from unit.bookings upstream, see api.js). */
+function timelineRowStatus(req) {
+  if (req.status === "completed") return { key: "completed", label: "Completed", color: "var(--service)", soft: "var(--service-soft)" };
+  return bookingStatus({ startDate: req.startDate, endDate: req.endDate });
+}
+
 function TimelineView({ units, requests = [], onNavigate, compact = false }) {
   const [floorFilter, setFloorFilter] = useState("all");
-  const [urgencyFilter, setUrgencyFilter] = useState("all");
+  const [urgencyFilters, setUrgencyFilters] = useState(new Set()); // empty = show all
   const [disciplineFilter, setDisciplineFilter] = useState("all");
   const [hoveredRow, setHoveredRow] = useState(null);
+  const toggleUrgency = (key) => setUrgencyFilters((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
 
   const rangeStart = addDays(TODAY, -14);
   const rangeEnd = addDays(TODAY, 106);
@@ -1034,22 +1083,22 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
   const shortDate = (d) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   const axisMarks = [rangeStart, addDays(TODAY, 30), addDays(TODAY, 60), addDays(TODAY, 90), rangeEnd].map((d) => ({ label: shortDate(d), pct: pct(d) }));
 
-  // One row per booking (not per unit) — a unit can have both a current
-  // and an upcoming booking, and unitOccupant() only ever returns the
-  // current one, which previously meant upcoming bookings never appeared
-  // here even though they'd already show as "upcoming" in Inventory.
-  const occupied = units.flatMap((u) => {
+  // Built from requests, not units.bookings — a completed requisition's
+  // booking is deliberately excluded from unit.bookings upstream (it no
+  // longer counts as active occupancy), but it should still show here,
+  // greyed out, as part of the unit's history.
+  const occupied = requests.flatMap((r, reqIndex) => {
+    if (r.status !== "approved" && r.status !== "completed") return [];
+    const u = units.find((unit) => unit.id === r.assignedUnitId);
+    if (!u) return [];
     if (floorFilter !== "all" && u.floor !== floorFilter) return [];
-    if (disciplineFilter !== "all" && unitDiscipline(u) !== disciplineFilter) return [];
-    return (u.bookings || [])
-      .map((o) => {
-        const start = new Date(o.startDate);
-        const end = new Date(o.endDate);
-        const s = bookingStatus(o);
-        if (urgencyFilter !== "all" && s.key !== urgencyFilter) return null;
-        return { u, o, s, start: start < rangeStart ? rangeStart : start, end };
-      })
-      .filter(Boolean);
+    if (disciplineFilter !== "all" && r.discipline !== disciplineFilter) return [];
+    const s = timelineRowStatus(r);
+    if (urgencyFilters.size > 0 && !urgencyFilters.has(s.key)) return [];
+    const start = new Date(r.startDate);
+    const end = new Date(r.endDate);
+    const o = { researcher: r.researcher, labGroup: r.labGroup, project: r.projectTitle, discipline: r.discipline, startDate: r.startDate, endDate: r.endDate };
+    return [{ u, o, s, reqIndex, start: start < rangeStart ? rangeStart : start, end }];
   });
 
   const groups = FLOORS.map((f) => ({ floor: f, items: occupied.filter((o) => o.u.floor === f).sort((a, b) => a.end - b.end) }))
@@ -1075,13 +1124,25 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
           <option value="plant">Plant Sciences</option>
           <option value="insect">Insect Sciences</option>
         </select>
-        <select value={urgencyFilter} onChange={(e) => setUrgencyFilter(e.target.value)} className="gc-input w-auto font-semibold" style={{ maxWidth: 150 }}>
-          <option value="all">All Statuses</option>
-          <option value="occupied">Occupied</option>
-          <option value="warning">Ending soon</option>
-          <option value="overdue">Overdue</option>
-          <option value="upcoming">Upcoming</option>
-        </select>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {TIMELINE_STATUS_OPTIONS.map((o) => (
+            <button
+              key={o.key}
+              onClick={() => toggleUrgency(o.key)}
+              className="px-3 py-1.5 rounded-full text-xs font-bold border"
+              style={{
+                background: urgencyFilters.has(o.key) ? "var(--sidebar-bg)" : "var(--surface)",
+                color: urgencyFilters.has(o.key) ? "#fff" : "var(--ink-soft)",
+                borderColor: urgencyFilters.has(o.key) ? "var(--sidebar-bg)" : "var(--border)",
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+          {urgencyFilters.size > 0 && (
+            <button onClick={() => setUrgencyFilters(new Set())} className="text-xs font-bold underline px-1" style={{ color: "var(--ink-faint)" }}>Clear</button>
+          )}
+        </div>
       </div>
 
       {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No requisitions match these filters.</p>}
@@ -1102,13 +1163,12 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
                 <span className="text-[13px] font-extrabold gc-display">{FLOOR_LABEL[g.floor]}</span>
               </div>
               <div className="space-y-1.5">
-                {(compact ? g.items.slice(0, 3) : g.items).map(({ u, o, s, start, end }) => {
+                {(compact ? g.items.slice(0, 3) : g.items).map(({ u, o, s, reqIndex, start, end }) => {
                   const left = pct(start);
                   const width = Math.max(1.2, pct(end) - left);
-                  const dm = DISCIPLINE_META[unitDiscipline(u)];
-                  const reqIndex = findRequisitionIndex(requests, o);
-                  const req = reqIndex !== null ? requests[reqIndex] : null;
-                  const rowKey = u.id + o.startDate;
+                  const dm = DISCIPLINE_META[o.discipline] || DISCIPLINE_META.plant;
+                  const req = requests[reqIndex];
+                  const rowKey = u.id + o.startDate + reqIndex;
                   const isHovered = hoveredRow === rowKey;
                   return (
                     <div key={rowKey} className="flex items-center gap-2 text-xs">
@@ -1125,11 +1185,11 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
                           type="button"
                           onFocus={() => setHoveredRow(rowKey)}
                           onBlur={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
-                          onClick={() => reqIndex !== null && onNavigate && onNavigate(requisitionTab(req.status), reqIndex)}
+                          onClick={() => onNavigate && onNavigate(requisitionTab(req.status), reqIndex)}
                           className="absolute h-7 rounded-lg flex items-center px-2.5"
                           style={{
                             left: `${left}%`, width: `${width}%`, background: s.soft, border: `1px solid ${s.color}`,
-                            cursor: reqIndex !== null ? "pointer" : "default",
+                            cursor: "pointer",
                           }}
                         >
                           <span className="text-[11.5px] font-bold truncate" style={{ color: s.color }}>{o.researcher}</span>
@@ -1147,7 +1207,7 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
                               <MapPin size={11} />{u.id} · {FLOOR_LABEL[u.floor]}, {u.room}
                             </div>
                             <div className="text-[12px] font-bold" style={{ color: s.color }}>{fmtGB(o.startDate)} → {fmtGB(o.endDate)}</div>
-                            {reqIndex !== null && <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click bar to view requisition →</div>}
+                            <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click bar to view requisition →</div>
                           </div>
                         )}
                       </div>
@@ -1174,11 +1234,16 @@ function UnitCard({ unit, onClick }) {
   const isReftech = unit.type === "reftech";
   const occupant = unitOccupant(unit);
   const upcoming = upcomingBookings(unit);
-  const dm = DISCIPLINE_META[unitDiscipline(unit)];
+  // null when free — discipline isn't a fixed unit property, so there's
+  // nothing to show for an unoccupied unit.
+  const disciplineKey = unitDiscipline(unit);
+  const dm = disciplineKey ? DISCIPLINE_META[disciplineKey] : null;
   // Cabinets are meant to only hold one booking at a time — more than one
   // active means an admin edit created an overlap. Surfaced here too (not
   // just on the unit detail page) so it's visible without opening it.
-  const hasClash = !isReftech && currentBookingsList(unit).length > 1;
+  // Hidden once the overlap has been explicitly approved as intentional.
+  const currentForClash = currentBookingsList(unit);
+  const hasClash = !isReftech && currentForClash.length > 1 && !isClashAcknowledged(unit, currentForClash);
 
   // occupant / availability box colour follows the same status language used everywhere else
   const boxStyle =
@@ -1226,11 +1291,13 @@ function UnitCard({ unit, onClick }) {
         </div>
       )}
 
-      {/* tags */}
+      {/* tags — discipline only shows when occupied; it's not a fixed unit property */}
       <div className="flex flex-wrap gap-1.5 mb-3">
-        <span className="gc-tag" style={{ background: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-bg)" : "var(--tag-insect-bg)", color: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-ink)" : "var(--tag-insect-ink)", borderColor: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-border)" : "var(--tag-insect-border)" }}>
-          <dm.icon size={11} /> {dm.label}
-        </span>
+        {dm && (
+          <span className="gc-tag" style={{ background: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-bg)" : "var(--tag-insect-bg)", color: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-ink)" : "var(--tag-insect-ink)", borderColor: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-border)" : "var(--tag-insect-border)" }}>
+            <dm.icon size={11} /> {dm.label}
+          </span>
+        )}
         {unit.co2Control && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>CO₂</span>}
       </div>
 
@@ -1285,7 +1352,7 @@ function exportUnitsCSV(units) {
     const occ = unitOccupant(u);
     return [
       u.id, u.type === "reftech" ? "Reftech Room" : "Growth Cabinet", FLOOR_LABEL[u.floor], u.room,
-      u.manufacturer, u.model, DISCIPLINE_META[unitDiscipline(u)].label, s.label,
+      u.manufacturer, u.model, unitDiscipline(u) ? DISCIPLINE_META[unitDiscipline(u)].label : "", s.label,
       occ ? occ.researcher : "", occ ? (PI_BY_LAB[occ.labGroup] || "") : "", occ ? fmtGB(occ.endDate) : "",
     ];
   });
@@ -1311,15 +1378,23 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
 
   const filtered = units.filter((u) => {
     const s = displayStatus(u);
-    const occ = unitOccupant(u);
+    // Checks every currently-active booking, not just unitOccupant()'s
+    // first one — otherwise a unit with more than one active booking (a
+    // reftech room's normal simultaneous occupants, or a cabinet clash)
+    // could wrongly disappear from a lab-group/discipline/search match
+    // that a booking other than the first one actually satisfies.
+    const currentAll = currentBookingsList(u);
     const matchesQuery = query === "" || u.id.toLowerCase().includes(query.toLowerCase()) || u.room.toLowerCase().includes(query.toLowerCase()) ||
-      (occ && occ.labGroup.toLowerCase().includes(query.toLowerCase())) || (occ && occ.researcher.toLowerCase().includes(query.toLowerCase())) ||
-      (occ && (PI_BY_LAB[occ.labGroup] || "").toLowerCase().includes(query.toLowerCase()));
+      currentAll.some((occ) =>
+        occ.labGroup.toLowerCase().includes(query.toLowerCase()) ||
+        occ.researcher.toLowerCase().includes(query.toLowerCase()) ||
+        (PI_BY_LAB[occ.labGroup] || "").toLowerCase().includes(query.toLowerCase())
+      );
     return matchesQuery
       && (statusFilter === "all" || s.key === statusFilter)
       && (typeFilter === "all" || u.type === typeFilter)
-      && (disciplineFilter === "all" || unitDiscipline(u) === disciplineFilter)
-      && (labGroupFilter === "all" || (occ && occ.labGroup === labGroupFilter))
+      && (disciplineFilter === "all" || currentAll.some((occ) => occ.discipline === disciplineFilter))
+      && (labGroupFilter === "all" || currentAll.some((occ) => occ.labGroup === labGroupFilter))
       && (floorFilter === "all" || u.floor === floorFilter);
   });
   const groups = FLOORS
@@ -1479,7 +1554,6 @@ function AssetInfoCard({ unit }) {
       <FieldGrid>
         <FieldPair label="Status" value={<StatusTag unit={unit} big />} />
         <FieldPair label="Type" value={isReftech ? "Reftech Room" : "Growth Cabinet"} />
-        <FieldPair label="Research area" value={<DisciplineBadge discipline={unitDiscipline(unit)} size="md" />} />
         <FieldPair label="Manufacturer" value={unit.manufacturer} />
         <FieldPair label="Model" value={unit.model} />
         <FieldPair label="Serial No." value={unit.serialNumber} />
@@ -1837,10 +1911,8 @@ function UnitDetailContent({
   // changes (a date moves, a third one joins), that's a different
   // situation and the warning should come back rather than staying
   // dismissed forever.
-  const currentIds = current.map((b) => b.id).slice().sort();
-  const acknowledgedIds = (unit.acknowledgedClashBookingIds || []).slice().sort();
-  const isAcknowledged = currentIds.length > 1 && currentIds.length === acknowledgedIds.length && currentIds.every((id, i) => id === acknowledgedIds[i]);
-  const isClash = !isReftech && current.length > 1 && !isAcknowledged;
+  const currentIds = current.map((b) => b.id);
+  const isClash = !isReftech && current.length > 1 && !isClashAcknowledged(unit, current);
   const [upcomingExpanded, setUpcomingExpanded] = useState(false);
   const shownUpcoming = upcomingExpanded ? upcoming : upcoming.slice(0, 2);
   const linkFor = (booking) => {
@@ -1859,14 +1931,14 @@ function UnitDetailContent({
             <AlertTriangle size={15} style={{ color: "var(--overdue)", flexShrink: 0, marginTop: 1 }} />
             <div className="text-xs flex-1">
               <div className="font-semibold" style={{ color: "var(--overdue)" }}>
-                {current.length} requisitions are overlapping on this cabinet right now — cabinets are meant to hold one at a time. Review and adjust the dates below, or confirm below if this is genuinely intentional.
+                {current.length} requisitions are overlapping on this cabinet right now — cabinets are meant to hold one at a time. Review and adjust the dates below, or approve the clash if this is genuinely intentional.
               </div>
               <button
                 onClick={() => onAcknowledgeClash(unit.id, currentIds)}
                 className="mt-2 text-xs font-bold px-3 py-1.5 rounded-lg"
                 style={{ background: "var(--surface)", border: "1px solid var(--overdue)", color: "var(--overdue)" }}
               >
-                Confirm both are genuinely ongoing
+                Approve clash
               </button>
             </div>
           </div>
@@ -2034,7 +2106,7 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
     unit
       ? { ...unit, tempMin: unit.tempRange[0], tempMax: unit.tempRange[1], humMin: unit.humidityRange[0], humMax: unit.humidityRange[1] }
       : {
-          id: "", type: "cabinet", floor: "L1", room: ROOMS_BY_FLOOR.L1[0], discipline: "plant",
+          id: "", type: "cabinet", floor: "L1", room: ROOMS_BY_FLOOR.L1[0],
           manufacturer: MANUFACTURERS[0], model: "", serialNumber: "", assetNumber: "", tscanId: "",
           shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: BALLAST_TYPES[0],
           co2Control: false, dimmingControl: false,
@@ -2082,16 +2154,6 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
                 <option value="reftech">Reftech Room</option>
               </select>
             </Field>
-            {form.type === "cabinet" && (
-              <Field label="Discipline">
-                <select value={form.discipline} onChange={set("discipline")} className="gc-input">
-                  <option value="plant">Plant Sciences</option>
-                  <option value="insect">Insect Sciences</option>
-                </select>
-              </Field>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
             <Field label="Floor">
               <select
                 value={form.floor}
@@ -2367,11 +2429,12 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   const [chosenUnit, setChosenUnit] = useState("");
   const [reassigning, setReassigning] = useState(false);
   const [reassignUnit, setReassignUnit] = useState("");
-  // Any unit that matches type & discipline and is available across the *requested* date window —
-  // not just units that happen to be free right now.
+  // Any unit that matches type and is available across the *requested*
+  // date window — not just units that happen to be free right now.
+  // Discipline isn't a unit property: any cabinet can be assigned
+  // regardless of what discipline the requisition is for.
   const windowCandidates = units.filter((u) =>
     u.type === req.unitType
-    && (u.type === "reftech" || u.discipline === req.discipline)
     && unitAvailableForWindow(u, req.startDate, req.endDate)
   );
   const STATUS_STYLE = {
@@ -2530,7 +2593,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   const statusColor = STATUS_STYLE[req.status].color;
   const statusSoft = STATUS_STYLE[req.status].soft;
   const windowCandidates = units.filter((u) =>
-    u.type === req.unitType && (u.type === "reftech" || u.discipline === req.discipline) && unitAvailableForWindow(u, req.startDate, req.endDate)
+    u.type === req.unitType && unitAvailableForWindow(u, req.startDate, req.endDate)
   );
   const saveEdit = (updated) => { onEdit(index, updated); setEditing(false); };
 
@@ -2976,8 +3039,8 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
   if (stepName === "spaceType") {
     return (
       <WizardShell step={1} totalSteps={steps.length} onBack={goBack} title="Where would you like to request space?" subtitle="Choose the kind of environment your work needs.">
-        <WizardChoice icon={Leaf} title="Growth Cabinet" subtitle="A single-occupant controlled cabinet" onClick={() => { setSpaceType("cabinet"); goNext(); }} />
-        <WizardChoice icon={DoorOpen} title="Reftech Room" subtitle="A shared controlled-environment room, bookable by slot" onClick={() => { setSpaceType("reftech"); goNext(); }} />
+        <WizardChoice icon={Leaf} title="Growth Cabinet" onClick={() => { setSpaceType("cabinet"); goNext(); }} />
+        <WizardChoice icon={DoorOpen} title="Reftech Room" onClick={() => { setSpaceType("reftech"); goNext(); }} />
       </WizardShell>
     );
   }
@@ -2990,7 +3053,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
           onClick={() => { setDiscipline("plant"); setForm((f) => ({ ...f, setTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0] })); goNext(); }}
         />
         <WizardChoice
-          icon={Bug} title="Insect Sciences"
+          icon={Bug} title="Insects"
           onClick={() => { setDiscipline("insect"); setForm((f) => ({ ...f, setTemp: 25, setHumidity: 65, lightCycle: LIGHT_CYCLES[0] })); goNext(); }}
         />
       </WizardShell>
@@ -3078,9 +3141,9 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
           {mode === "amend" ? "Amend requisition" : "New requisition"} · {spaceType === "reftech" ? "Reftech Room" : "Growth Cabinet"}
         </p>
       </div>
-      <div className="flex gap-1.5 mb-6">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <span key={i} className="h-1 flex-1 rounded-full" style={{ background: "var(--free)" }} />
+      <div className="flex items-center gap-1.5 mb-6">
+        {Array.from({ length: steps.length }).map((_, i) => (
+          <span key={i} className="rounded-full" style={{ width: i === stepIndex ? 20 : 6, height: 6, background: i <= stepIndex ? "var(--accent)" : "var(--border)", transition: "width 0.15s" }} />
         ))}
       </div>
 
