@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lab Group Space Usage — Visualization Prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F3F5F4; --surface: #FFFFFF; --surface-soft: #F1F5F3; --border: #E3E8E5;
+    --ink: #16211D; --ink-soft: #5C6D65; --ink-faint: #93A29B;
+    --accent-dark: #0F7A38; --accent-soft: #DCFCE7;
+    --sidebar-bg: #0E1A16;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--ink); }
+  .display { font-family: 'Plus Jakarta Sans', sans-serif; }
+
+  .chrome { position: sticky; top: 0; z-index: 50; background: var(--sidebar-bg); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .chrome .title { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 700; font-size: 14px; margin-right: 6px; }
+  .chrome .group { display: flex; gap: 2px; background: rgba(255,255,255,0.08); border-radius: 10px; padding: 3px; flex-wrap: wrap; }
+  .chrome button { font-family: 'Inter', sans-serif; font-size: 12.5px; font-weight: 600; padding: 7px 13px; border-radius: 8px; border: none; background: transparent; color: rgba(255,255,255,0.65); cursor: pointer; }
+  .chrome button.active { background: #fff; color: var(--sidebar-bg); }
+  .note { font-size: 12px; color: rgba(255,255,255,0.55); max-width: 520px; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 28px 80px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 26px; }
+  .card h2 { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 19px; font-weight: 800; }
+  .card .sub { font-size: 13px; color: var(--ink-soft); margin-top: 4px; margin-bottom: 22px; max-width: 640px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; font-size: 12px; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 9px; height: 9px; border-radius: 2.5px; display: inline-block; }
+
+  /* ---- heatmap ---- */
+  table.heat { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  table.heat th { text-align: left; font-weight: 700; padding: 8px 10px; color: var(--ink-soft); font-size: 11px; }
+  table.heat td { text-align: center; padding: 0; }
+  .heat-cell { width: 100%; height: 40px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; border-radius: 6px; margin: 2px; }
+  .heat-row-label { font-weight: 700; padding-right: 14px; white-space: nowrap; font-size: 12.5px; }
+
+  /* ---- ranked bars ---- */
+  .rank-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .rank-row:last-child { border-bottom: none; }
+  .rank-num { width: 20px; font-weight: 800; color: var(--ink-faint); font-size: 13px; flex-shrink: 0; }
+  .rank-name { width: 150px; flex-shrink: 0; font-weight: 700; font-size: 13.5px; }
+  .rank-bar-track { flex: 1; height: 20px; background: var(--surface-soft); border-radius: 6px; position: relative; overflow: hidden; }
+  .rank-bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
+  .rank-bar-fill span { font-size: 11px; font-weight: 800; color: #fff; }
+  .rank-spark { width: 90px; flex-shrink: 0; }
+
+  /* ---- small multiples ---- */
+  .sm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .sm-tile { border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
+  .sm-tile .name { font-size: 12.5px; font-weight: 800; margin-bottom: 2px; }
+  .sm-tile .val { font-size: 11px; color: var(--ink-faint); margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <span class="title">Lab Group Space Usage — Prototypes</span>
+  <div class="group" id="tabs">
+    <button data-p="1" class="active">1 · Stacked Area</button>
+    <button data-p="2">2 · Line Comparison</button>
+    <button data-p="3">3 · Heatmap</button>
+    <button data-p="4">4 · Ranked + Trend</button>
+    <button data-p="5">5 · Small Multiples</button>
+  </div>
+  <span class="note" id="note"></span>
+</div>
+
+<div class="wrap">
+
+  <!-- 1: STACKED AREA -->
+  <div class="panel active" id="p1">
+    <div class="card">
+      <h2 class="display">CER space occupied, by lab group</h2>
+      <p class="sub">Stacked area — shows both the total space in use across all groups and each group's share of it, month by month. Best for spotting overall growth alongside who's driving it.</p>
+      <svg viewBox="0 0 1000 340" style="width:100%;height:auto" id="area-svg"></svg>
+      <div class="legend" id="area-legend"></div>
+    </div>
+  </div>
+
+  <!-- 2: LINE COMPARISON -->
+  <div class="panel" id="p2">
+    <div class="card">
+      <h2 class="display">Units occupied per lab group, over time</h2>
+      <p class="sub">One line per lab group on a shared axis — the clearest way to directly compare trajectories and see who is climbing, flat, or shrinking relative to everyone else.</p>
+      <svg viewBox="0 0 1000 340" style="width:100%;height:auto" id="line-svg"></svg>
+      <div class="legend" id="line-legend"></div>
+    </div>
+  </div>
+
+  <!-- 3: HEATMAP -->
+  <div class="panel" id="p3">
+    <div class="card">
+      <h2 class="display">Space usage heatmap</h2>
+      <p class="sub">Every lab × every month in one grid, shaded by units occupied. Fastest way to scan for outliers and seasonal spikes without reading a single axis.</p>
+      <div id="heat-table"></div>
+      <div class="legend"><span><i style="background:#DCFCE7"></i>Low</span><span><i style="background:#4ADE80"></i>Medium</span><span><i style="background:#0F7A38"></i>High</span></div>
+    </div>
+  </div>
+
+  <!-- 4: RANKED + SPARKLINE -->
+  <div class="panel" id="p4">
+    <div class="card">
+      <h2 class="display">Current usage, ranked</h2>
+      <p class="sub">Answers "who's using significantly more space than others" directly — labs ranked by units occupied right now, with a small trend line showing how each got there.</p>
+      <div id="rank-list"></div>
+    </div>
+  </div>
+
+  <!-- 5: SMALL MULTIPLES -->
+  <div class="panel" id="p5">
+    <div class="card">
+      <h2 class="display">Each lab group, side by side</h2>
+      <p class="sub">A mini chart per lab on identical axes — good when you want to study one group's pattern (e.g. seasonal, growing, stable) without other lines crossing through it.</p>
+      <div class="sm-grid" id="sm-grid"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const LABS = ["Okafor Lab","Petrova Lab","Chen Lab","Singh Lab","Martins Lab","Whitfield Lab","Al-Farsi Lab","Novak Lab"];
+  const COLORS = { "Okafor Lab":"#3B6EA5","Petrova Lab":"#8E5FB0","Chen Lab":"#2F8F5B","Singh Lab":"#C97A2B","Martins Lab":"#B23A34","Whitfield Lab":"#4E8B8B","Al-Farsi Lab":"#A6763F","Novak Lab":"#5B6EC9" };
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug"];
+
+  // mock monthly units-occupied per lab — deliberately uneven so "who uses more" is visible
+  const DATA = {
+    "Okafor Lab":    [4,5,6,7,8,9,10,11],
+    "Petrova Lab":   [6,6,7,6,7,8,7,7],
+    "Chen Lab":      [3,3,4,4,5,5,6,6],
+    "Singh Lab":     [8,7,7,6,6,5,5,4],
+    "Martins Lab":   [2,3,2,3,3,4,4,5],
+    "Whitfield Lab": [5,5,5,5,6,6,6,7],
+    "Al-Farsi Lab":  [1,2,2,3,3,3,4,4],
+    "Novak Lab":     [3,3,3,4,4,4,3,3],
+  };
+
+  function pi(lab) { return "PI: " + ({ "Okafor Lab":"James Okafor","Petrova Lab":"Elena Petrova","Chen Lab":"Wei Chen","Singh Lab":"Amrit Singh","Martins Lab":"Sofia Martins","Whitfield Lab":"Rachel Whitfield","Al-Farsi Lab":"Yousef Al-Farsi","Novak Lab":"Tomas Novak" }[lab]); }
+
+  const W = 1000, H = 340, PAD_L = 34, PAD_B = 26, PAD_T = 14, PAD_R = 10;
+  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
+  const xFor = (i) => PAD_L + (i / (MONTHS.length - 1)) * plotW;
+
+  // ---------- 1. Stacked area ----------
+  function renderArea() {
+    const totals = MONTHS.map((_, i) => LABS.reduce((s, l) => s + DATA[l][i], 0));
+    const maxTotal = Math.max(...totals) * 1.15;
+    const yFor = (v) => PAD_T + plotH - (v / maxTotal) * plotH;
+    let svg = "";
+    // gridlines
+    for (let g = 0; g <= 4; g++) {
+      const v = (maxTotal / 4) * g;
+      const y = yFor(v);
+      svg += `<line x1="${PAD_L}" y1="${y}" x2="${W-PAD_R}" y2="${y}" stroke="#E3E8E5" stroke-width="1"/>`;
+      svg += `<text x="${PAD_L-8}" y="${y+4}" font-size="10" fill="#93A29B" text-anchor="end">${Math.round(v)}</text>`;
+    }
+    let cum = MONTHS.map(() => 0);
+    LABS.forEach((lab) => {
+      const top = MONTHS.map((_, i) => cum[i] + DATA[lab][i]);
+      const pathTop = top.map((v, i) => `${i === 0 ? "M" : "L"}${xFor(i)},${yFor(v)}`).join(" ");
+      const pathBottom = cum.slice().reverse().map((v, i) => `L${xFor(MONTHS.length - 1 - i)},${yFor(v)}`).join(" ");
+      svg += `<path d="${pathTop} ${pathBottom} Z" fill="${COLORS[lab]}" fill-opacity="0.85" stroke="#fff" stroke-width="1"/>`;
+      cum = top;
+    });
+    MONTHS.forEach((m, i) => { svg += `<text x="${xFor(i)}" y="${H-6}" font-size="11" fill="#5C6D65" text-anchor="middle" font-weight="600">${m}</text>`; });
+    document.getElementById("area-svg").innerHTML = svg;
+    document.getElementById("area-legend").innerHTML = LABS.map((l) => `<span><i style="background:${COLORS[l]}"></i>${pi(l)}</span>`).join("");
+  }
+
+  // ---------- 2. Line comparison ----------
+  function renderLines() {
+    const maxV = Math.max(...LABS.flatMap((l) => DATA[l])) * 1.15;
+    const yFor = (v) => PAD_T + plotH - (v / maxV) * plotH;
+    let svg = "";
+    for (let g = 0; g <= 4; g++) {
+      const v = (maxV / 4) * g;
+      const y = yFor(v);
+      svg += `<line x1="${PAD_L}" y1="${y}" x2="${W-PAD_R}" y2="${y}" stroke="#E3E8E5" stroke-width="1"/>`;
+      svg += `<text x="${PAD_L-8}" y="${y+4}" font-size="10" fill="#93A29B" text-anchor="end">${Math.round(v)}</text>`;
+    }
+    LABS.forEach((lab) => {
+      const pts = DATA[lab].map((v, i) => `${xFor(i)},${yFor(v)}`).join(" ");
+      svg += `<polyline points="${pts}" fill="none" stroke="${COLORS[lab]}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+      DATA[lab].forEach((v, i) => { svg += `<circle cx="${xFor(i)}" cy="${yFor(v)}" r="3" fill="${COLORS[lab]}"/>`; });
+    });
+    MONTHS.forEach((m, i) => { svg += `<text x="${xFor(i)}" y="${H-6}" font-size="11" fill="#5C6D65" text-anchor="middle" font-weight="600">${m}</text>`; });
+    document.getElementById("line-svg").innerHTML = svg;
+    document.getElementById("line-legend").innerHTML = LABS.map((l) => `<span><i style="background:${COLORS[l]}"></i>${pi(l)} — now ${DATA[l][DATA[l].length-1]}</span>`).join("");
+  }
+
+  // ---------- 3. Heatmap ----------
+  function renderHeatmap() {
+    const maxV = Math.max(...LABS.flatMap((l) => DATA[l]));
+    const colorFor = (v) => {
+      const t = v / maxV; // 0..1
+      // interpolate a light->dark green
+      const r = Math.round(220 - t * 205), g = Math.round(252 - t * 130), b = Math.round(231 - t * 175);
+      return `rgb(${Math.max(r,15)},${Math.max(g,90)},${Math.max(b,56)})`;
+    };
+    let html = '<table class="heat"><tr><th></th>' + MONTHS.map((m) => `<th style="text-align:center">${m}</th>`).join("") + "</tr>";
+    LABS.forEach((lab) => {
+      html += `<tr><td class="heat-row-label">${pi(lab)}</td>`;
+      DATA[lab].forEach((v) => {
+        const c = colorFor(v);
+        const textColor = v / maxV > 0.55 ? "#fff" : "#16211D";
+        html += `<td><div class="heat-cell" style="background:${c};color:${textColor}">${v}</div></td>`;
+      });
+      html += "</tr>";
+    });
+    html += "</table>";
+    document.getElementById("heat-table").innerHTML = html;
+  }
+
+  // ---------- 4. Ranked + sparkline ----------
+  function renderRanked() {
+    const rows = LABS.map((lab) => ({ lab, current: DATA[lab][DATA[lab].length - 1], series: DATA[lab] })).sort((a, b) => b.current - a.current);
+    const maxCurrent = rows[0].current;
+    let html = "";
+    rows.forEach((r, i) => {
+      const sparkMax = Math.max(...r.series);
+      const sparkPts = r.series.map((v, idx) => `${(idx / (r.series.length - 1)) * 90},${20 - (v / sparkMax) * 18}`).join(" ");
+      html += `
+        <div class="rank-row">
+          <div class="rank-num">#${i + 1}</div>
+          <div class="rank-name">${pi(r.lab)}</div>
+          <div class="rank-bar-track">
+            <div class="rank-bar-fill" style="width:${(r.current / maxCurrent) * 100}%;background:${COLORS[r.lab]}"><span>${r.current} units</span></div>
+          </div>
+          <svg class="rank-spark" viewBox="0 0 90 20"><polyline points="${sparkPts}" fill="none" stroke="${COLORS[r.lab]}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>`;
+    });
+    document.getElementById("rank-list").innerHTML = html;
+  }
+
+  // ---------- 5. Small multiples ----------
+  function renderSmallMultiples() {
+    const maxV = Math.max(...LABS.flatMap((l) => DATA[l])) * 1.1;
+    let html = "";
+    LABS.forEach((lab) => {
+      const w = 220, h = 70, pl = 4, pb = 4;
+      const yFor = (v) => h - pb - (v / maxV) * (h - pb - 4);
+      const xFor2 = (i) => pl + (i / (MONTHS.length - 1)) * (w - pl * 2);
+      const pts = DATA[lab].map((v, i) => `${xFor2(i)},${yFor(v)}`).join(" ");
+      const areaPath = `M${xFor2(0)},${h-pb} ` + DATA[lab].map((v, i) => `L${xFor2(i)},${yFor(v)}`).join(" ") + ` L${xFor2(DATA[lab].length-1)},${h-pb} Z`;
+      html += `
+        <div class="sm-tile">
+          <div class="name">${pi(lab)}</div>
+          <div class="val">Now: ${DATA[lab][DATA[lab].length-1]} units · Peak: ${Math.max(...DATA[lab])}</div>
+          <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto">
+            <path d="${areaPath}" fill="${COLORS[lab]}" fill-opacity="0.15"/>
+            <polyline points="${pts}" fill="none" stroke="${COLORS[lab]}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>`;
+    });
+    document.getElementById("sm-grid").innerHTML = html;
+  }
+
+  renderArea(); renderLines(); renderHeatmap(); renderRanked(); renderSmallMultiples();
+
+  const notes = {
+    "1": "Best for a dashboard headline: shows total CER demand rising/falling AND who makes up that total, in one glance.",
+    "2": "Best for direct comparison: crosses and gaps between lines make it obvious who's growing faster than whom.",
+    "3": "Best for scanning many groups fast — no axis-reading required, colour intensity does the work.",
+    "4": "Best for the specific question 'who uses significantly more than others' — it's already sorted for you.",
+    "5": "Best when each lab's own shape matters more than comparing them directly against each other.",
+  };
+  document.getElementById("tabs").addEventListener("click", (e) => {
+    if (!e.target.dataset.p) return;
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b === e.target));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "p" + e.target.dataset.p));
+    document.getElementById("note").textContent = notes[e.target.dataset.p];
+  });
+  document.getElementById("note").textContent = notes["1"];
+</script>
+</body>
+</html>

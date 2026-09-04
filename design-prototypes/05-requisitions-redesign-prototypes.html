@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Requisitions Page — Redesign Prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F3F5F4; --surface: #FFFFFF; --surface-soft: #F1F5F3; --border: #E3E8E5;
+    --ink: #16211D; --ink-soft: #5C6D65; --ink-faint: #93A29B;
+    --accent-dark: #0F7A38; --accent-soft: #DCFCE7;
+    --free: #2F8F5B; --free-soft: #E7F2EA;
+    --occupied: #3B6EA5; --occupied-soft: #E4EDF6;
+    --warning: #C97A2B; --warning-soft: #FBEDDD;
+    --overdue: #B23A34; --overdue-soft: #FAE4E2;
+    --sidebar-bg: #0E1A16;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--ink); }
+  .display { font-family: 'Plus Jakarta Sans', sans-serif; }
+
+  .chrome { position: sticky; top: 0; z-index: 50; background: var(--sidebar-bg); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .chrome .title { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 700; font-size: 14px; margin-right: 6px; }
+  .chrome .group { display: flex; gap: 2px; background: rgba(255,255,255,0.08); border-radius: 10px; padding: 3px; flex-wrap: wrap; }
+  .chrome button { font-family: 'Inter', sans-serif; font-size: 12.5px; font-weight: 600; padding: 7px 13px; border-radius: 8px; border: none; background: transparent; color: rgba(255,255,255,0.65); cursor: pointer; }
+  .chrome button.active { background: #fff; color: var(--sidebar-bg); }
+  .note { font-size: 12px; color: rgba(255,255,255,0.55); max-width: 460px; }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 28px 80px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .page-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; flex-wrap: wrap; gap: 12px; }
+  .page-head h1 { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 22px; font-weight: 800; }
+  .page-head p { font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; }
+  .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 13px; padding: 4px; gap: 3px; }
+  .seg button { font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700; padding: 8px 15px; border-radius: 9px; border: none; background: transparent; color: var(--ink-soft); cursor: pointer; }
+  .seg button.on { background: var(--sidebar-bg); color: #fff; }
+
+  .status-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; flex-shrink: 0; }
+  .status-pill.pending { background: var(--warning-soft); color: var(--warning); }
+  .status-pill.approved { background: var(--free-soft); color: var(--free); }
+  .status-pill.declined { background: var(--overdue-soft); color: var(--overdue); }
+  .avatar { border-radius: 999px; display: flex; align-items: center; justify-content: center; font-weight: 800; flex-shrink: 0; color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <span class="title">Requisitions — Redesign Prototypes</span>
+  <div class="group" id="tabs">
+    <button data-p="1" class="active">1 · Table Rows</button>
+    <button data-p="2">2 · Avatar Cards</button>
+    <button data-p="3">3 · Kanban Columns</button>
+    <button data-p="4">4 · Grouped by Lab</button>
+    <button data-p="5">5 · Timeline List</button>
+  </div>
+  <span class="note" id="note"></span>
+</div>
+
+<div class="wrap">
+
+<!-- ============================= 1: TABLE ROWS ============================= -->
+<div class="panel active" id="p1">
+  <style>
+    #p1 table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    #p1 thead th { text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); padding: 12px 16px; background: var(--surface-soft); }
+    #p1 tbody td { padding: 13px 16px; border-top: 1px solid var(--border); font-size: 13px; }
+    #p1 tbody tr:hover { background: var(--surface-soft); cursor: pointer; }
+    #p1 .proj { font-weight: 700; }
+    #p1 .sub { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
+    #p1 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  </style>
+  <div class="page-head"><div><h1 class="display">Requisitions</h1><p>8 total · 3 pending review</p></div><div class="seg"><button class="on">Active</button><button>Completed</button></div></div>
+  <table>
+    <thead><tr><th>Project</th><th>Researcher</th><th>Space</th><th>Dates</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><div class="proj">Arabidopsis salt-stress trial</div><div class="sub">PI: James Okafor</div></td><td>Alejandro Reyes</td><td>Growth Cabinet · Plant</td><td>26/08 → 12/10/26</td><td><span class="status-pill pending"><span class="dot" style="background:var(--warning)"></span>Pending</span></td></tr>
+      <tr><td><div class="proj">Drosophila temperature response</div><div class="sub">PI: Wei Chen</div></td><td>Toshiro Nakamura</td><td>Reftech Room · Insect</td><td>24/08 → 30/09/26</td><td><span class="status-pill pending"><span class="dot" style="background:var(--warning)"></span>Pending</span></td></tr>
+      <tr><td><div class="proj">Root architecture imaging series</div><div class="sub">PI: James Okafor</div></td><td>Max Fischer</td><td>Reftech Room · Plant</td><td>23/08 → 15/11/26</td><td><span class="status-pill pending"><span class="dot" style="background:var(--warning)"></span>Pending</span></td></tr>
+      <tr><td><div class="proj">Barley drought-tolerance panel</div><div class="sub">PI: Amrit Singh</div></td><td>Linda Boateng</td><td>Growth Cabinet · Plant</td><td>29/07 → 14/09/26</td><td><span class="status-pill approved">● Approved</span></td></tr>
+      <tr><td><div class="proj">Seedling photoperiod trial</div><div class="sub">PI: Tomas Novak</div></td><td>Elin Larsen</td><td>Growth Cabinet · Plant</td><td>18/08 → 05/12/26</td><td><span class="status-pill approved">● Approved</span></td></tr>
+      <tr><td><div class="proj">Fungal growth-rate assay</div><div class="sub">PI: Sofia Martins</div></td><td>Paulo Duarte</td><td>Growth Cabinet · Insect</td><td>25/06 → 24/08/26</td><td><span class="status-pill declined">● Declined</span></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ============================= 2: AVATAR CARDS ============================= -->
+<div class="panel" id="p2">
+  <style>
+    #p2 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 16px; display: flex; align-items: center; gap: 13px; margin-bottom: 10px; cursor: pointer; }
+    #p2 .card:hover { background: var(--surface-soft); }
+    #p2 .info { flex: 1; min-width: 0; }
+    #p2 .proj { font-weight: 700; font-size: 13.5px; }
+    #p2 .sub { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
+    #p2 .meta { font-size: 11px; color: var(--ink-faint); text-align: right; flex-shrink: 0; }
+  </style>
+  <div class="page-head"><div><h1 class="display">Requisitions</h1><p>8 total · 3 pending review</p></div><div class="seg"><button class="on">Active</button><button>Completed</button></div></div>
+
+  <div class="card">
+    <span class="avatar" style="width:40px;height:40px;font-size:13px;background:#E69F00">AR</span>
+    <div class="info"><div class="proj">Arabidopsis salt-stress trial</div><div class="sub">Alejandro Reyes · PI: James Okafor</div></div>
+    <span class="status-pill pending">Pending</span>
+  </div>
+  <div class="card">
+    <span class="avatar" style="width:40px;height:40px;font-size:13px;background:#009E73">TN</span>
+    <div class="info"><div class="proj">Drosophila temperature response</div><div class="sub">Toshiro Nakamura · PI: Wei Chen</div></div>
+    <span class="status-pill pending">Pending</span>
+  </div>
+  <div class="card">
+    <span class="avatar" style="width:40px;height:40px;font-size:13px;background:#E69F00">MF</span>
+    <div class="info"><div class="proj">Root architecture imaging series</div><div class="sub">Max Fischer · PI: James Okafor</div></div>
+    <span class="status-pill pending">Pending</span>
+  </div>
+  <div class="card">
+    <span class="avatar" style="width:40px;height:40px;font-size:13px;background:#F0E442;color:#16211D">LB</span>
+    <div class="info"><div class="proj">Barley drought-tolerance panel</div><div class="sub">Linda Boateng · PI: Amrit Singh</div></div>
+    <div class="meta">29/07 → 14/09/26</div>
+    <span class="status-pill approved">Approved</span>
+  </div>
+  <div class="card">
+    <span class="avatar" style="width:40px;height:40px;font-size:13px;background:#4D4D4D">EL</span>
+    <div class="info"><div class="proj">Seedling photoperiod trial</div><div class="sub">Elin Larsen · PI: Tomas Novak</div></div>
+    <div class="meta">18/08 → 05/12/26</div>
+    <span class="status-pill approved">Approved</span>
+  </div>
+</div>
+
+<!-- ============================= 3: KANBAN COLUMNS ============================= -->
+<div class="panel" id="p3">
+  <style>
+    #p3 .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+    #p3 .col-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-weight: 700; font-size: 13px; }
+    #p3 .col-head .n { font-size: 11px; font-weight: 800; padding: 1px 8px; border-radius: 999px; background: var(--surface-soft); color: var(--ink-faint); }
+    #p3 .kcard { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; border-left: 4px solid; cursor: pointer; }
+    #p3 .kcard:hover { background: var(--surface-soft); }
+    #p3 .kcard .proj { font-weight: 700; font-size: 12.5px; margin-bottom: 4px; }
+    #p3 .kcard .who { font-size: 11px; color: var(--ink-faint); }
+    #p3 .kcard .dates { font-size: 10.5px; color: var(--ink-faint); margin-top: 6px; }
+  </style>
+  <div class="page-head"><div><h1 class="display">Requisitions</h1><p>Board view — drag isn't wired up here, but click any card in the real app</p></div></div>
+  <div class="board">
+    <div>
+      <div class="col-head"><span style="width:8px;height:8px;border-radius:50%;background:var(--warning);display:inline-block"></span>Pending <span class="n">3</span></div>
+      <div class="kcard" style="border-color:#E69F00"><div class="proj">Arabidopsis salt-stress trial</div><div class="who">Alejandro Reyes · PI: James Okafor</div><div class="dates">26/08 → 12/10/26</div></div>
+      <div class="kcard" style="border-color:#009E73"><div class="proj">Drosophila temperature response</div><div class="who">Toshiro Nakamura · PI: Wei Chen</div><div class="dates">24/08 → 30/09/26</div></div>
+      <div class="kcard" style="border-color:#E69F00"><div class="proj">Root architecture imaging series</div><div class="who">Max Fischer · PI: James Okafor</div><div class="dates">23/08 → 15/11/26</div></div>
+    </div>
+    <div>
+      <div class="col-head"><span style="width:8px;height:8px;border-radius:50%;background:var(--free);display:inline-block"></span>Approved <span class="n">2</span></div>
+      <div class="kcard" style="border-color:#F0E442"><div class="proj">Barley drought-tolerance panel</div><div class="who">Linda Boateng · PI: Amrit Singh</div><div class="dates">29/07 → 14/09/26</div></div>
+      <div class="kcard" style="border-color:#4D4D4D"><div class="proj">Seedling photoperiod trial</div><div class="who">Elin Larsen · PI: Tomas Novak</div><div class="dates">18/08 → 05/12/26</div></div>
+    </div>
+    <div>
+      <div class="col-head"><span style="width:8px;height:8px;border-radius:50%;background:var(--overdue);display:inline-block"></span>Declined <span class="n">1</span></div>
+      <div class="kcard" style="border-color:#D55E00"><div class="proj">Fungal growth-rate assay</div><div class="who">Paulo Duarte · PI: Sofia Martins</div><div class="dates">25/06 → 24/08/26</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================= 4: GROUPED BY LAB ============================= -->
+<div class="panel" id="p4">
+  <style>
+    #p4 .lab-head { display: flex; align-items: center; gap: 9px; margin: 22px 0 10px; }
+    #p4 .lab-head:first-child { margin-top: 0; }
+    #p4 .stripe { width: 4px; height: 15px; border-radius: 2px; }
+    #p4 .lab-head b { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 14px; font-weight: 800; }
+    #p4 .lab-head span { font-size: 12px; color: var(--ink-faint); }
+    #p4 .row { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 13px; padding: 11px 14px; margin-bottom: 8px; cursor: pointer; }
+    #p4 .row:hover { background: var(--surface-soft); }
+    #p4 .row .proj { font-weight: 700; font-size: 13px; flex: 1; min-width: 0; }
+    #p4 .row .who { font-size: 11.5px; color: var(--ink-faint); flex-shrink: 0; }
+  </style>
+  <div class="page-head"><div><h1 class="display">Requisitions</h1><p>Grouped by lab group — mirrors the Inventory page's layout</p></div><div class="seg"><button class="on">Active</button><button>Completed</button></div></div>
+
+  <div class="lab-head"><span class="stripe" style="background:#E69F00"></span><b>PI: James Okafor</b><span>2 requisitions</span></div>
+  <div class="row"><span class="status-pill pending" style="width:74px;justify-content:center">Pending</span><div class="proj">Arabidopsis salt-stress trial</div><div class="who">Alejandro Reyes · 26/08 → 12/10</div></div>
+  <div class="row"><span class="status-pill pending" style="width:74px;justify-content:center">Pending</span><div class="proj">Root architecture imaging series</div><div class="who">Max Fischer · 23/08 → 15/11</div></div>
+
+  <div class="lab-head"><span class="stripe" style="background:#009E73"></span><b>PI: Wei Chen</b><span>1 requisition</span></div>
+  <div class="row"><span class="status-pill pending" style="width:74px;justify-content:center">Pending</span><div class="proj">Drosophila temperature response</div><div class="who">Toshiro Nakamura · 24/08 → 30/09</div></div>
+
+  <div class="lab-head"><span class="stripe" style="background:#F0E442"></span><b>PI: Amrit Singh</b><span>1 requisition</span></div>
+  <div class="row"><span class="status-pill approved" style="width:74px;justify-content:center">Approved</span><div class="proj">Barley drought-tolerance panel</div><div class="who">Linda Boateng · 29/07 → 14/09</div></div>
+</div>
+
+<!-- ============================= 5: TIMELINE LIST ============================= -->
+<div class="panel" id="p5">
+  <style>
+    #p5 .row { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 13px 16px; margin-bottom: 9px; cursor: pointer; }
+    #p5 .row:hover { background: var(--surface-soft); }
+    #p5 .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    #p5 .proj { font-weight: 700; font-size: 13px; }
+    #p5 .who { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
+    #p5 .bar-track { height: 8px; border-radius: 4px; background: var(--surface-soft); position: relative; }
+    #p5 .bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+    #p5 .range { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-faint); margin-top: 4px; }
+  </style>
+  <div class="page-head"><div><h1 class="display">Requisitions</h1><p>Each row shows its date range as a mini bar — same visual language as the dashboard timeline</p></div><div class="seg"><button class="on">Active</button><button>Completed</button></div></div>
+
+  <div class="row">
+    <div class="top"><div><div class="proj">Arabidopsis salt-stress trial</div><div class="who">Alejandro Reyes · PI: James Okafor</div></div><span class="status-pill pending">Pending</span></div>
+    <div class="bar-track"><div class="bar-fill" style="left:15%;width:35%;background:#E69F00"></div></div>
+    <div class="range"><span>26/08/26</span><span>12/10/26</span></div>
+  </div>
+  <div class="row">
+    <div class="top"><div><div class="proj">Drosophila temperature response</div><div class="who">Toshiro Nakamura · PI: Wei Chen</div></div><span class="status-pill pending">Pending</span></div>
+    <div class="bar-track"><div class="bar-fill" style="left:10%;width:28%;background:#009E73"></div></div>
+    <div class="range"><span>24/08/26</span><span>30/09/26</span></div>
+  </div>
+  <div class="row">
+    <div class="top"><div><div class="proj">Barley drought-tolerance panel</div><div class="who">Linda Boateng · PI: Amrit Singh</div></div><span class="status-pill approved">Approved</span></div>
+    <div class="bar-track"><div class="bar-fill" style="left:2%;width:40%;background:#F0E442"></div></div>
+    <div class="range"><span>29/07/26</span><span>14/09/26</span></div>
+  </div>
+  <div class="row">
+    <div class="top"><div><div class="proj">Seedling photoperiod trial</div><div class="who">Elin Larsen · PI: Tomas Novak</div></div><span class="status-pill approved">Approved</span></div>
+    <div class="bar-track"><div class="bar-fill" style="left:20%;width:55%;background:#4D4D4D"></div></div>
+    <div class="range"><span>18/08/26</span><span>05/12/26</span></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+  const notes = {
+    "1": "Table rows — fastest to scan a long list, same language as the Maintenance History table you already liked. Best if you mostly triage many requisitions at once.",
+    "2": "Avatar cards — reuses the initials-avatar pattern already in BookingCard/Current Requisition, so it'd feel native rather than new. A bit more visual than the table, still calm.",
+    "3": "Kanban columns — status becomes spatial (Pending/Approved/Declined side by side) instead of a toggle+list. Good for a quick 'how much is in each bucket' glance, less good for long lists.",
+    "4": "Grouped by lab — mirrors the Inventory page's floor-grouping pattern exactly (stripe + heading + count). Useful if you often think 'what has this lab got in flight'.",
+    "5": "Timeline list — each row carries a mini date-range bar in the same style as the dashboard timeline, so date overlaps are visible without opening anything.",
+  };
+  document.getElementById("tabs").addEventListener("click", (e) => {
+    if (!e.target.dataset.p) return;
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b === e.target));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "p" + e.target.dataset.p));
+    document.getElementById("note").textContent = notes[e.target.dataset.p];
+  });
+  document.getElementById("note").textContent = notes["1"];
+</script>
+</body>
+</html>

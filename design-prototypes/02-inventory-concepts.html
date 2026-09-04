@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Inventory — Layout Concepts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: #E9E4DA; }
+
+  /* ===================== chrome (meta UI, not part of any concept) ===================== */
+  .chrome { position: sticky; top: 0; z-index: 200; background: #16211D; color: #fff; padding: 12px 22px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .chrome b { font-size: 13px; margin-right: 4px; }
+  .chrome .tabs { display: flex; gap: 3px; background: rgba(255,255,255,0.08); border-radius: 10px; padding: 3px; }
+  .chrome button { font-family: Inter, sans-serif; font-size: 12.5px; font-weight: 600; padding: 7px 13px; border: none; border-radius: 8px; background: transparent; color: rgba(255,255,255,0.65); cursor: pointer; }
+  .chrome button.on { background: #fff; color: #16211D; }
+  .chrome .note { font-size: 12px; color: rgba(255,255,255,0.55); max-width: 480px; line-height: 1.4; }
+
+  .view { display: none; padding: 28px; max-width: 1400px; margin: 0 auto; }
+  .view.on { display: block; }
+
+  /* ===================== VIEW 0 — current design, 3 per row ===================== */
+  .v0 {
+    --bg: #F3F5F4; --surface: #FFFFFF; --surface-soft: #F1F5F3; --border: #E3E8E5;
+    --ink: #16211D; --ink-soft: #5C6D65; --ink-faint: #93A29B;
+    --free: #64748B; --free-soft: #F1F5F3;
+    --occupied: #3B6EA5; --occupied-soft: #E4EDF6;
+    --warning: #C97A2B; --warning-soft: #FBEDDD;
+    --overdue: #B23A34; --overdue-soft: #FAE4E2;
+    --service: #75786F; --service-soft: #ECEAE4;
+    --chip-bg: #0F1D18; --chip-label: #ABC0B5; --chip-temp: #4ADE80; --chip-rh: #60A5FA; --chip-cycle: #FBBF24;
+    background: var(--bg); color: var(--ink); border-radius: 20px; padding: 22px;
+  }
+  .v0 h1 { font-family: 'Plus Jakarta Sans'; font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+  .v0 .sub { font-size: 13px; color: var(--ink-soft); margin-bottom: 18px; }
+  .v0-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .v0-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 18px; }
+  .v0-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+  .v0-id { font-family: 'Plus Jakarta Sans'; font-size: 17px; font-weight: 800; }
+  .v0-meta { font-size: 12px; color: var(--ink-soft); margin-bottom: 10px; }
+  .v0-room { display: inline-flex; align-items: center; gap: 5px; background: #EFF6F2; color: #2B4A3A; border: 1px solid #D3E6DA; border-radius: 8px; padding: 4px 9px; font-size: 12px; font-weight: 700; margin-bottom: 12px; }
+  .v0-readouts { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-bottom: 12px; }
+  .v0-readout { background: var(--chip-bg); border-radius: 9px; padding: 8px 4px; text-align: center; }
+  .v0-readout .l { color: var(--chip-label); font-size: 8.5px; font-weight: 700; letter-spacing: .06em; }
+  .v0-readout .v { font-family: 'Plus Jakarta Sans'; font-weight: 800; font-size: 14px; margin-top: 2px; }
+  .v0-tags { display: flex; gap: 5px; margin-bottom: 12px; flex-wrap: wrap; }
+  .v0-tag { font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: #ECFDF3; color: #15803D; border: 1px solid #BBF0CE; }
+  .v0-status { font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; flex-shrink: 0; }
+  .v0-occbox { border-radius: 12px; padding: 11px 13px; }
+  .v0-occbox .name { font-weight: 800; font-size: 13.5px; }
+  .v0-occbox .proj { font-style: italic; font-size: 12px; opacity: .85; margin-top: 1px; }
+  .v0-occbox .dates { font-size: 11px; font-weight: 700; opacity: .75; margin-top: 5px; }
+
+  /* ===================== VIEW 1 — dense scan table ===================== */
+  .v1 { background: #FDFCFA; border-radius: 20px; padding: 26px; color: #21261F; }
+  .v1 h1 { font-family: 'IBM Plex Mono'; font-size: 19px; font-weight: 600; margin-bottom: 3px; letter-spacing: -.01em; }
+  .v1 .sub { font-size: 12.5px; color: #6B7268; margin-bottom: 18px; font-family: 'IBM Plex Mono'; }
+  .v1 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .v1 thead th { text-align: left; font-family: 'IBM Plex Mono'; font-size: 10.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #8A9186; padding: 9px 12px; border-bottom: 2px solid #21261F; }
+  .v1 tbody td { padding: 11px 12px; border-bottom: 1px solid #E6E3DA; vertical-align: middle; }
+  .v1 tbody tr:hover { background: #F3F1E9; }
+  .v1 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .v1 .id { font-family: 'IBM Plex Mono'; font-weight: 600; }
+  .v1 .room { color: #6B7268; }
+  .v1 .pi { color: #6B7268; font-size: 12px; }
+  .v1 .readout { font-family: 'IBM Plex Mono'; font-size: 12px; color: #4A5148; }
+  .v1 .status-text { font-family: 'IBM Plex Mono'; font-size: 11.5px; font-weight: 600; }
+  .v1 .disc { width: 6px; height: 20px; border-radius: 3px; display: inline-block; margin-right: 8px; vertical-align: middle; }
+
+  /* ===================== VIEW 2 — spatial floor map ===================== */
+  .v2 { background: #12181F; border-radius: 20px; padding: 28px; color: #E7ECF2; }
+  .v2 h1 { font-family: 'Plus Jakarta Sans'; font-size: 21px; font-weight: 800; margin-bottom: 4px; }
+  .v2 .sub { font-size: 13px; color: #8B98A8; margin-bottom: 20px; }
+  .v2-floor { margin-bottom: 26px; }
+  .v2-floor-label { font-family: 'Plus Jakarta Sans'; font-weight: 700; font-size: 13.5px; color: #C7D0DB; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+  .v2-floor-label .line { flex: 1; height: 1px; background: #2A3542; }
+  .v2-rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+  .v2-room { border-radius: 14px; padding: 12px; min-height: 88px; display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; transition: transform .12s; border: 1px solid rgba(255,255,255,0.06); }
+  .v2-room:hover { transform: translateY(-3px); }
+  .v2-room .id { font-family: 'IBM Plex Mono'; font-size: 11.5px; font-weight: 600; opacity: .85; }
+  .v2-room .who { font-weight: 700; font-size: 12.5px; margin-top: 6px; line-height: 1.25; }
+  .v2-room .sub2 { font-size: 10px; opacity: .7; margin-top: 3px; }
+  .v2-legend { display: flex; gap: 16px; margin-top: 22px; flex-wrap: wrap; font-size: 12px; color: #8B98A8; }
+  .v2-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .v2-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .v2-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 320px; background: #1B232D; border-left: 1px solid #2A3542; padding: 22px; transform: translateX(100%); transition: transform .2s; z-index: 50; }
+  .v2-panel.open { transform: translateX(0); }
+  .v2-panel h3 { font-family: 'Plus Jakarta Sans'; font-size: 18px; font-weight: 800; margin-bottom: 2px; }
+  .v2-panel .close { position: absolute; top: 18px; right: 18px; background: rgba(255,255,255,0.08); border: none; color: #fff; width: 30px; height: 30px; border-radius: 8px; cursor: pointer; }
+  .v2-panel .row { margin-top: 14px; }
+  .v2-panel .l { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: #8B98A8; font-weight: 700; }
+  .v2-panel .v { font-size: 14px; font-weight: 600; margin-top: 3px; }
+
+  /* ===================== VIEW 3 — kanban by status ===================== */
+  .v3 { background: #FBF8F3; border-radius: 20px; padding: 26px; color: #26221B; }
+  .v3 h1 { font-family: 'Fraunces'; font-size: 24px; font-weight: 600; font-style: italic; margin-bottom: 4px; }
+  .v3 .sub { font-size: 13px; color: #7A7264; margin-bottom: 20px; }
+  .v3-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; align-items: start; }
+  .v3-col { background: #F1EBDF; border-radius: 16px; padding: 14px; }
+  .v3-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; padding: 0 2px; }
+  .v3-col-head .t { font-weight: 700; font-size: 13px; }
+  .v3-col-head .n { font-family: 'IBM Plex Mono'; font-size: 11px; font-weight: 600; background: rgba(0,0,0,0.08); padding: 2px 8px; border-radius: 999px; }
+  .v3-card { background: #FFFDF9; border-radius: 12px; padding: 11px 12px; margin-bottom: 9px; box-shadow: 0 1px 0 rgba(38,34,27,0.04); border-left: 3px solid transparent; }
+  .v3-card .id { font-family: 'IBM Plex Mono'; font-size: 11.5px; font-weight: 600; opacity: .6; }
+  .v3-card .who { font-weight: 700; font-size: 13px; margin-top: 3px; }
+  .v3-card .meta { font-size: 11px; color: #8A8272; margin-top: 3px; }
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <b>Inventory — Layout Concepts</b>
+  <div class="tabs" id="tabs">
+    <button data-v="0" class="on">0 · Current (3/row)</button>
+    <button data-v="1">1 · Dense Table</button>
+    <button data-v="2">2 · Floor Map</button>
+    <button data-v="3">3 · Status Kanban</button>
+  </div>
+  <div class="note" id="note"></div>
+</div>
+
+<!-- ============================================================ VIEW 0 — current, 3 per row ============================================================ -->
+<div class="view on" data-view="0">
+  <div class="v0">
+    <h1>Inventory</h1>
+    <div class="sub">Same design language as the current app, just re-flowed to three cards per row.</div>
+    <div class="v0-grid">
+
+      <div class="v0-card">
+        <div class="v0-top"><div class="v0-id">GC-041</div><span class="v0-status" style="background:var(--occupied-soft);color:var(--occupied)">Occupied</span></div>
+        <div class="v0-meta">Conviron E-15</div>
+        <div class="v0-room">📍 Level 1 · 1.09</div>
+        <div class="v0-readouts">
+          <div class="v0-readout"><div class="l">TEMP</div><div class="v" style="color:var(--chip-temp)">21°C</div></div>
+          <div class="v0-readout"><div class="l">RH</div><div class="v" style="color:var(--chip-rh)">58%</div></div>
+          <div class="v0-readout"><div class="l">CYCLE</div><div class="v" style="color:var(--chip-cycle);font-size:12px">16/8h</div></div>
+        </div>
+        <div class="v0-tags"><span class="v0-tag">Plant Sciences</span></div>
+        <div class="v0-occbox" style="background:var(--occupied-soft)">
+          <div class="name" style="color:var(--occupied)">Alejandro Reyes</div>
+          <div class="proj" style="color:var(--occupied)">Arabidopsis salt-stress trial · PI: James Okafor</div>
+          <div class="dates" style="color:var(--occupied)">26/08/2026 → 12/10/2026</div>
+        </div>
+      </div>
+
+      <div class="v0-card">
+        <div class="v0-top"><div class="v0-id">GC-014</div><span class="v0-status" style="background:var(--warning-soft);color:var(--warning)">Ending soon</span></div>
+        <div class="v0-meta">Percival AR-66</div>
+        <div class="v0-room">📍 Level 1 · 1.04</div>
+        <div class="v0-readouts">
+          <div class="v0-readout"><div class="l">TEMP</div><div class="v" style="color:var(--chip-temp)">24°C</div></div>
+          <div class="v0-readout"><div class="l">RH</div><div class="v" style="color:var(--chip-rh)">70%</div></div>
+          <div class="v0-readout"><div class="l">CYCLE</div><div class="v" style="color:var(--chip-cycle);font-size:12px">8/16h</div></div>
+        </div>
+        <div class="v0-tags"><span class="v0-tag">Plant Sciences</span></div>
+        <div class="v0-occbox" style="background:var(--warning-soft)">
+          <div class="name" style="color:var(--warning)">Karolina Nowak</div>
+          <div class="proj" style="color:var(--warning)">Wheat vernalisation series · PI: Elena Petrova</div>
+          <div class="dates" style="color:var(--warning)">Until 27/08/2026</div>
+        </div>
+      </div>
+
+      <div class="v0-card">
+        <div class="v0-top"><div class="v0-id">GC-008</div><span class="v0-status" style="background:var(--free-soft);color:var(--free)">Free</span></div>
+        <div class="v0-meta">Snijders GC-8</div>
+        <div class="v0-room">📍 Level 1 · 1.15</div>
+        <div class="v0-readouts" style="grid-template-columns:repeat(2,1fr)">
+          <div class="v0-readout"><div class="l">TEMP RANGE</div><div class="v" style="color:#fff;font-size:12px">4–50°C</div></div>
+          <div class="v0-readout"><div class="l">RH RANGE</div><div class="v" style="color:#fff;font-size:12px">20–95%</div></div>
+        </div>
+        <div class="v0-tags"><span class="v0-tag" style="background:#FEF9EC;color:#92400E;border-color:#FBE7B8">Insect Sciences</span></div>
+        <div class="v0-occbox" style="background:var(--free-soft);text-align:center;font-weight:700;font-size:12.5px;color:var(--free)">Free and ready to book</div>
+      </div>
+
+      <div class="v0-card">
+        <div class="v0-top"><div class="v0-id">RTR-03</div><span class="v0-status" style="background:var(--overdue-soft);color:var(--overdue)">Overdue</span></div>
+        <div class="v0-meta">Reftech Room · Percival I-36VL</div>
+        <div class="v0-room">📍 Level 2a · 2A-B</div>
+        <div class="v0-readouts">
+          <div class="v0-readout"><div class="l">TEMP</div><div class="v" style="color:var(--chip-temp)">25°C</div></div>
+          <div class="v0-readout"><div class="l">RH</div><div class="v" style="color:var(--chip-rh)">60%</div></div>
+          <div class="v0-readout"><div class="l">CYCLE</div><div class="v" style="color:var(--chip-cycle);font-size:12px">24h dark</div></div>
+        </div>
+        <div class="v0-tags"><span class="v0-tag" style="background:#FEF9EC;color:#92400E;border-color:#FBE7B8">Insect Sciences</span></div>
+        <div class="v0-occbox" style="background:var(--overdue-soft)">
+          <div class="name" style="color:var(--overdue)">Hana Ibrahim</div>
+          <div class="proj" style="color:var(--overdue)">Insect diapause induction · PI: Yousef Al-Farsi</div>
+          <div class="dates" style="color:var(--overdue)">Was due back 22/08/2026</div>
+        </div>
+      </div>
+
+      <div class="v0-card">
+        <div class="v0-top"><div class="v0-id">GC-019</div><span class="v0-status" style="background:var(--service-soft);color:var(--service)">Out of Service</span></div>
+        <div class="v0-meta">Sanyo/Panasonic MLR-352H</div>
+        <div class="v0-room">📍 Level 2a · 2A.11</div>
+        <div class="v0-readouts" style="grid-template-columns:repeat(2,1fr)">
+          <div class="v0-readout"><div class="l">TEMP RANGE</div><div class="v" style="color:#fff;font-size:12px">4–40°C</div></div>
+          <div class="v0-readout"><div class="l">RH RANGE</div><div class="v" style="color:#fff;font-size:12px">20–95%</div></div>
+        </div>
+        <div class="v0-tags"><span class="v0-tag">Plant Sciences</span></div>
+        <div class="v0-occbox" style="background:var(--service-soft);text-align:center;font-weight:700;font-size:12.5px;color:var(--service)">Under maintenance</div>
+      </div>
+
+      <div class="v0-card">
+        <div class="v0-top"><div class="v0-id">GC-032</div><span class="v0-status" style="background:var(--occupied-soft);color:var(--occupied)">Occupied</span></div>
+        <div class="v0-meta">BioChambers TC-30</div>
+        <div class="v0-room">📍 Level 2a · 2A.02</div>
+        <div class="v0-readouts">
+          <div class="v0-readout"><div class="l">TEMP</div><div class="v" style="color:var(--chip-temp)">22°C</div></div>
+          <div class="v0-readout"><div class="l">RH</div><div class="v" style="color:var(--chip-rh)">65%</div></div>
+          <div class="v0-readout"><div class="l">CYCLE</div><div class="v" style="color:var(--chip-cycle);font-size:12px">12/12h</div></div>
+        </div>
+        <div class="v0-tags"><span class="v0-tag">Plant Sciences</span></div>
+        <div class="v0-occbox" style="background:var(--occupied-soft)">
+          <div class="name" style="color:var(--occupied)">Elin Larsen</div>
+          <div class="proj" style="color:var(--occupied)">Seedling photoperiod trial · PI: Tomas Novak</div>
+          <div class="dates" style="color:var(--occupied)">Until 05/12/2026</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ VIEW 1 — dense scan table ============================================================ -->
+<div class="view" data-view="1">
+  <div class="v1">
+    <h1>&gt; inventory --list --all</h1>
+    <div class="sub">82 units · sorted by floor, then ID · click a row to open</div>
+    <table>
+      <thead><tr><th></th><th>ID</th><th>Room</th><th>Occupant</th><th>PI / Lab</th><th>Temp</th><th>RH</th><th>Cycle</th><th>Model</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><span class="dot" style="background:#3B6EA5"></span></td><td class="id">GC-041</td><td class="room">L1 · 1.09</td><td>Alejandro Reyes</td><td class="pi">PI: James Okafor</td><td class="readout">21°C</td><td class="readout">58%</td><td class="readout">16/8h</td><td class="room">Conviron E-15</td><td class="status-text" style="color:#3B6EA5">Occupied</td></tr>
+        <tr><td><span class="dot" style="background:#C97A2B"></span></td><td class="id">GC-014</td><td class="room">L1 · 1.04</td><td>Karolina Nowak</td><td class="pi">PI: Elena Petrova</td><td class="readout">24°C</td><td class="readout">70%</td><td class="readout">8/16h</td><td class="room">Percival AR-66</td><td class="status-text" style="color:#C97A2B">Ends 27/08</td></tr>
+        <tr><td><span class="dot" style="background:#94A19B"></span></td><td class="id">GC-008</td><td class="room">L1 · 1.15</td><td>—</td><td class="pi">—</td><td class="readout">4–50°C</td><td class="readout">20–95%</td><td class="readout">—</td><td class="room">Snijders GC-8</td><td class="status-text" style="color:#6B7268">Free</td></tr>
+        <tr><td><span class="dot" style="background:#B23A34"></span></td><td class="id">RTR-03</td><td class="room">L2A · 2A-B</td><td>Hana Ibrahim</td><td class="pi">PI: Yousef Al-Farsi</td><td class="readout">25°C</td><td class="readout">60%</td><td class="readout">24h dark</td><td class="room">Percival I-36VL</td><td class="status-text" style="color:#B23A34">3d overdue</td></tr>
+        <tr><td><span class="dot" style="background:#75786F"></span></td><td class="id">GC-019</td><td class="room">L2A · 2A.11</td><td>—</td><td class="pi">—</td><td class="readout">4–40°C</td><td class="readout">20–95%</td><td class="readout">—</td><td class="room">Sanyo MLR-352H</td><td class="status-text" style="color:#75786F">Out of service</td></tr>
+        <tr><td><span class="dot" style="background:#3B6EA5"></span></td><td class="id">GC-032</td><td class="room">L2A · 2A.02</td><td>Elin Larsen</td><td class="pi">PI: Tomas Novak</td><td class="readout">22°C</td><td class="readout">65%</td><td class="readout">12/12h</td><td class="room">BioChambers TC-30</td><td class="status-text" style="color:#3B6EA5">Occupied</td></tr>
+        <tr><td><span class="dot" style="background:#3B6EA5"></span></td><td class="id">GC-051</td><td class="room">L2B · 2B.03</td><td>Sylwia Kowalski</td><td class="pi">PI: Rachel Whitfield</td><td class="readout">18°C</td><td class="readout">55%</td><td class="readout">16/8h</td><td class="room">Conviron E-15</td><td class="status-text" style="color:#3B6EA5">Occupied</td></tr>
+        <tr><td><span class="dot" style="background:#94A19B"></span></td><td class="id">GC-062</td><td class="room">L3 · 3.02</td><td>—</td><td class="pi">—</td><td class="readout">4–45°C</td><td class="readout">30–95%</td><td class="readout">—</td><td class="room">BioChambers TC-30</td><td class="status-text" style="color:#6B7268">Free</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================================ VIEW 2 — spatial floor map ============================================================ -->
+<div class="view" data-view="2">
+  <div class="v2">
+    <h1>Floor Map</h1>
+    <div class="sub">Each tile is a room, arranged the way it actually sits on the floor. Click a room for details.</div>
+
+    <div class="v2-floor">
+      <div class="v2-floor-label">Level 1<span class="line"></span></div>
+      <div class="v2-rooms">
+        <div class="v2-room" style="background:#1E3A5C" onclick="openPanel('GC-041','Alejandro Reyes','Occupied · ends 12/10','21°C · 58% · 16/8h')"><div class="id">GC-041</div><div class="who">Alejandro Reyes</div><div class="sub2">PI: Okafor</div></div>
+        <div class="v2-room" style="background:#5C3E14" onclick="openPanel('GC-014','Karolina Nowak','Ending soon · 27/08','24°C · 70% · 8/16h')"><div class="id">GC-014</div><div class="who">Karolina Nowak</div><div class="sub2">PI: Petrova</div></div>
+        <div class="v2-room" style="background:#2B332E" onclick="openPanel('GC-008','Free','Free and ready to book','4–50°C range')"><div class="id">GC-008</div><div class="who" style="opacity:.6">Free</div></div>
+        <div class="v2-room" style="background:#2B332E" onclick="openPanel('GC-015','Free','Free and ready to book','4–40°C range')"><div class="id">GC-015</div><div class="who" style="opacity:.6">Free</div></div>
+      </div>
+    </div>
+
+    <div class="v2-floor">
+      <div class="v2-floor-label">Level 2a<span class="line"></span></div>
+      <div class="v2-rooms">
+        <div class="v2-room" style="background:#1E3A5C" onclick="openPanel('GC-032','Elin Larsen','Occupied · ends 05/12','22°C · 65% · 12/12h')"><div class="id">GC-032</div><div class="who">Elin Larsen</div><div class="sub2">PI: Novak</div></div>
+        <div class="v2-room" style="background:#3C1E1B;grid-column:span 2" onclick="openPanel('RTR-03','Hana Ibrahim','3 days overdue','25°C · 60% · 24h dark')"><div class="id">RTR-03 · Reftech Room</div><div class="who">Hana Ibrahim</div><div class="sub2">PI: Al-Farsi · overdue</div></div>
+        <div class="v2-room" style="background:#39362B" onclick="openPanel('GC-019','—','Out of service','Serviced 21/08')"><div class="id">GC-019</div><div class="who" style="opacity:.6">Maintenance</div></div>
+      </div>
+    </div>
+
+    <div class="v2-floor">
+      <div class="v2-floor-label">Level 3<span class="line"></span></div>
+      <div class="v2-rooms">
+        <div class="v2-room" style="background:#2B332E" onclick="openPanel('GC-062','Free','Free and ready to book','4–45°C range')"><div class="id">GC-062</div><div class="who" style="opacity:.6">Free</div></div>
+        <div class="v2-room" style="background:#1E3A5C" onclick="openPanel('GC-071','Paulo Duarte','Occupied · ends 14/09','23°C · 62% · 16/8h')"><div class="id">GC-071</div><div class="who">Paulo Duarte</div><div class="sub2">PI: Martins</div></div>
+      </div>
+    </div>
+
+    <div class="v2-legend">
+      <span><i style="background:#1E3A5C"></i>Occupied</span>
+      <span><i style="background:#5C3E14"></i>Ending soon</span>
+      <span><i style="background:#3C1E1B"></i>Overdue</span>
+      <span><i style="background:#39362B"></i>Out of service</span>
+      <span><i style="background:#2B332E"></i>Free</span>
+    </div>
+  </div>
+
+  <div class="v2-panel" id="v2panel">
+    <button class="close" onclick="document.getElementById('v2panel').classList.remove('open')">✕</button>
+    <h3 id="p-id">—</h3>
+    <div class="row"><div class="l">Occupant</div><div class="v" id="p-who">—</div></div>
+    <div class="row"><div class="l">Status</div><div class="v" id="p-status">—</div></div>
+    <div class="row"><div class="l">Conditions</div><div class="v" id="p-cond">—</div></div>
+  </div>
+</div>
+
+<!-- ============================================================ VIEW 3 — status kanban ============================================================ -->
+<div class="view" data-view="3">
+  <div class="v3">
+    <h1>Today's board</h1>
+    <div class="sub">Grouped by what needs attention, not where things sit — built for a shift that starts with "what do I need to deal with today?"</div>
+    <div class="v3-board">
+
+      <div class="v3-col">
+        <div class="v3-col-head"><span class="t" style="color:#B23A34">Overdue</span><span class="n">1</span></div>
+        <div class="v3-card" style="border-color:#B23A34"><div class="id">RTR-03</div><div class="who">Hana Ibrahim</div><div class="meta">3 days overdue · L2A</div></div>
+      </div>
+
+      <div class="v3-col">
+        <div class="v3-col-head"><span class="t" style="color:#C97A2B">Ending soon</span><span class="n">1</span></div>
+        <div class="v3-card" style="border-color:#C97A2B"><div class="id">GC-014</div><div class="who">Karolina Nowak</div><div class="meta">Ends 27/08 · L1</div></div>
+      </div>
+
+      <div class="v3-col">
+        <div class="v3-col-head"><span class="t" style="color:#3B6EA5">Occupied</span><span class="n">3</span></div>
+        <div class="v3-card" style="border-color:#3B6EA5"><div class="id">GC-041</div><div class="who">Alejandro Reyes</div><div class="meta">Until 12/10 · L1</div></div>
+        <div class="v3-card" style="border-color:#3B6EA5"><div class="id">GC-032</div><div class="who">Elin Larsen</div><div class="meta">Until 05/12 · L2A</div></div>
+        <div class="v3-card" style="border-color:#3B6EA5"><div class="id">GC-071</div><div class="who">Paulo Duarte</div><div class="meta">Until 14/09 · L3</div></div>
+      </div>
+
+      <div class="v3-col">
+        <div class="v3-col-head"><span class="t" style="color:#75786F">Out of service</span><span class="n">1</span></div>
+        <div class="v3-card" style="border-color:#75786F"><div class="id">GC-019</div><div class="who">—</div><div class="meta">Serviced 21/08 · L2A</div></div>
+      </div>
+
+      <div class="v3-col">
+        <div class="v3-col-head"><span class="t" style="color:#6B7268">Free</span><span class="n">3</span></div>
+        <div class="v3-card"><div class="id">GC-008</div><div class="who">Ready to book</div><div class="meta">L1</div></div>
+        <div class="v3-card"><div class="id">GC-015</div><div class="who">Ready to book</div><div class="meta">L1</div></div>
+        <div class="v3-card"><div class="id">GC-062</div><div class="who">Ready to book</div><div class="meta">L3</div></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const notes = {
+    "0": "Same visual system as your current app, just re-flowed to 3 cards per row as you asked.",
+    "1": "Dense scan table — every unit as one aligned row. Best when you know roughly what you're looking for and want to compare many units fast.",
+    "2": "Spatial floor map — rooms laid out the way they physically sit on each floor, colour-coded by status. Best for facilities intuition: 'what's going on on Level 2a?'",
+    "3": "Status kanban — grouped by what needs attention today, not by location. Best for a shift that starts with 'what's overdue?' rather than 'where is unit X?'",
+  };
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    if (!e.target.dataset.v) return;
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b === e.target));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.dataset.view === e.target.dataset.v));
+    document.getElementById('note').textContent = notes[e.target.dataset.v];
+  });
+  document.getElementById('note').textContent = notes["0"];
+
+  function openPanel(id, who, status, cond) {
+    document.getElementById('p-id').textContent = id;
+    document.getElementById('p-who').textContent = who;
+    document.getElementById('p-status').textContent = status;
+    document.getElementById('p-cond').textContent = cond;
+    document.getElementById('v2panel').classList.add('open');
+  }
+</script>
+</body>
+</html>

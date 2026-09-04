@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Growth Space Admin — Design Concepts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=Libre+Franklin:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600&family=Source+Sans+3:wght@400;500;600&family=Quicksand:wght@500;600;700&family=Nunito:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { min-height: 100vh; background: #E7E2D8; }
+
+  /* ============================= CHROME (meta UI, not part of any concept) ============================= */
+  .chrome {
+    position: sticky; top: 0; z-index: 100;
+    background: #1C1B19; color: #fff;
+    padding: 14px 24px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    font-family: Inter, sans-serif;
+  }
+  .chrome .title { font-weight: 700; font-size: 14px; margin-right: 4px; }
+  .chrome .group { display: flex; align-items: center; gap: 2px; background: rgba(255,255,255,0.08); border-radius: 10px; padding: 3px; }
+  .chrome button {
+    font-family: Inter, sans-serif; font-size: 12.5px; font-weight: 600; padding: 7px 13px; border-radius: 8px;
+    border: none; background: transparent; color: rgba(255,255,255,0.65); cursor: pointer; transition: all .12s;
+  }
+  .chrome button:hover { color: #fff; }
+  .chrome button.active { background: #fff; color: #1C1B19; }
+  .chrome .divider { width: 1px; height: 20px; background: rgba(255,255,255,0.15); }
+  .concept-note {
+    font-family: Inter, sans-serif; font-size: 12.5px; color: rgba(255,255,255,0.55); max-width: 460px; line-height: 1.4;
+  }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .page-view { display: none; }
+  .page-view.active { display: block; }
+
+  /* shared little helpers */
+  .visually-hide { display: none !important; }
+
+  /* ======================================================================================================
+     CONCEPT 1 — "POTTING SHED"
+     Warm, tactile, human. Nursery-label motifs, soft moss/clay palette, Fraunces + Inter.
+     Inventory declutter strategy: colour-coded edge stripe, single meta line instead of stacked stats.
+     ====================================================================================================== */
+  .c1 {
+    --bg: #FAF6ED; --surface: #FFFFFF; --surface-soft: #F3EEE1; --border: #E7DFCB;
+    --ink: #2E3324; --ink-soft: #6B6D57; --ink-faint: #9B9C85;
+    --accent: #5C7A52; --accent-soft: #E4ECD9; --accent-ink: #3F5636;
+    --clay: #C97A4A; --clay-soft: #F5E3D3; --clay-ink: #9C5730;
+    --free: #5C7A52; --free-soft: #E4ECD9;
+    --occupied: #6E8CA6; --occupied-soft: #E4EBF0;
+    --warning: #C99A3C; --warning-soft: #F6ECD7;
+    --overdue: #B45B41; --overdue-soft: #F5E1DA;
+    --service: #948C79; --service-soft: #EEEAE0;
+    font-family: 'Inter', sans-serif; background: var(--bg); color: var(--ink);
+  }
+  .c1 .display { font-family: 'Fraunces', serif; }
+  .c1 .tag {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
+    padding: 5px 12px 5px 10px; border-radius: 3px 10px 10px 3px; position: relative;
+  }
+  .c1 .tag::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .c1 .card { background: var(--surface); border-radius: 22px; box-shadow: 0 2px 0 rgba(46,51,36,0.04), 0 14px 30px -20px rgba(46,51,36,0.25); }
+  .c1 .wrap { max-width: 1280px; margin: 0 auto; padding: 40px 32px 80px; }
+  .c1 .hero {
+    background: linear-gradient(135deg, #6E8B60 0%, #4E6A45 100%); color: #F7F4EA; border-radius: 26px; padding: 30px 34px;
+    display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; margin-bottom: 28px;
+  }
+  .c1 .hero h1 { font-size: 27px; font-weight: 500; font-style: italic; }
+  .c1 .hero p { margin-top: 6px; font-size: 14.5px; opacity: .9; max-width: 480px; }
+  .c1 .ring { position: relative; width: 96px; height: 96px; flex-shrink: 0; }
+  .c1 .ring svg { transform: rotate(-90deg); }
+  .c1 .ring .num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+  .c1 .ring .num b { font-family: 'Fraunces', serif; font-size: 22px; font-weight: 600; }
+  .c1 .ring .num span { font-size: 9.5px; opacity: .85; letter-spacing: .03em; }
+  .c1 .alerts { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+  .c1 .alert-tag { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: 16px; padding: 10px 16px; font-size: 13.5px; font-weight: 500; box-shadow: 0 1px 0 rgba(46,51,36,0.04), 0 8px 18px -14px rgba(46,51,36,0.3); }
+  .c1 .alert-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .c1 .cols { display: grid; grid-template-columns: 1.05fr 1.4fr; gap: 22px; }
+  .c1 .section-title { font-family: 'Fraunces', serif; font-size: 17px; font-weight: 500; margin-bottom: 14px; }
+  .c1 .card-pad { padding: 22px; margin-bottom: 20px; }
+  .c1 .activity-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px dashed var(--border); }
+  .c1 .activity-row:last-child { border-bottom: none; }
+  .c1 .activity-icon { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; }
+  .c1 .timeline-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .c1 .timeline-label { width: 92px; font-size: 12px; color: var(--ink-soft); flex-shrink: 0; }
+  .c1 .timeline-track { flex: 1; height: 26px; background: var(--surface-soft); border-radius: 8px; position: relative; overflow: hidden; }
+  .c1 .timeline-bar { position: absolute; top: 3px; bottom: 3px; border-radius: 6px; display: flex; align-items: center; padding: 0 10px; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+  .c1 .lab-tile { flex: 1; min-width: 130px; background: var(--surface-soft); border-radius: 16px; padding: 14px; }
+  .c1 .lab-tile .swatch { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 700; margin-bottom: 8px; }
+
+  /* c1 inventory */
+  .c1 .inv-toolbar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+  .c1 .inv-search { flex: 1; min-width: 220px; background: var(--surface); border-radius: 14px; padding: 11px 16px; font-size: 13.5px; color: var(--ink-faint); box-shadow: inset 0 0 0 1px var(--border); }
+  .c1 .chip { background: var(--surface); border-radius: 999px; padding: 8px 15px; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); box-shadow: inset 0 0 0 1px var(--border); }
+  .c1 .chip.on { background: var(--accent); color: #fff; box-shadow: none; }
+  .c1 .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+  .c1 .unit-card { background: var(--surface); border-radius: 18px; padding: 16px 16px 15px 18px; position: relative; overflow: hidden; box-shadow: 0 1px 0 rgba(46,51,36,0.04), 0 10px 22px -18px rgba(46,51,36,0.35); }
+  .c1 .unit-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; }
+  .c1 .unit-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .c1 .unit-id { font-family: 'Fraunces', serif; font-size: 17px; font-weight: 600; }
+  .c1 .unit-room { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
+  .c1 .unit-occupant { font-size: 13.5px; font-weight: 600; margin-bottom: 1px; }
+  .c1 .unit-pi { font-size: 12px; color: var(--ink-soft); margin-bottom: 10px; }
+  .c1 .unit-meta { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .c1 .unit-meta .sep { color: var(--ink-faint); }
+  .c1 .unit-status { position: absolute; top: 14px; right: 14px; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+
+  /* ======================================================================================================
+     CONCEPT 2 — "BENCH SHEET"
+     Calm, clinical, worksheet-like. Muted steel-blue, Libre Franklin + Source Sans, flat rules not shadows.
+     Inventory declutter strategy: switch grid-of-cards to an aligned, scannable list/table.
+     ====================================================================================================== */
+  .c2 {
+    --bg: #F1F3F4; --surface: #FFFFFF; --surface-soft: #E9EDEF; --border: #D5DBDD;
+    --ink: #212B2F; --ink-soft: #5B6A70; --ink-faint: #93A0A4;
+    --accent: #3D6E8C; --accent-soft: #DDE8EE; --accent-ink: #24475C;
+    --free: #3F8F6B; --free-soft: #DFF0E7;
+    --occupied: #3D6E8C; --occupied-soft: #DDE8EE;
+    --warning: #B5842B; --warning-soft: #F2E7D2;
+    --overdue: #AF473E; --overdue-soft: #F3E0DD;
+    --service: #7C878B; --service-soft: #E7EAEB;
+    font-family: 'Source Sans 3', sans-serif; background: var(--bg); color: var(--ink);
+  }
+  .c2 .display { font-family: 'Libre Franklin', sans-serif; letter-spacing: -.01em; }
+  .c2 .mono { font-family: 'IBM Plex Mono', monospace; }
+  .c2 .wrap { max-width: 1280px; margin: 0 auto; padding: 0; }
+  .c2 .masthead { background: var(--surface); border-bottom: 1px solid var(--border); padding: 20px 32px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+  .c2 .masthead .kicker { font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+  .c2 .masthead h1 { font-family: 'Libre Franklin', sans-serif; font-size: 23px; font-weight: 700; }
+  .c2 .masthead .datestamp { font-size: 12.5px; color: var(--ink-faint); font-family: 'IBM Plex Mono', monospace; }
+  .c2 .stat-strip { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .c2 .stat { flex: 1; padding: 16px 28px; border-right: 1px solid var(--border); }
+  .c2 .stat:last-child { border-right: none; }
+  .c2 .stat .label { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 5px; }
+  .c2 .stat .value { font-family: 'Libre Franklin', sans-serif; font-size: 26px; font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
+  .c2 .stat .value small { font-family: 'Source Sans 3', sans-serif; font-size: 12.5px; font-weight: 500; color: var(--ink-soft); }
+  .c2 .body-pad { padding: 24px 32px 60px; }
+  .c2 .section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 18px; }
+  .c2 .section-head { padding: 13px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .c2 .section-head h3 { font-family: 'Libre Franklin', sans-serif; font-size: 13.5px; font-weight: 700; }
+  .c2 .section-body { padding: 16px 18px; }
+  .c2 .cols { display: grid; grid-template-columns: 1fr 1.5fr; gap: 18px; }
+  .c2 .row-line { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .c2 .row-line:last-child { border-bottom: none; }
+  .c2 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .c2 .timeline-grid { background: repeating-linear-gradient(90deg, transparent, transparent calc(12.5% - 1px), var(--border) calc(12.5% - 1px), var(--border) 12.5%); border: 1px solid var(--border); border-radius: 4px; padding: 12px; }
+  .c2 .t-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 11.5px; }
+  .c2 .t-label { width: 78px; flex-shrink: 0; color: var(--ink-soft); font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; }
+  .c2 .t-track { flex: 1; height: 18px; position: relative; }
+  .c2 .t-bar { position: absolute; top: 1px; bottom: 1px; border-radius: 2px; display: flex; align-items: center; padding: 0 6px; font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+  .c2 .lab-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .c2 .lab-row:last-child { border-bottom: none; }
+
+  /* c2 inventory — table */
+  .c2 .inv-toolbar { display: flex; gap: 10px; margin: 0 0 16px; flex-wrap: wrap; align-items: center; }
+  .c2 .inv-search { flex: 1; min-width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 9px 13px; font-size: 13px; color: var(--ink-faint); }
+  .c2 .chip { background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 6px 12px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+  .c2 .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .c2 table.inv-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .c2 .inv-table thead th { text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface-soft); }
+  .c2 .inv-table tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .c2 .inv-table tbody tr:hover { background: var(--surface-soft); }
+  .c2 .inv-table .id-cell { font-family: 'IBM Plex Mono', monospace; font-weight: 600; }
+  .c2 .inv-table .room-cell { color: var(--ink-soft); }
+  .c2 .inv-table .meta-icons { display: flex; gap: 12px; color: var(--ink-soft); font-size: 12px; }
+  .c2 .status-pill-flat { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; }
+
+  /* ======================================================================================================
+     CONCEPT 3 — "GREENHOUSE TILES"
+     Friendly, colourful, big touch targets. Rounded shapes throughout. Quicksand + Nunito.
+     Inventory declutter strategy: progressive disclosure — glance state, tap for detail.
+     ====================================================================================================== */
+  .c3 {
+    --bg: #F5FAF4; --surface: #FFFFFF; --surface-soft: #EBF6EE; --border: #DCEEE0;
+    --ink: #26332C; --ink-soft: #62766A; --ink-faint: #99AEA2;
+    --accent: #45A579; --accent-soft: #DEF3E7; --accent-ink: #2A7654;
+    --sand: #E3A857; --sand-soft: #FBEEDC; --sand-ink: #9C6D28;
+    --free: #45A579; --free-soft: #DEF3E7;
+    --occupied: #5C8FDB; --occupied-soft: #E4ECFB;
+    --warning: #E3A857; --warning-soft: #FBEEDC;
+    --overdue: #E36B52; --overdue-soft: #FCE6E0;
+    --service: #A6A08F; --service-soft: #EFEDE6;
+    font-family: 'Nunito', sans-serif; background: var(--bg); color: var(--ink);
+  }
+  .c3 .display { font-family: 'Quicksand', sans-serif; }
+  .c3 .wrap { max-width: 1280px; margin: 0 auto; padding: 32px 28px 80px; }
+  .c3 .topline { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
+  .c3 .topline h1 { font-family: 'Quicksand', sans-serif; font-size: 24px; font-weight: 700; }
+  .c3 .topline p { font-size: 13.5px; color: var(--ink-soft); margin-top: 2px; }
+  .c3 .hero-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .c3 .big-tile { border-radius: 28px; padding: 22px; position: relative; overflow: hidden; }
+  .c3 .ring-tile { background: linear-gradient(135deg, #55BC8C, #2E8F62); color: #fff; display: flex; align-items: center; gap: 16px; }
+  .c3 .ring-tile .ring { position: relative; width: 74px; height: 74px; flex-shrink: 0; }
+  .c3 .ring-tile .ring svg { transform: rotate(-90deg); }
+  .c3 .ring-tile .ring .num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: 'Quicksand', sans-serif; font-weight: 700; font-size: 17px; }
+  .c3 .alert-tile { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+  .c3 .alert-tile .n { font-family: 'Quicksand', sans-serif; font-size: 30px; font-weight: 700; }
+  .c3 .alert-tile .l { font-size: 12.5px; font-weight: 700; }
+  .c3 .alert-tile .s { font-size: 11.5px; opacity: .85; }
+  .c3 .card { background: var(--surface); border-radius: 26px; box-shadow: 0 14px 30px -22px rgba(38,51,44,0.35); }
+  .c3 .cols { display: grid; grid-template-columns: 1fr 1.3fr; gap: 18px; }
+  .c3 .card-pad { padding: 22px; margin-bottom: 18px; }
+  .c3 .section-title { font-family: 'Quicksand', sans-serif; font-size: 16.5px; font-weight: 700; margin-bottom: 14px; }
+  .c3 .activity-pill { display: flex; align-items: center; gap: 12px; background: var(--surface-soft); border-radius: 18px; padding: 10px 14px; margin-bottom: 8px; }
+  .c3 .activity-pill .ic { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+  .c3 .tl-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .c3 .tl-tab { padding: 7px 15px; border-radius: 999px; font-size: 12.5px; font-weight: 700; background: var(--surface-soft); color: var(--ink-soft); }
+  .c3 .tl-tab.on { background: var(--accent); color: #fff; }
+  .c3 .tl-row { display: flex; align-items: center; gap: 12px; background: var(--surface-soft); border-radius: 16px; padding: 10px 14px; margin-bottom: 8px; }
+  .c3 .tl-row .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .c3 .tl-row .who { font-weight: 700; font-size: 13px; flex: 1; }
+  .c3 .tl-row .when { font-size: 11.5px; color: var(--ink-soft); }
+  .c3 .lab-pill { border-radius: 20px; padding: 14px; flex: 1; min-width: 128px; }
+
+  /* c3 inventory — progressive disclosure */
+  .c3 .inv-toolbar { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; }
+  .c3 .inv-search { flex: 1; min-width: 220px; background: var(--surface); border-radius: 16px; padding: 11px 16px; font-size: 13.5px; color: var(--ink-faint); box-shadow: 0 6px 16px -12px rgba(38,51,44,0.3); }
+  .c3 .chip { background: var(--surface); border-radius: 999px; padding: 8px 15px; font-size: 12.5px; font-weight: 700; color: var(--ink-soft); box-shadow: 0 6px 16px -12px rgba(38,51,44,0.3); }
+  .c3 .chip.on { background: var(--accent); color: #fff; box-shadow: none; }
+  .c3 .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+  .c3 .unit-tile { border-radius: 24px; padding: 16px; cursor: pointer; transition: all .18s ease; position: relative; }
+  .c3 .unit-tile .u-id { font-family: 'Quicksand', sans-serif; font-size: 18px; font-weight: 700; }
+  .c3 .unit-tile .u-room { font-size: 11.5px; font-weight: 600; opacity: .8; margin-top: 1px; margin-bottom: 10px; }
+  .c3 .unit-tile .u-avatar { width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.6); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+  .c3 .unit-tile .u-name { font-size: 12.5px; font-weight: 700; }
+  .c3 .unit-tile .u-tap { font-size: 10.5px; font-weight: 700; opacity: .65; margin-top: 8px; }
+  .c3 .unit-tile.expanded { grid-column: span 2; }
+  .c3 .unit-detail { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.4); font-size: 11.5px; display: none; }
+  .c3 .unit-tile.expanded .unit-detail { display: block; }
+  .c3 .unit-detail .meta-line { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; }
+
+  /* small icon font substitute using unicode/emoji-free glyphs via CSS shapes kept minimal */
+  .icon-leaf::before { content: "🌱"; }
+  .icon-bug::before { content: "🪲"; }
+  .icon-temp::before { content: "🌡"; }
+  .icon-drop::before { content: "💧"; }
+  .icon-sun::before { content: "☀"; }
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <span class="title">Growth Space Admin — Design Concepts</span>
+  <div class="group" id="pageToggle">
+    <button data-page="dashboard" class="active">Dashboard</button>
+    <button data-page="inventory">Inventory</button>
+  </div>
+  <div class="divider"></div>
+  <div class="group" id="conceptToggle">
+    <button data-concept="1" class="active">1 · Potting Shed</button>
+    <button data-concept="2">2 · Bench Sheet</button>
+    <button data-concept="3">3 · Greenhouse Tiles</button>
+  </div>
+  <div class="divider"></div>
+  <div class="concept-note" id="conceptNote"></div>
+</div>
+
+<!-- ================================================================== DASHBOARD — CONCEPT 1 ================================================================== -->
+<div class="page-view active" data-page-view="dashboard">
+<div class="panel active c1" data-panel="1">
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <h1 class="display">Good afternoon, team.</h1>
+        <p>78 of 82 spaces are in use across the floors. Three returns are overdue and four requests are waiting on you.</p>
+      </div>
+      <div class="ring">
+        <svg width="96" height="96" viewBox="0 0 96 96">
+          <circle cx="48" cy="48" r="40" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="10"/>
+          <circle cx="48" cy="48" r="40" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-dasharray="251" stroke-dashoffset="55"/>
+        </svg>
+        <div class="num"><b>78%</b><span>IN USE</span></div>
+      </div>
+    </div>
+
+    <div class="alerts">
+      <div class="alert-tag"><span class="alert-dot" style="background:var(--overdue)"></span>3 overdue returns — worth a look</div>
+      <div class="alert-tag"><span class="alert-dot" style="background:var(--warning)"></span>4 requests waiting for review</div>
+    </div>
+
+    <div class="cols">
+      <div>
+        <div class="card card-pad">
+          <div class="section-title">Recent activity</div>
+          <div class="activity-row">
+            <div class="activity-icon" style="background:var(--occupied-soft);color:var(--occupied)">📦</div>
+            <div><div style="font-weight:600;font-size:13.5px">Elin Larsen booked GC-032</div><div style="font-size:11.5px;color:var(--ink-faint)">23/08/2026 · PI: Tomas Novak</div></div>
+          </div>
+          <div class="activity-row">
+            <div class="activity-icon" style="background:var(--free-soft);color:var(--free)">✓</div>
+            <div><div style="font-weight:600;font-size:13.5px">Requisition approved — Wheat vernalisation series</div><div style="font-size:11.5px;color:var(--ink-faint)">22/08/2026 · Karolina Nowak</div></div>
+          </div>
+          <div class="activity-row">
+            <div class="activity-icon" style="background:var(--service-soft);color:var(--service)">🔧</div>
+            <div><div style="font-weight:600;font-size:13.5px">GC-014 serviced by contractor R. Adeyemi</div><div style="font-size:11.5px;color:var(--ink-faint)">21/08/2026 · Filter clean, fan bearing checked</div></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card card-pad">
+          <div class="section-title">Booking timeline</div>
+          <div class="timeline-row"><span class="timeline-label">Level 1</span>
+            <div class="timeline-track"><div class="timeline-bar" style="left:8%;width:38%;background:var(--free-soft);color:var(--free-ink,var(--free))">Alejandro Reyes</div></div>
+          </div>
+          <div class="timeline-row"><span class="timeline-label">Level 2a</span>
+            <div class="timeline-track"><div class="timeline-bar" style="left:20%;width:22%;background:var(--overdue-soft);color:var(--overdue)">Hana Ibrahim</div></div>
+          </div>
+          <div class="timeline-row"><span class="timeline-label">Level 3</span>
+            <div class="timeline-track"><div class="timeline-bar" style="left:40%;width:30%;background:var(--warning-soft);color:var(--warning)">Paulo Duarte</div></div>
+          </div>
+        </div>
+        <div class="card card-pad">
+          <div class="section-title">Lab groups</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="lab-tile"><div class="swatch" style="background:#3B6EA5">OKAF</div>PI: James Okafor<div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;margin-top:2px">9 units</div></div>
+            <div class="lab-tile"><div class="swatch" style="background:#8E5FB0">PETR</div>PI: Elena Petrova<div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;margin-top:2px">7 units</div></div>
+            <div class="lab-tile"><div class="swatch" style="background:#2F8F5B">CHEN</div>PI: Wei Chen<div style="font-family:'Fraunces',serif;font-weight:600;font-size:16px;margin-top:2px">6 units</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ================================================================== DASHBOARD — CONCEPT 2 ================================================================== -->
+<div class="page-view" data-page-view="dashboard">
+<div class="panel c2" data-panel="2">
+  <div class="wrap">
+    <div class="masthead">
+      <div><div class="kicker">Growth Space Admin</div><h1 class="display">Facilities Dashboard</h1></div>
+      <div class="datestamp">TUE 25/08/2026 · DAY SHIFT</div>
+    </div>
+    <div class="stat-strip">
+      <div class="stat"><div class="label">Utilisation</div><div class="value">78<small>%</small></div></div>
+      <div class="stat"><div class="label">Occupied</div><div class="value">78<small>of 82</small></div></div>
+      <div class="stat"><div class="label">Overdue returns</div><div class="value" style="color:var(--overdue)">3</div></div>
+      <div class="stat"><div class="label">Pending requisitions</div><div class="value" style="color:var(--warning)">4</div></div>
+    </div>
+    <div class="body-pad">
+      <div class="cols">
+        <div>
+          <div class="section">
+            <div class="section-head"><h3>Recent activity</h3><span style="font-size:11px;color:var(--ink-faint)">Last 24h</span></div>
+            <div class="section-body">
+              <div class="row-line"><span class="status-dot" style="background:var(--occupied)"></span>Elin Larsen booked <span class="mono">GC-032</span></div>
+              <div class="row-line"><span class="status-dot" style="background:var(--free)"></span>Requisition approved — Wheat vernalisation series</div>
+              <div class="row-line"><span class="status-dot" style="background:var(--service)"></span><span class="mono">GC-014</span> serviced by contractor R. Adeyemi</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="section">
+            <div class="section-head"><h3>Booking timeline</h3><span style="font-size:11px;color:var(--ink-faint)">Today → +90d</span></div>
+            <div class="section-body">
+              <div class="timeline-grid">
+                <div class="t-row"><span class="t-label">L1</span><div class="t-track"><div class="t-bar" style="left:8%;width:38%;background:var(--free-soft);color:var(--free)">A. Reyes</div></div></div>
+                <div class="t-row"><span class="t-label">L2A</span><div class="t-track"><div class="t-bar" style="left:20%;width:22%;background:var(--overdue-soft);color:var(--overdue)">H. Ibrahim</div></div></div>
+                <div class="t-row"><span class="t-label">L3</span><div class="t-track"><div class="t-bar" style="left:40%;width:30%;background:var(--warning-soft);color:var(--warning)">P. Duarte</div></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-head"><h3>Lab groups</h3></div>
+            <div class="section-body">
+              <div class="lab-row"><span>PI: James Okafor</span><b>9 units</b></div>
+              <div class="lab-row"><span>PI: Elena Petrova</span><b>7 units</b></div>
+              <div class="lab-row"><span>PI: Wei Chen</span><b>6 units</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ================================================================== DASHBOARD — CONCEPT 3 ================================================================== -->
+<div class="page-view" data-page-view="dashboard">
+<div class="panel c3" data-panel="3">
+  <div class="wrap">
+    <div class="topline">
+      <div><h1 class="display">Dashboard</h1><p>Here's what's happening across the growth floors today.</p></div>
+    </div>
+    <div class="hero-grid">
+      <div class="big-tile ring-tile">
+        <div class="ring">
+          <svg width="74" height="74" viewBox="0 0 74 74">
+            <circle cx="37" cy="37" r="30" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="9"/>
+            <circle cx="37" cy="37" r="30" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-dasharray="188" stroke-dashoffset="41"/>
+          </svg>
+          <div class="num">78%</div>
+        </div>
+        <div><div style="font-weight:700;font-size:14px">Space in use</div><div style="font-size:12px;opacity:.85">78 of 82 units</div></div>
+      </div>
+      <div class="big-tile alert-tile" style="background:var(--overdue-soft);color:var(--overdue-ink,#8f3e2c)">
+        <div class="n" style="color:var(--overdue)">3</div>
+        <div class="l">Overdue returns</div>
+        <div class="s">Worth a quick look</div>
+      </div>
+      <div class="big-tile alert-tile" style="background:var(--warning-soft)">
+        <div class="n" style="color:var(--warning-ink,#9c6d1f)">4</div>
+        <div class="l" style="color:#9c6d1f">Pending requests</div>
+        <div class="s" style="color:#9c6d1f">Ready for review</div>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div>
+        <div class="card card-pad">
+          <div class="section-title">Recent activity</div>
+          <div class="activity-pill"><div class="ic" style="background:var(--occupied-soft);color:var(--occupied)">📦</div><div><div style="font-weight:700;font-size:13px">Elin Larsen booked GC-032</div><div style="font-size:11px;color:var(--ink-soft)">23/08/2026</div></div></div>
+          <div class="activity-pill"><div class="ic" style="background:var(--free-soft);color:var(--free)">✓</div><div><div style="font-weight:700;font-size:13px">Requisition approved</div><div style="font-size:11px;color:var(--ink-soft)">Wheat vernalisation series</div></div></div>
+          <div class="activity-pill"><div class="ic" style="background:var(--service-soft);color:var(--service)">🔧</div><div><div style="font-weight:700;font-size:13px">GC-014 serviced</div><div style="font-size:11px;color:var(--ink-soft)">by contractor R. Adeyemi</div></div></div>
+        </div>
+      </div>
+      <div>
+        <div class="card card-pad">
+          <div class="section-title">Booking timeline</div>
+          <div class="tl-tabs"><span class="tl-tab on">Today</span><span class="tl-tab">This week</span><span class="tl-tab">Later</span></div>
+          <div class="tl-row"><span class="dot" style="background:var(--free)"></span><span class="who">Alejandro Reyes · GC-041</span><span class="when">ends 12/10</span></div>
+          <div class="tl-row"><span class="dot" style="background:var(--overdue)"></span><span class="who">Hana Ibrahim · RTR-03</span><span class="when">3d overdue</span></div>
+          <div class="tl-row"><span class="dot" style="background:var(--warning)"></span><span class="who">Paulo Duarte · GC-019</span><span class="when">ends in 2d</span></div>
+        </div>
+        <div class="card card-pad">
+          <div class="section-title">Lab groups</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="lab-pill" style="background:#E4ECFB"><div style="font-weight:700;font-size:13px">PI: James Okafor</div><div class="display" style="font-size:18px;font-weight:700;margin-top:4px">9 units</div></div>
+            <div class="lab-pill" style="background:#F3E6FB"><div style="font-weight:700;font-size:13px">PI: Elena Petrova</div><div class="display" style="font-size:18px;font-weight:700;margin-top:4px">7 units</div></div>
+            <div class="lab-pill" style="background:var(--free-soft)"><div style="font-weight:700;font-size:13px">PI: Wei Chen</div><div class="display" style="font-size:18px;font-weight:700;margin-top:4px">6 units</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ================================================================== INVENTORY — CONCEPT 1 ================================================================== -->
+<div class="page-view" data-page-view="inventory">
+<div class="panel c1" data-panel="1">
+  <div class="wrap">
+    <h1 class="display" style="font-size:24px;font-weight:500;margin-bottom:4px">Inventory</h1>
+    <p style="font-size:13px;color:var(--ink-soft);margin-bottom:20px">82 growth cabinets & Reftech rooms across 5 floors</p>
+    <div class="inv-toolbar">
+      <div class="inv-search">Search by ID, room, researcher, or PI…</div>
+      <div class="chip on">All levels</div>
+      <div class="chip">Level 1</div>
+      <div class="chip">Level 2a</div>
+      <div class="chip">Free</div>
+      <div class="chip">Overdue</div>
+    </div>
+    <p style="font-size:11.5px;color:var(--ink-faint);margin-bottom:14px">A coloured edge shows status at a glance — details are one calm line, not a stack of boxes.</p>
+    <div class="inv-grid">
+      <div class="unit-card"><div style="position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--free)"></div>
+        <div class="unit-top"><div><div class="unit-id">GC-041</div><div class="unit-room">Level 1 · Room 1.09</div></div><span class="unit-status" style="background:var(--free-soft);color:var(--free)">Free</span></div>
+        <div class="unit-meta"><span class="icon-leaf"></span> Plant Sciences <span class="sep">·</span> Conviron E-15</div>
+      </div>
+      <div class="unit-card"><div style="position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--occupied)"></div>
+        <div class="unit-top"><div><div class="unit-id">GC-032</div><div class="unit-room">Level 2a · Room 2A.02</div></div><span class="unit-status" style="background:var(--occupied-soft);color:var(--occupied)">Occupied</span></div>
+        <div class="unit-occupant">Elin Larsen</div><div class="unit-pi">PI: Tomas Novak</div>
+        <div class="unit-meta"><span class="icon-temp"></span> 21°C <span class="sep">·</span> <span class="icon-drop"></span> 58% <span class="sep">·</span> <span class="icon-sun"></span> 16/8h</div>
+      </div>
+      <div class="unit-card"><div style="position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--overdue)"></div>
+        <div class="unit-top"><div><div class="unit-id">RTR-03</div><div class="unit-room">Level 2a · Reftech 2A-B</div></div><span class="unit-status" style="background:var(--overdue-soft);color:var(--overdue)">3d overdue</span></div>
+        <div class="unit-occupant">Hana Ibrahim</div><div class="unit-pi">PI: Yousef Al-Farsi</div>
+        <div class="unit-meta"><span class="icon-bug"></span> Insect Sciences <span class="sep">·</span> Ended 22/08/2026</div>
+      </div>
+      <div class="unit-card"><div style="position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--warning)"></div>
+        <div class="unit-top"><div><div class="unit-id">GC-019</div><div class="unit-room">Level 3 · Room 3.06</div></div><span class="unit-status" style="background:var(--warning-soft);color:var(--warning)">Ends in 2d</span></div>
+        <div class="unit-occupant">Paulo Duarte</div><div class="unit-pi">PI: Sofia Martins</div>
+        <div class="unit-meta"><span class="icon-temp"></span> 25°C <span class="sep">·</span> <span class="icon-drop"></span> 65% <span class="sep">·</span> <span class="icon-sun"></span> 8/16h</div>
+      </div>
+      <div class="unit-card"><div style="position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--service)"></div>
+        <div class="unit-top"><div><div class="unit-id">GC-014</div><div class="unit-room">Level 1 · Room 1.04</div></div><span class="unit-status" style="background:var(--service-soft);color:var(--service)">Out of service</span></div>
+        <div class="unit-meta">Serviced 21/08/2026 <span class="sep">·</span> Contractor R. Adeyemi</div>
+      </div>
+      <div class="unit-card"><div style="position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--free)"></div>
+        <div class="unit-top"><div><div class="unit-id">GC-008</div><div class="unit-room">LG · Room LG.03</div></div><span class="unit-status" style="background:var(--free-soft);color:var(--free)">Free</span></div>
+        <div class="unit-meta"><span class="icon-leaf"></span> Plant Sciences <span class="sep">·</span> Snijders GC-8</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ================================================================== INVENTORY — CONCEPT 2 ================================================================== -->
+<div class="page-view" data-page-view="inventory">
+<div class="panel c2" data-panel="2">
+  <div class="wrap">
+    <div class="masthead">
+      <div><div class="kicker">82 units · 5 floors</div><h1 class="display">Inventory</h1></div>
+    </div>
+    <div class="body-pad" style="padding-top:20px">
+      <div class="inv-toolbar">
+        <div class="inv-search">Search by ID, room, researcher, or PI…</div>
+        <div class="chip on">All levels</div>
+        <div class="chip">Cabinets</div>
+        <div class="chip">Reftech</div>
+        <div class="chip">Overdue</div>
+      </div>
+      <p style="font-size:11.5px;color:var(--ink-faint);margin:-8px 0 14px">List view trades card decoration for aligned columns — faster to scan a whole floor at once.</p>
+      <table class="inv-table">
+        <thead><tr><th></th><th>ID</th><th>Room</th><th>Occupant</th><th>PI</th><th>Conditions</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><span class="status-dot" style="background:var(--free)"></span></td><td class="id-cell">GC-041</td><td class="room-cell">L1 · 1.09</td><td>—</td><td>—</td><td class="meta-icons">—</td><td><span class="status-pill-flat" style="color:var(--free)">Free</span></td></tr>
+          <tr><td><span class="status-dot" style="background:var(--occupied)"></span></td><td class="id-cell">GC-032</td><td class="room-cell">L2A · 2A.02</td><td>Elin Larsen</td><td>PI: Tomas Novak</td><td class="meta-icons"><span>21°C</span><span>58%</span><span>16/8h</span></td><td><span class="status-pill-flat" style="color:var(--occupied)">Occupied</span></td></tr>
+          <tr><td><span class="status-dot" style="background:var(--overdue)"></span></td><td class="id-cell">RTR-03</td><td class="room-cell">L2A · 2A-B</td><td>Hana Ibrahim</td><td>PI: Yousef Al-Farsi</td><td class="meta-icons">Ended 22/08</td><td><span class="status-pill-flat" style="color:var(--overdue)">3d overdue</span></td></tr>
+          <tr><td><span class="status-dot" style="background:var(--warning)"></span></td><td class="id-cell">GC-019</td><td class="room-cell">L3 · 3.06</td><td>Paulo Duarte</td><td>PI: Sofia Martins</td><td class="meta-icons"><span>25°C</span><span>65%</span><span>8/16h</span></td><td><span class="status-pill-flat" style="color:var(--warning)">Ends in 2d</span></td></tr>
+          <tr><td><span class="status-dot" style="background:var(--service)"></span></td><td class="id-cell">GC-014</td><td class="room-cell">L1 · 1.04</td><td>—</td><td>—</td><td class="meta-icons">Serviced 21/08</td><td><span class="status-pill-flat" style="color:var(--service)">Out of service</span></td></tr>
+          <tr><td><span class="status-dot" style="background:var(--free)"></span></td><td class="id-cell">GC-008</td><td class="room-cell">LG · LG.03</td><td>—</td><td>—</td><td class="meta-icons">—</td><td><span class="status-pill-flat" style="color:var(--free)">Free</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ================================================================== INVENTORY — CONCEPT 3 ================================================================== -->
+<div class="page-view" data-page-view="inventory">
+<div class="panel c3" data-panel="3">
+  <div class="wrap">
+    <div class="topline"><div><h1 class="display">Inventory</h1><p>82 growth cabinets & Reftech rooms across 5 floors</p></div></div>
+    <div class="inv-toolbar">
+      <div class="inv-search">Search by ID, room, researcher, or PI…</div>
+      <div class="chip on">All levels</div>
+      <div class="chip">Level 1</div>
+      <div class="chip">Free</div>
+      <div class="chip">Overdue</div>
+    </div>
+    <p style="font-size:11.5px;color:var(--ink-faint);margin:-6px 0 16px">Tap a tile to reveal its full detail — the grid stays calm until you need more.</p>
+    <div class="inv-grid" id="c3grid">
+      <div class="unit-tile" style="background:var(--free-soft)" onclick="this.classList.toggle('expanded')">
+        <div class="u-id" style="color:var(--accent-ink)">GC-041</div><div class="u-room" style="color:var(--accent-ink)">Level 1 · 1.09</div>
+        <div style="font-size:11px;font-weight:700;color:var(--free)">● Free</div>
+        <div class="u-tap" style="color:var(--accent-ink)">Tap for details</div>
+        <div class="unit-detail" style="color:var(--accent-ink)">Conviron E-15 · Plant Sciences<div class="meta-line"><span>4–30°C range</span><span>LED lighting</span></div></div>
+      </div>
+      <div class="unit-tile" style="background:var(--occupied-soft)" onclick="this.classList.toggle('expanded')">
+        <div class="u-avatar">EL</div>
+        <div class="u-id" style="color:#2d4d85">GC-032</div><div class="u-room" style="color:#2d4d85">Level 2a · 2A.02</div>
+        <div class="u-name" style="color:#2d4d85">Elin Larsen</div>
+        <div class="u-tap" style="color:#2d4d85">Tap for details</div>
+        <div class="unit-detail" style="color:#2d4d85">PI: Tomas Novak<div class="meta-line"><span>🌡 21°C</span><span>💧 58%</span><span>☀ 16/8h</span></div></div>
+      </div>
+      <div class="unit-tile" style="background:var(--overdue-soft)" onclick="this.classList.toggle('expanded')">
+        <div class="u-avatar">HI</div>
+        <div class="u-id" style="color:#963f2c">RTR-03</div><div class="u-room" style="color:#963f2c">Level 2a · 2A-B</div>
+        <div class="u-name" style="color:#963f2c">Hana Ibrahim · 3d overdue</div>
+        <div class="u-tap" style="color:#963f2c">Tap for details</div>
+        <div class="unit-detail" style="color:#963f2c">PI: Yousef Al-Farsi<div class="meta-line"><span>Ended 22/08/2026</span><span>Insect Sciences</span></div></div>
+      </div>
+      <div class="unit-tile" style="background:var(--warning-soft)" onclick="this.classList.toggle('expanded')">
+        <div class="u-avatar">PD</div>
+        <div class="u-id" style="color:#8f6421">GC-019</div><div class="u-room" style="color:#8f6421">Level 3 · 3.06</div>
+        <div class="u-name" style="color:#8f6421">Paulo Duarte · ends in 2d</div>
+        <div class="u-tap" style="color:#8f6421">Tap for details</div>
+        <div class="unit-detail" style="color:#8f6421">PI: Sofia Martins<div class="meta-line"><span>🌡 25°C</span><span>💧 65%</span><span>☀ 8/16h</span></div></div>
+      </div>
+      <div class="unit-tile" style="background:var(--service-soft)" onclick="this.classList.toggle('expanded')">
+        <div class="u-id" style="color:#5c574a">GC-014</div><div class="u-room" style="color:#5c574a">Level 1 · 1.04</div>
+        <div style="font-size:11px;font-weight:700;color:var(--service)">● Out of service</div>
+        <div class="u-tap" style="color:#5c574a">Tap for details</div>
+        <div class="unit-detail" style="color:#5c574a">Serviced 21/08/2026<div class="meta-line"><span>Contractor R. Adeyemi</span></div></div>
+      </div>
+      <div class="unit-tile" style="background:var(--free-soft)" onclick="this.classList.toggle('expanded')">
+        <div class="u-id" style="color:var(--accent-ink)">GC-008</div><div class="u-room" style="color:var(--accent-ink)">LG · LG.03</div>
+        <div style="font-size:11px;font-weight:700;color:var(--free)">● Free</div>
+        <div class="u-tap" style="color:var(--accent-ink)">Tap for details</div>
+        <div class="unit-detail" style="color:var(--accent-ink)">Snijders GC-8 · Plant Sciences<div class="meta-line"><span>4–30°C range</span><span>LED lighting</span></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+  const notes = {
+    "1": "Potting Shed — warm, tactile, human. Fraunces + Inter, moss/clay palette, nursery-label tags. Inventory: colour-edge stripe + one calm meta line instead of stacked stats.",
+    "2": "Bench Sheet — calm, clinical, worksheet-like. Libre Franklin + Source Sans, steel-blue, flat rules not shadows. Inventory: switched from cards to an aligned, scannable table.",
+    "3": "Greenhouse Tiles — friendly, colourful, big touch targets. Quicksand + Nunito, rounded shapes. Inventory: progressive disclosure — tap a tile to reveal full detail.",
+  };
+  let page = "dashboard", concept = "1";
+  function render() {
+    document.querySelectorAll('[data-page-view]').forEach(el => el.classList.toggle('active', el.dataset.pageView === page));
+    document.querySelectorAll('[data-page-view].active [data-panel]').forEach(el => el.classList.toggle('active', el.dataset.panel === concept));
+    document.querySelectorAll('#pageToggle button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+    document.querySelectorAll('#conceptToggle button').forEach(b => b.classList.toggle('active', b.dataset.concept === concept));
+    document.getElementById('conceptNote').textContent = notes[concept];
+  }
+  document.getElementById('pageToggle').addEventListener('click', e => {
+    if (e.target.dataset.page) { page = e.target.dataset.page; render(); }
+  });
+  document.getElementById('conceptToggle').addEventListener('click', e => {
+    if (e.target.dataset.concept) { concept = e.target.dataset.concept; render(); }
+  });
+  render();
+</script>
+</body>
+</html>

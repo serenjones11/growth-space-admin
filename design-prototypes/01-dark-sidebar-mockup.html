@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GrowthSpace — Facility Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sidebar-bg: #0E1A16;
+    --sidebar-hover: #16261F;
+    --sidebar-active: #163826;
+    --sidebar-text: #8FA39A;
+    --sidebar-text-dim: #5C6D65;
+    --green: #22C55E;
+    --green-dark: #16A34A;
+
+    --bg: #F3F5F4;
+    --surface: #FFFFFF;
+    --border: #E6EAE8;
+    --ink: #131A17;
+    --ink-soft: #66756E;
+    --ink-faint: #98A39D;
+
+    --chip-bg: #0F1D18;
+    --chip-temp: #4ADE80;
+    --chip-rh: #60A5FA;
+    --chip-cycle: #FBBF24;
+
+    --active: #16A34A; --active-soft: #DCFCE7;
+    --free: #64748B; --free-soft: #F1F5F3;
+    --warn: #B45309; --warn-soft: #FEF3C7;
+    --overdue: #DC2626; --overdue-soft: #FEE2E2;
+    --service: #475569; --service-soft: #E2E8F0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--ink); display: flex; min-height: 100vh; }
+  .display { font-family: 'Plus Jakarta Sans', sans-serif; }
+
+  /* ---------------- Sidebar ---------------- */
+  .sidebar { width: 264px; flex-shrink: 0; background: var(--sidebar-bg); min-height: 100vh; display: flex; flex-direction: column; padding: 26px 18px; position: sticky; top: 0; }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 26px; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 18px; }
+  .brand .icon { width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, #34D399, #16A34A); display: flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; }
+  .brand .name { color: #fff; font-weight: 800; font-size: 16.5px; letter-spacing: -0.01em; }
+  .brand .sub { color: var(--sidebar-text-dim); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; margin-top: 1px; }
+  .nav { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+  .nav a {
+    display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 11px; text-decoration: none;
+    color: var(--sidebar-text); font-weight: 600; font-size: 14px; cursor: pointer; transition: background .12s;
+  }
+  .nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .nav a.active { background: var(--sidebar-active); color: var(--green); }
+  .nav a .ic { width: 18px; text-align: center; font-size: 15px; flex-shrink: 0; }
+  .nav a .badge { margin-left: auto; background: #DC2626; color: #fff; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .sidebar-footer { color: var(--sidebar-text-dim); font-size: 11px; padding: 12px 8px 4px; border-top: 1px solid rgba(255,255,255,0.06); line-height: 1.4; }
+
+  /* ---------------- Main shell ---------------- */
+  main { flex: 1; padding: 34px 40px 70px; max-width: 1500px; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; flex-wrap: wrap; gap: 14px; }
+  .page-head h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
+  .page-head .sub { color: var(--ink-soft); font-size: 13.5px; margin-top: 4px; }
+  .btn { font-family: 'Inter', sans-serif; font-size: 13.5px; font-weight: 700; padding: 11px 18px; border-radius: 11px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); cursor: pointer; }
+  .btn.primary { background: var(--green-dark); border-color: var(--green-dark); color: #fff; }
+  .btn-row { display: flex; gap: 10px; flex-shrink: 0; }
+
+  /* ---------------- Shared: dark readout chips ---------------- */
+  .readout-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .readout-row.two { grid-template-columns: repeat(2, 1fr); }
+  .readout { background: var(--chip-bg); border-radius: 10px; padding: 9px 4px; text-align: center; }
+  .readout .lbl { color: #7C8C84; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; }
+  .readout .val { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 17px; margin-top: 3px; }
+
+  /* ---------------- Shared: tag pills ---------------- */
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .tag { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid transparent; }
+  .tag.plant { background: #ECFDF3; color: #15803D; border-color: #BBF0CE; }
+  .tag.insect { background: #FEF9EC; color: #92400E; border-color: #FBE7B8; }
+  .tag.co2 { background: #EFF6FF; color: #1D4ED8; border-color: #C7DDFB; }
+  .tag.dim { background: #F5F3FF; color: #6D28D9; border-color: #DDD6FE; }
+  .tag.neutral { background: #F1F5F3; color: #475569; border-color: #E2E8F0; }
+
+  /* ---------------- Shared: status pill ---------------- */
+  .status-pill { font-size: 11.5px; font-weight: 700; padding: 5px 12px; border-radius: 999px; flex-shrink: 0; }
+  .status-pill.active { background: var(--active-soft); color: var(--active); }
+  .status-pill.free { background: var(--free-soft); color: var(--free); }
+  .status-pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .status-pill.overdue { background: var(--overdue-soft); color: var(--overdue); }
+  .status-pill.service { background: var(--service-soft); color: var(--service); }
+
+  /* ============================================================ OVERVIEW / DASHBOARD ============================================================ */
+  .alert-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+  .alert-chip { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; padding: 9px 15px; border-radius: 11px; cursor: pointer; }
+  .alert-chip.od { background: var(--overdue-soft); color: var(--overdue); }
+  .alert-chip.pd { background: var(--warn-soft); color: var(--warn); }
+  .alert-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 22px; }
+  .kpi { background: var(--chip-bg); border-radius: 14px; padding: 16px 18px; }
+  .kpi .lbl { color: #7C8C84; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; }
+  .kpi .val { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 26px; margin-top: 5px; }
+  .kpi .sub { color: #7C8C84; font-size: 11px; margin-top: 2px; }
+
+  .dash-cols { display: grid; grid-template-columns: 1.35fr 1fr; gap: 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 22px; margin-bottom: 20px; }
+  .card h3 { font-size: 15px; font-weight: 800; margin-bottom: 3px; }
+  .card .card-sub { color: var(--ink-faint); font-size: 12px; margin-bottom: 16px; }
+
+  .level-bar { display: flex; align-items: center; gap: 9px; margin: 18px 0 10px; }
+  .level-bar:first-child { margin-top: 0; }
+  .level-bar .stripe { width: 4px; height: 15px; border-radius: 2px; background: var(--green-dark); }
+  .level-bar b { font-size: 13.5px; font-weight: 800; }
+  .level-bar span { color: var(--ink-faint); font-size: 12px; }
+
+  .tl-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .tl-label { width: 60px; flex-shrink: 0; font-size: 11px; font-weight: 700; color: var(--ink-soft); }
+  .tl-track { flex: 1; height: 24px; background: var(--bg); border-radius: 7px; position: relative; }
+  .tl-bar { position: absolute; top: 3px; bottom: 3px; border-radius: 5px; display: flex; align-items: center; padding: 0 9px; font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; cursor: pointer; }
+  .tl-hint { color: var(--ink-faint); font-size: 11px; margin-top: 10px; }
+
+  .activity-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .activity-row:last-child { border-bottom: none; }
+  .activity-ic { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+  .activity-title { font-size: 13px; font-weight: 700; }
+  .activity-sub { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
+
+  .lab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .lab-tile { background: var(--bg); border-radius: 13px; padding: 13px; }
+  .lab-tile .avatar { width: 28px; height: 28px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 10.5px; font-weight: 800; margin-bottom: 8px; }
+  .lab-tile .pi { font-size: 12px; font-weight: 700; }
+  .lab-tile .count { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; font-size: 16px; margin-top: 2px; }
+
+  .trend-wrap { display: flex; align-items: flex-end; gap: 12px; height: 130px; padding-top: 6px; }
+  .trend-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; }
+  .trend-bars { display: flex; flex-direction: column; justify-content: flex-end; width: 100%; height: 100px; border-radius: 5px 5px 0 0; overflow: hidden; }
+  .trend-bars div { width: 100%; }
+  .trend-month { font-size: 10.5px; color: var(--ink-faint); font-weight: 700; }
+  .trend-legend { display: flex; gap: 14px; margin-top: 14px; font-size: 11px; color: var(--ink-soft); }
+  .trend-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .trend-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+  /* ============================================================ INVENTORY / EQUIPMENT ============================================================ */
+  .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 13px; padding: 4px; margin-bottom: 18px; gap: 3px; }
+  .seg button { font-family: 'Inter', sans-serif; font-size: 13.5px; font-weight: 700; padding: 9px 16px; border-radius: 10px; border: none; background: transparent; color: var(--ink-soft); cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .seg button.on { background: var(--sidebar-bg); color: #fff; }
+  .seg button .count { font-size: 11px; font-weight: 800; padding: 1px 8px; border-radius: 999px; background: rgba(255,255,255,0.12); color: inherit; }
+  .seg button:not(.on) .count { background: var(--bg); color: var(--ink-faint); }
+
+  .toolbar { display: flex; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; }
+  .search-box { flex: 1; min-width: 260px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; font-size: 13.5px; color: var(--ink-faint); }
+  .dropdown { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; font-size: 13.5px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 10px; min-width: 130px; justify-content: space-between; }
+
+  .unit-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 6px; }
+  .unit-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 20px; }
+  .unit-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 3px; }
+  .unit-id { font-size: 17px; font-weight: 800; }
+  .unit-meta { color: var(--ink-soft); font-size: 12.5px; margin-bottom: 1px; }
+  .unit-room { color: var(--ink-faint); font-size: 12px; margin-bottom: 14px; }
+
+  .occ-box { border-radius: 13px; padding: 12px 14px; display: flex; align-items: center; gap: 11px; margin-top: 4px; }
+  .occ-box.active { background: var(--active-soft); }
+  .occ-box.warn { background: var(--warn-soft); }
+  .occ-box.overdue { background: var(--overdue-soft); }
+  .occ-avatar { width: 34px; height: 34px; border-radius: 10px; background: rgba(255,255,255,0.7); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; flex-shrink: 0; }
+  .occ-name { font-size: 13px; font-weight: 800; }
+  .occ-role { font-size: 11px; opacity: .8; font-weight: 600; }
+  .occ-until { font-size: 11px; opacity: .85; margin-top: 2px; font-weight: 700; }
+  .occ-box.active .occ-name, .occ-box.active .occ-until { color: #14532D; }
+  .occ-box.warn .occ-name, .occ-box.warn .occ-until { color: #78350F; }
+  .occ-box.overdue .occ-name, .occ-box.overdue .occ-until { color: #7F1D1D; }
+  .avail-bar { background: var(--free-soft); color: var(--ink-soft); border-radius: 13px; padding: 12px 14px; text-align: center; font-size: 12.5px; font-weight: 700; margin-top: 4px; }
+  .service-bar { background: var(--service-soft); color: var(--service); border-radius: 13px; padding: 12px 14px; font-size: 12.5px; font-weight: 700; margin-top: 4px; }
+  .more-bookings { font-size: 11px; font-weight: 700; color: var(--green-dark); margin-top: 8px; }
+</style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="icon">🌱</div>
+      <div><div class="name">GrowthSpace</div><div class="sub">FACILITIES &amp; ESTATES</div></div>
+    </div>
+    <nav class="nav">
+      <a class="nav-link active" data-target="overview"><span class="ic">◇</span> Overview</a>
+      <a class="nav-link" data-target="inventory"><span class="ic">▦</span> Equipment</a>
+      <a class="nav-link"><span class="ic">☰</span> Requisitions <span class="badge">4</span></a>
+      <a class="nav-link"><span class="ic">＋</span> Request Space</a>
+      <a class="nav-link"><span class="ic">◎</span> Admin</a>
+    </nav>
+    <div class="sidebar-footer">Plant &amp; Insect Growth<br>Facility Management System</div>
+  </aside>
+
+  <main>
+
+    <!-- ======================================================= OVERVIEW / DASHBOARD ======================================================= -->
+    <section class="page active" id="page-overview">
+      <div class="page-head">
+        <div><h1 class="display">Overview</h1><div class="sub">Tuesday, 25 August 2026 · 82 units across 5 floors</div></div>
+        <div class="btn-row"><button class="btn">Full-screen timeline</button></div>
+      </div>
+
+      <div class="alert-row">
+        <div class="alert-chip od"><span class="dot"></span> 3 overdue returns</div>
+        <div class="alert-chip pd"><span class="dot"></span> 4 pending requisitions</div>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi"><div class="lbl">UTILISATION</div><div class="val" style="color:var(--chip-temp)">78%</div><div class="sub">of 82 units</div></div>
+        <div class="kpi"><div class="lbl">OCCUPIED</div><div class="val" style="color:var(--chip-rh)">64</div><div class="sub">currently in use</div></div>
+        <div class="kpi"><div class="lbl">FREE NOW</div><div class="val" style="color:#fff">14</div><div class="sub">ready to book</div></div>
+        <div class="kpi"><div class="lbl">OVERDUE</div><div class="val" style="color:#F87171">3</div><div class="sub">need follow-up</div></div>
+        <div class="kpi"><div class="lbl">SERVICE DUE</div><div class="val" style="color:var(--chip-cycle)">6</div><div class="sub">within 21 days</div></div>
+      </div>
+
+      <div class="dash-cols">
+        <div>
+          <div class="card">
+            <h3 class="display">Booking timeline</h3>
+            <div class="card-sub">Today → +90 days, grouped by floor</div>
+
+            <div class="level-bar"><div class="stripe"></div><b>Level 1</b><span>3 bookings shown</span></div>
+            <div class="tl-row"><span class="tl-label">GC-041</span><div class="tl-track"><div class="tl-bar" style="left:6%;width:34%;background:var(--active-soft);color:var(--active)" title="Alejandro Reyes · PI: James Okafor · 26/08→12/10">Alejandro Reyes</div></div></div>
+            <div class="tl-row"><span class="tl-label">GC-014</span><div class="tl-track"><div class="tl-bar" style="left:44%;width:20%;background:var(--warn-soft);color:var(--warn)" title="Karolina Nowak · PI: Elena Petrova · ends in 2d">Karolina Nowak</div></div></div>
+
+            <div class="level-bar"><div class="stripe"></div><b>Level 2a</b><span>2 bookings shown</span></div>
+            <div class="tl-row"><span class="tl-label">RTR-03</span><div class="tl-track"><div class="tl-bar" style="left:2%;width:16%;background:var(--overdue-soft);color:var(--overdue)" title="Hana Ibrahim · PI: Yousef Al-Farsi · 3d overdue">Hana Ibrahim</div></div></div>
+            <div class="tl-row"><span class="tl-label">GC-032</span><div class="tl-track"><div class="tl-bar" style="left:20%;width:46%;background:var(--active-soft);color:var(--active)" title="Elin Larsen · PI: Tomas Novak · 18/08→05/12">Elin Larsen</div></div></div>
+
+            <div class="tl-hint">Hover a bar for booking details · click to open its requisition</div>
+          </div>
+
+          <div class="card">
+            <h3 class="display">Recent activity</h3>
+            <div class="card-sub">Bookings, requisitions, and servicing</div>
+            <div class="activity-row">
+              <div class="activity-ic" style="background:var(--active-soft);color:var(--active)">📦</div>
+              <div><div class="activity-title">Elin Larsen booked GC-032</div><div class="activity-sub">23/08/2026 · PI: Tomas Novak · Level 2a, Room 2A.02</div></div>
+            </div>
+            <div class="activity-row">
+              <div class="activity-ic" style="background:var(--active-soft);color:var(--active)">✓</div>
+              <div><div class="activity-title">Requisition approved — Wheat vernalisation series</div><div class="activity-sub">22/08/2026 · Karolina Nowak · assigned GC-014</div></div>
+            </div>
+            <div class="activity-row">
+              <div class="activity-ic" style="background:var(--service-soft);color:var(--service)">🔧</div>
+              <div><div class="activity-title">GC-014 serviced by contractor R. Adeyemi</div><div class="activity-sub">21/08/2026 · Filter clean, fan bearing checked</div></div>
+            </div>
+            <div class="activity-row">
+              <div class="activity-ic" style="background:var(--warn-soft);color:var(--warn)">📥</div>
+              <div><div class="activity-title">GC-081 added to inventory</div><div class="activity-sub">20/08/2026 · Growth cabinet · Level 3, Room 3.12</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h3 class="display">Lab groups</h3>
+            <div class="card-sub">Units currently held, by group</div>
+            <div class="lab-grid">
+              <div class="lab-tile"><div class="avatar" style="background:#3B6EA5">OK</div><div class="pi">PI: James Okafor</div><div class="count">9 units</div></div>
+              <div class="lab-tile"><div class="avatar" style="background:#8E5FB0">PE</div><div class="pi">PI: Elena Petrova</div><div class="count">7 units</div></div>
+              <div class="lab-tile"><div class="avatar" style="background:#2F8F5B">CH</div><div class="pi">PI: Wei Chen</div><div class="count">6 units</div></div>
+              <div class="lab-tile"><div class="avatar" style="background:#C97A2B">SI</div><div class="pi">PI: Amrit Singh</div><div class="count">5 units</div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="display">Occupancy trend</h3>
+            <div class="card-sub">Last 7 months</div>
+            <div class="trend-wrap">
+              <div class="trend-col"><div class="trend-bars" style="height:76px"><div style="height:60%;background:var(--chip-rh)"></div><div style="height:26%;background:#CBD5E1"></div><div style="height:14%;background:var(--chip-cycle)"></div></div><div class="trend-month">Feb</div></div>
+              <div class="trend-col"><div class="trend-bars" style="height:84px"><div style="height:64%;background:var(--chip-rh)"></div><div style="height:24%;background:#CBD5E1"></div><div style="height:12%;background:var(--chip-cycle)"></div></div><div class="trend-month">Mar</div></div>
+              <div class="trend-col"><div class="trend-bars" style="height:80px"><div style="height:60%;background:var(--chip-rh)"></div><div style="height:28%;background:#CBD5E1"></div><div style="height:12%;background:var(--chip-cycle)"></div></div><div class="trend-month">Apr</div></div>
+              <div class="trend-col"><div class="trend-bars" style="height:96px"><div style="height:70%;background:var(--chip-rh)"></div><div style="height:20%;background:#CBD5E1"></div><div style="height:10%;background:var(--chip-cycle)"></div></div><div class="trend-month">May</div></div>
+              <div class="trend-col"><div class="trend-bars" style="height:104px"><div style="height:74%;background:var(--chip-rh)"></div><div style="height:16%;background:#CBD5E1"></div><div style="height:10%;background:var(--chip-cycle)"></div></div><div class="trend-month">Jun</div></div>
+              <div class="trend-col"><div class="trend-bars" style="height:92px"><div style="height:68%;background:var(--chip-rh)"></div><div style="height:22%;background:#CBD5E1"></div><div style="height:10%;background:var(--chip-cycle)"></div></div><div class="trend-month">Jul</div></div>
+              <div class="trend-col"><div class="trend-bars" style="height:112px"><div style="height:78%;background:var(--chip-rh)"></div><div style="height:12%;background:#CBD5E1"></div><div style="height:10%;background:var(--chip-cycle)"></div></div><div class="trend-month">Aug</div></div>
+            </div>
+            <div class="trend-legend">
+              <span><i style="background:var(--chip-rh)"></i>Occupied</span>
+              <span><i style="background:#CBD5E1"></i>Free</span>
+              <span><i style="background:var(--chip-cycle)"></i>Service</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================= EQUIPMENT / INVENTORY ======================================================= -->
+    <section class="page" id="page-inventory">
+      <div class="page-head">
+        <div><h1 class="display">Inventory</h1><div class="sub">82 growth cabinets &amp; Reftech rooms across 5 floors</div></div>
+        <div class="btn-row"><button class="btn">Export CSV</button><button class="btn primary">+ Add Cabinet</button></div>
+      </div>
+
+      <div class="seg">
+        <button class="on">Growth Cabinets <span class="count">60</span></button>
+        <button>Reftech Rooms <span class="count">11</span></button>
+      </div>
+
+      <div class="toolbar">
+        <div class="search-box">Search by ID, room, researcher, or PI…</div>
+        <div class="dropdown">All Floors <span>▾</span></div>
+        <div class="dropdown">All Areas <span>▾</span></div>
+        <div class="dropdown">All Statuses <span>▾</span></div>
+      </div>
+
+      <div class="level-bar"><div class="stripe"></div><b>Level 1</b><span>3 cabinets</span></div>
+      <div class="unit-grid">
+
+        <div class="unit-card">
+          <div class="unit-top"><div class="unit-id">GC-041</div><span class="status-pill active">Active</span></div>
+          <div class="unit-meta">Conviron E-15</div>
+          <div class="unit-room">Level 1 · Room 1.09</div>
+          <div class="readout-row">
+            <div class="readout"><div class="lbl">TEMP</div><div class="val" style="color:var(--chip-temp)">21°C</div></div>
+            <div class="readout"><div class="lbl">RH</div><div class="val" style="color:var(--chip-rh)">58%</div></div>
+            <div class="readout"><div class="lbl">CYCLE</div><div class="val" style="color:var(--chip-cycle)">16/8h</div></div>
+          </div>
+          <div class="tags"><span class="tag plant">Plant Sciences</span><span class="tag neutral">4 shelves</span></div>
+          <div class="occ-box active">
+            <div class="occ-avatar">AR</div>
+            <div><div class="occ-name">Alejandro Reyes</div><div class="occ-role">PhD Student · PI: James Okafor</div><div class="occ-until">Until 12/10/2026</div></div>
+          </div>
+        </div>
+
+        <div class="unit-card">
+          <div class="unit-top"><div class="unit-id">GC-014</div><span class="status-pill warn">Ends in 2d</span></div>
+          <div class="unit-meta">Percival AR-66</div>
+          <div class="unit-room">Level 1 · Room 1.04</div>
+          <div class="readout-row">
+            <div class="readout"><div class="lbl">TEMP</div><div class="val" style="color:var(--chip-temp)">24°C</div></div>
+            <div class="readout"><div class="lbl">RH</div><div class="val" style="color:var(--chip-rh)">70%</div></div>
+            <div class="readout"><div class="lbl">CYCLE</div><div class="val" style="color:var(--chip-cycle)">8/16h</div></div>
+          </div>
+          <div class="tags"><span class="tag plant">Plant Sciences</span><span class="tag co2">CO₂</span><span class="tag dim">Dimming</span><span class="tag neutral">6 shelves</span></div>
+          <div class="occ-box warn">
+            <div class="occ-avatar">KN</div>
+            <div><div class="occ-name">Karolina Nowak</div><div class="occ-role">Postdoc · PI: Elena Petrova</div><div class="occ-until">Until 27/08/2026</div></div>
+          </div>
+        </div>
+
+        <div class="unit-card">
+          <div class="unit-top"><div class="unit-id">GC-008</div><span class="status-pill free">Free</span></div>
+          <div class="unit-meta">Snijders GC-8</div>
+          <div class="unit-room">Level 1 · Room 1.15</div>
+          <div class="readout-row two">
+            <div class="readout"><div class="lbl">TEMP RANGE</div><div class="val" style="font-size:14px;color:#fff">4–50°C</div></div>
+            <div class="readout"><div class="lbl">RH RANGE</div><div class="val" style="font-size:14px;color:#fff">20–95%</div></div>
+          </div>
+          <div class="tags"><span class="tag insect">Insect Sciences</span><span class="tag co2">CO₂</span><span class="tag neutral">8 shelves</span></div>
+          <div class="avail-bar">Free and ready to book</div>
+        </div>
+
+      </div>
+
+      <div class="level-bar"><div class="stripe"></div><b>Level 2a</b><span>2 cabinets, 1 Reftech room</span></div>
+      <div class="unit-grid">
+
+        <div class="unit-card">
+          <div class="unit-top"><div class="unit-id">GC-032</div><span class="status-pill active">Active</span></div>
+          <div class="unit-meta">BioChambers TC-30</div>
+          <div class="unit-room">Level 2a · Room 2A.02</div>
+          <div class="readout-row">
+            <div class="readout"><div class="lbl">TEMP</div><div class="val" style="color:var(--chip-temp)">22°C</div></div>
+            <div class="readout"><div class="lbl">RH</div><div class="val" style="color:var(--chip-rh)">65%</div></div>
+            <div class="readout"><div class="lbl">CYCLE</div><div class="val" style="color:var(--chip-cycle)">12/12h</div></div>
+          </div>
+          <div class="tags"><span class="tag plant">Plant Sciences</span><span class="tag neutral">5 shelves</span></div>
+          <div class="occ-box active">
+            <div class="occ-avatar">EL</div>
+            <div><div class="occ-name">Elin Larsen</div><div class="occ-role">Masters Student · PI: Tomas Novak</div><div class="occ-until">Until 05/12/2026</div></div>
+          </div>
+        </div>
+
+        <div class="unit-card">
+          <div class="unit-top"><div class="unit-id">GC-019</div><span class="status-pill service">Out of service</span></div>
+          <div class="unit-meta">Sanyo/Panasonic MLR-352H</div>
+          <div class="unit-room">Level 2a · Room 2A.11</div>
+          <div class="readout-row two">
+            <div class="readout"><div class="lbl">TEMP RANGE</div><div class="val" style="font-size:14px;color:#fff">4–40°C</div></div>
+            <div class="readout"><div class="lbl">RH RANGE</div><div class="val" style="font-size:14px;color:#fff">20–95%</div></div>
+          </div>
+          <div class="tags"><span class="tag plant">Plant Sciences</span><span class="tag neutral">4 shelves</span></div>
+          <div class="service-bar">Under maintenance · serviced 21/08/2026 by contractor R. Adeyemi</div>
+        </div>
+
+        <div class="unit-card">
+          <div class="unit-top"><div class="unit-id">RTR-03</div><span class="status-pill overdue">3d overdue</span></div>
+          <div class="unit-meta">Reftech Room · Percival I-36VL</div>
+          <div class="unit-room">Level 2a · Reftech Room 2A-B</div>
+          <div class="readout-row">
+            <div class="readout"><div class="lbl">TEMP</div><div class="val" style="color:var(--chip-temp)">25°C</div></div>
+            <div class="readout"><div class="lbl">RH</div><div class="val" style="color:var(--chip-rh)">60%</div></div>
+            <div class="readout"><div class="lbl">CYCLE</div><div class="val" style="color:var(--chip-cycle)">24h dark</div></div>
+          </div>
+          <div class="tags"><span class="tag insect">Insect Sciences</span></div>
+          <div class="occ-box overdue">
+            <div class="occ-avatar">HI</div>
+            <div><div class="occ-name">Hana Ibrahim</div><div class="occ-role">Technician · PI: Yousef Al-Farsi</div><div class="occ-until">Was due back 22/08/2026</div></div>
+          </div>
+          <div class="more-bookings">+2 more bookings ahead →</div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    document.querySelectorAll('.nav-link[data-target]').forEach(link => {
+      link.addEventListener('click', () => {
+        document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+        link.classList.add('active');
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById('page-' + link.dataset.target).classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>

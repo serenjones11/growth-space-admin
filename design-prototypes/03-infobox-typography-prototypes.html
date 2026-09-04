@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Info Box Typography — Prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F3F5F4; --surface: #FFFFFF; --surface-soft: #F1F5F3; --border: #E3E8E5;
+    --ink: #16211D; --ink-soft: #5C6D65; --ink-faint: #93A29B;
+    --accent-dark: #0F7A38; --accent-soft: #DCFCE7;
+    --occupied: #3B6EA5; --occupied-soft: #E4EDF6;
+    --sidebar-bg: #0E1A16;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--ink); }
+  .display { font-family: 'Plus Jakarta Sans', sans-serif; }
+
+  .chrome { position: sticky; top: 0; z-index: 50; background: var(--sidebar-bg); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .chrome .title { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 700; font-size: 14px; margin-right: 6px; }
+  .chrome .group { display: flex; gap: 2px; background: rgba(255,255,255,0.08); border-radius: 10px; padding: 3px; flex-wrap: wrap; }
+  .chrome button { font-family: 'Inter', sans-serif; font-size: 12.5px; font-weight: 600; padding: 7px 13px; border-radius: 8px; border: none; background: transparent; color: rgba(255,255,255,0.65); cursor: pointer; }
+  .chrome button.active { background: #fff; color: var(--sidebar-bg); }
+  .note { font-size: 12px; color: rgba(255,255,255,0.55); max-width: 480px; }
+
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 28px 80px; }
+  .context-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 8px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .stack { display: flex; flex-direction: column; gap: 26px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .card-outer { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 20px; }
+  .status-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-dark); }
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <span class="title">Info Box Typography — Prototypes</span>
+  <div class="group" id="tabs">
+    <button data-p="A" class="active">A · Soft Weight</button>
+    <button data-p="B">B · Sentence Case</button>
+    <button data-p="C">C · Compact Dense</button>
+    <button data-p="D">D · Definition List</button>
+  </div>
+  <span class="note" id="note"></span>
+</div>
+
+<div class="wrap">
+
+  <!-- =================== A: SOFT WEIGHT =================== -->
+  <div class="panel active" id="pA">
+    <style>
+      #pA .box { background: var(--surface-soft); border-radius: 18px; padding: 22px; }
+      #pA .box-title { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 18px; }
+      #pA .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px 20px; }
+      #pA .lbl { font-size: 10.5px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-faint); }
+      #pA .val { font-size: 13.5px; font-weight: 600; margin-top: 4px; color: var(--ink); }
+    </style>
+    <div class="stack">
+      <div>
+        <div class="context-label">Cabinet page — Asset Info</div>
+        <div class="card-outer">
+          <div class="box">
+            <div class="box-title">Asset Info</div>
+            <div class="grid">
+              <div><div class="lbl">Status</div><div class="val"><span class="status-pill">● Occupied</span></div></div>
+              <div><div class="lbl">Type</div><div class="val">Growth Cabinet</div></div>
+              <div><div class="lbl">Manufacturer</div><div class="val">Conviron</div></div>
+              <div><div class="lbl">Model</div><div class="val">E-15</div></div>
+              <div><div class="lbl">Serial No.</div><div class="val">SN-48213</div></div>
+              <div><div class="lbl">Location</div><div class="val">Level 1 · Room 1.09</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <div class="context-label">Requisition side panel — Requester</div>
+          <div class="card-outer">
+            <div class="box">
+              <div class="box-title">Requester</div>
+              <div class="grid">
+                <div><div class="lbl">Name</div><div class="val">Alejandro Reyes</div></div>
+                <div><div class="lbl">Role</div><div class="val">PhD Student</div></div>
+                <div><div class="lbl">Email</div><div class="val">alejandro.reyes@university.ac.uk</div></div>
+                <div><div class="lbl">PI</div><div class="val">James Okafor</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="context-label">Requisitions page — Schedule</div>
+          <div class="card-outer">
+            <div class="box">
+              <div class="box-title">Schedule</div>
+              <div class="grid">
+                <div><div class="lbl">Dates requested</div><div class="val">26/08/2026 → 12/10/2026</div></div>
+                <div><div class="lbl">Preferred floor</div><div class="val">No preference</div></div>
+                <div><div class="lbl">Submitted</div><div class="val">20/08/2026</div></div>
+                <div><div class="lbl">Assigned unit</div><div class="val">GC-041</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== B: SENTENCE CASE =================== -->
+  <div class="panel" id="pB">
+    <style>
+      #pB .box { background: var(--surface-soft); border-radius: 18px; padding: 22px; }
+      #pB .box-title { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 13.5px; font-weight: 700; color: var(--ink); margin-bottom: 18px; }
+      #pB .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 20px; }
+      #pB .lbl { font-size: 12px; font-weight: 500; color: var(--ink-faint); }
+      #pB .val { font-size: 13.5px; font-weight: 600; margin-top: 3px; color: var(--ink); }
+    </style>
+    <div class="stack">
+      <div>
+        <div class="context-label">Cabinet page — Asset Info</div>
+        <div class="card-outer">
+          <div class="box">
+            <div class="box-title">Asset info</div>
+            <div class="grid">
+              <div><div class="lbl">Status</div><div class="val"><span class="status-pill">● Occupied</span></div></div>
+              <div><div class="lbl">Type</div><div class="val">Growth cabinet</div></div>
+              <div><div class="lbl">Manufacturer</div><div class="val">Conviron</div></div>
+              <div><div class="lbl">Model</div><div class="val">E-15</div></div>
+              <div><div class="lbl">Serial number</div><div class="val">SN-48213</div></div>
+              <div><div class="lbl">Location</div><div class="val">Level 1, room 1.09</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <div class="context-label">Requisition side panel — Requester</div>
+          <div class="card-outer">
+            <div class="box">
+              <div class="box-title">Requester</div>
+              <div class="grid">
+                <div><div class="lbl">Name</div><div class="val">Alejandro Reyes</div></div>
+                <div><div class="lbl">Role</div><div class="val">PhD student</div></div>
+                <div><div class="lbl">Email</div><div class="val">alejandro.reyes@university.ac.uk</div></div>
+                <div><div class="lbl">PI</div><div class="val">James Okafor</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="context-label">Requisitions page — Schedule</div>
+          <div class="card-outer">
+            <div class="box">
+              <div class="box-title">Schedule</div>
+              <div class="grid">
+                <div><div class="lbl">Dates requested</div><div class="val">26/08/2026 → 12/10/2026</div></div>
+                <div><div class="lbl">Preferred floor</div><div class="val">No preference</div></div>
+                <div><div class="lbl">Submitted</div><div class="val">20/08/2026</div></div>
+                <div><div class="lbl">Assigned unit</div><div class="val">GC-041</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== C: COMPACT DENSE =================== -->
+  <div class="panel" id="pC">
+    <style>
+      #pC .box { background: var(--surface-soft); border-radius: 14px; padding: 16px 18px; }
+      #pC .box-title { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 12px; }
+      #pC .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; }
+      #pC .lbl { font-size: 9.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--ink-faint); }
+      #pC .val { font-size: 12.5px; font-weight: 600; margin-top: 2px; color: var(--ink); }
+    </style>
+    <div class="stack">
+      <div>
+        <div class="context-label">Cabinet page — Asset Info</div>
+        <div class="card-outer">
+          <div class="box">
+            <div class="box-title">Asset Info</div>
+            <div class="grid">
+              <div><div class="lbl">Status</div><div class="val"><span class="status-pill" style="padding:2px 8px;font-size:10.5px">● Occupied</span></div></div>
+              <div><div class="lbl">Type</div><div class="val">Growth Cabinet</div></div>
+              <div><div class="lbl">Manufacturer</div><div class="val">Conviron</div></div>
+              <div><div class="lbl">Model</div><div class="val">E-15</div></div>
+              <div><div class="lbl">Serial No.</div><div class="val">SN-48213</div></div>
+              <div><div class="lbl">Asset No.</div><div class="val">AST-4521</div></div>
+              <div><div class="lbl">TSCAN ID</div><div class="val">TSC-001</div></div>
+              <div><div class="lbl">Location</div><div class="val">Level 1 · 1.09</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <div class="context-label">Requisition side panel — Requester</div>
+          <div class="card-outer">
+            <div class="box">
+              <div class="box-title">Requester</div>
+              <div class="grid">
+                <div><div class="lbl">Name</div><div class="val">Alejandro Reyes</div></div>
+                <div><div class="lbl">Role</div><div class="val">PhD Student</div></div>
+                <div style="grid-column:span 2"><div class="lbl">Email</div><div class="val">alejandro.reyes@university.ac.uk</div></div>
+                <div><div class="lbl">PI</div><div class="val">James Okafor</div></div>
+                <div><div class="lbl">Lab group</div><div class="val">PI: James Okafor</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="context-label">Requisitions page — Schedule</div>
+          <div class="card-outer">
+            <div class="box">
+              <div class="box-title">Schedule</div>
+              <div class="grid">
+                <div style="grid-column:span 2"><div class="lbl">Dates requested</div><div class="val">26/08/2026 → 12/10/2026</div></div>
+                <div><div class="lbl">Preferred floor</div><div class="val">No preference</div></div>
+                <div><div class="lbl">Submitted</div><div class="val">20/08/2026</div></div>
+                <div><div class="lbl">Assigned unit</div><div class="val">GC-041</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== D: DEFINITION LIST =================== -->
+  <div class="panel" id="pD">
+    <style>
+      #pD .box { background: var(--surface-soft); border-radius: 16px; padding: 6px 20px; }
+      #pD .box-title { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 12.5px; font-weight: 700; color: var(--ink); padding: 14px 0 10px; }
+      #pD .row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid rgba(22,33,29,0.07); }
+      #pD .lbl { font-size: 12.5px; color: var(--ink-faint); flex-shrink: 0; }
+      #pD .val { font-size: 13px; font-weight: 500; color: var(--ink); text-align: right; }
+    </style>
+    <div class="stack">
+      <div>
+        <div class="context-label">Cabinet page — Asset Info</div>
+        <div class="card-outer">
+          <div class="box">
+            <div class="box-title">Asset Info</div>
+            <div class="row"><span class="lbl">Status</span><span class="val"><span class="status-pill">● Occupied</span></span></div>
+            <div class="row"><span class="lbl">Type</span><span class="val">Growth Cabinet</span></div>
+            <div class="row"><span class="lbl">Manufacturer</span><span class="val">Conviron</span></div>
+            <div class="row"><span class="lbl">Model</span><span class="val">E-15</span></div>
+            <div class="row"><span class="lbl">Serial No.</span><span class="val">SN-48213</span></div>
+            <div class="row"><span class="lbl">Location</span><span class="val">Level 1 · Room 1.09</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="row2">
+        <div>
+          <div class="context-label">Requisition side panel — Requester</div>
+          <div class="card-outer">
+            <div class="box">
+              <div class="box-title">Requester</div>
+              <div class="row"><span class="lbl">Name</span><span class="val">Alejandro Reyes</span></div>
+              <div class="row"><span class="lbl">Role</span><span class="val">PhD Student</span></div>
+              <div class="row"><span class="lbl">Email</span><span class="val" style="overflow-wrap:anywhere;max-width:190px">alejandro.reyes@university.ac.uk</span></div>
+              <div class="row"><span class="lbl">PI</span><span class="val">James Okafor</span></div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="context-label">Requisitions page — Schedule</div>
+          <div class="card-outer">
+            <div class="box">
+              <div class="box-title">Schedule</div>
+              <div class="row"><span class="lbl">Dates requested</span><span class="val">26/08 → 12/10/2026</span></div>
+              <div class="row"><span class="lbl">Preferred floor</span><span class="val">No preference</span></div>
+              <div class="row"><span class="lbl">Submitted</span><span class="val">20/08/2026</span></div>
+              <div class="row"><span class="lbl">Assigned unit</span><span class="val">GC-041</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const notes = {
+    A: "Same layout as now, but the caps labels drop to semibold and values move from bold to semibold — quieter without losing structure.",
+    B: "Labels go sentence-case instead of tracked-out caps — reads calmer, closer to a normal document than a UI shouting field names.",
+    C: "Everything shrinks and tightens up — more fields visible at once, useful if these boxes still feel too roomy even at lighter weight.",
+    D: "Drops the stacked block entirely for a right-aligned definition-list row — the lightest-feeling option, closest to a plain spec sheet.",
+  };
+  document.getElementById("tabs").addEventListener("click", (e) => {
+    if (!e.target.dataset.p) return;
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b === e.target));
+    document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "p" + e.target.dataset.p));
+    document.getElementById("note").textContent = notes[e.target.dataset.p];
+  });
+  document.getElementById("note").textContent = notes.A;
+</script>
+</body>
+</html>
