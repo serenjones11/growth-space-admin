@@ -178,10 +178,11 @@ const REFTECH_ROOMS_BY_FLOOR = {
 
 function addDays(base, days) { const d = new Date(base); d.setDate(d.getDate() + days); return d; }
 function fmt(date) { return date.toISOString().slice(0, 10); }
-/* British date display — "YYYY-MM-DD" -> "DD/MM/YYYY" */
+/* British date display — "YYYY-MM-DD" (or a full timestamp, date-only
+   portion taken) -> "DD/MM/YYYY" */
 function fmtGB(iso) {
   if (!iso) return "—";
-  const [y, m, d] = iso.split("-");
+  const [y, m, d] = String(iso).slice(0, 10).split("-");
   if (!y || !m || !d) return iso;
   return `${d}/${m}/${y}`;
 }
@@ -1246,6 +1247,20 @@ function timelineRowStatus(req) {
   return bookingStatus({ startDate: req.startDate, endDate: req.endDate });
 }
 
+/* Greedily assigns each item (sorted by start) to the lowest-numbered lane
+   whose previous occupant has already ended — so a unit's requisitions all
+   live in one timeline row, and only genuinely overlapping ones stack into
+   extra lanes within that same row. */
+function assignLanes(items) {
+  const laneEnds = [];
+  return items.map((it) => {
+    let lane = laneEnds.findIndex((end) => it.start >= end);
+    if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.end); }
+    else laneEnds[lane] = it.end;
+    return { ...it, lane };
+  });
+}
+
 function TimelineView({ units, requests = [], onNavigate, compact = false }) {
   const [floorFilter, setFloorFilter] = useState("all");
   const [urgencyFilters, setUrgencyFilters] = useState(new Set()); // empty = show all
@@ -1282,9 +1297,21 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
     return [{ u, o, s, reqIndex, start: start < rangeStart ? rangeStart : start, end }];
   });
 
-  const groups = FLOORS.map((f) => ({ floor: f, items: occupied.filter((o) => o.u.floor === f).sort((a, b) => a.end - b.end) }))
-    .filter((g) => g.items.length)
-    .slice(0, compact ? 2 : undefined);
+  // One row per unit (not per requisition) — requisitions sharing a unit
+  // share its row, laid out in lanes so genuinely overlapping ones stack
+  // instead of covering each other, while non-overlapping ones fall back
+  // to lane 0 and free stretches of the row read as visibly empty.
+  const groups = FLOORS.map((f) => {
+    const byUnit = new Map();
+    occupied.filter((o) => o.u.floor === f).forEach((it) => {
+      if (!byUnit.has(it.u.id)) byUnit.set(it.u.id, { u: it.u, items: [] });
+      byUnit.get(it.u.id).items.push(it);
+    });
+    const unitRows = Array.from(byUnit.values())
+      .sort((a, b) => a.u.id.localeCompare(b.u.id, undefined, { numeric: true }))
+      .map((row) => ({ u: row.u, items: assignLanes(row.items.sort((a, b) => a.start - b.start)) }));
+    return { floor: f, unitRows };
+  }).filter((g) => g.unitRows.length).slice(0, compact ? 2 : undefined);
 
   return (
     <div>
@@ -1344,57 +1371,69 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
                 <span className="text-[13px] font-extrabold gc-display">{FLOOR_LABEL[g.floor]}</span>
               </div>
               <div className="space-y-1.5">
-                {(compact ? g.items.slice(0, 3) : g.items).map(({ u, o, s, reqIndex, start, end }) => {
-                  const left = pct(start);
-                  const width = Math.max(1.2, pct(end) - left);
-                  const dm = DISCIPLINE_META[o.discipline] || DISCIPLINE_META.plant;
-                  const req = requests[reqIndex];
-                  const rowKey = u.id + o.startDate + reqIndex;
-                  const isHovered = hoveredRow === rowKey;
+                {/* One row per unit — every requisition for that unit lands
+                    on this same row (in lanes only when their dates
+                    genuinely overlap), so a gap in the row reads as free
+                    time and a lane stack reads as a clash, instead of the
+                    unit's requisitions being scattered across separate
+                    rows sorted by end date. */}
+                {(compact ? g.unitRows.slice(0, 3) : g.unitRows).map(({ u, items }) => {
+                  const dm = DISCIPLINE_META[items[0].o.discipline] || DISCIPLINE_META.plant;
+                  const laneH = 28, laneGap = 4;
+                  const laneCount = Math.max(...items.map((it) => it.lane)) + 1;
+                  const rowH = laneCount * laneH + (laneCount - 1) * laneGap;
                   return (
-                    <div key={rowKey} className="flex items-center gap-2 text-xs">
-                      <span className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold" style={{ color: "var(--ink-soft)" }}>
+                    <div key={u.id} className="flex items-start gap-2 text-xs">
+                      <span className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold" style={{ height: laneH, color: "var(--ink-soft)" }}>
                         <dm.icon size={11} style={{ color: dm.color }} />{u.id}
                       </span>
-                      <div
-                        className="relative flex-1 h-7 rounded-lg"
-                        style={{ background: "var(--surface-soft)" }}
-                        onMouseEnter={() => setHoveredRow(rowKey)}
-                        onMouseLeave={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
-                      >
-                        <button
-                          type="button"
-                          onFocus={() => setHoveredRow(rowKey)}
-                          onBlur={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
-                          onClick={() => onNavigate && onNavigate(requisitionTab(req.status), reqIndex)}
-                          className="absolute h-7 rounded-lg flex items-center px-2.5"
-                          style={{
-                            left: `${left}%`, width: `${width}%`, background: s.soft, border: `1px solid ${s.color}`,
-                            cursor: "pointer",
-                          }}
-                        >
-                          <span className="text-[11.5px] font-bold truncate" style={{ color: s.color }}>{o.researcher}</span>
-                        </button>
-                        {/* hover detail card — visibility driven by React state (not a CSS-only hover selector) */}
-                        {isHovered && (
-                          <div
-                            className="absolute z-20 top-full mt-1.5 rounded-xl p-3.5 text-left"
-                            style={{ left: `${left}%`, minWidth: 240, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 10px 30px -12px rgba(22,33,29,0.25)" }}
-                          >
-                            <div className="text-[13px] font-extrabold mb-0.5">{o.researcher}</div>
-                            <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>{piDisplay(o.labGroup)}</div>
-                            <div className="text-[12px] mb-1" style={{ color: "var(--ink-soft)" }}>{o.project}</div>
-                            <div className="text-[12px] font-semibold mb-1.5 flex items-center gap-1" style={{ color: "var(--ink-soft)" }}>
-                              <MapPin size={11} />{u.id} · {FLOOR_LABEL[u.floor]}, {u.room}
+                      <div className="relative flex-1 rounded-lg" style={{ height: rowH, background: "var(--surface-soft)" }}>
+                        {items.map(({ o, s, reqIndex, start, end, lane }) => {
+                          const left = pct(start);
+                          const width = Math.max(1.2, pct(end) - left);
+                          const top = lane * (laneH + laneGap);
+                          const req = requests[reqIndex];
+                          const rowKey = u.id + reqIndex;
+                          const isHovered = hoveredRow === rowKey;
+                          return (
+                            <div key={rowKey}>
+                              <button
+                                type="button"
+                                onMouseEnter={() => setHoveredRow(rowKey)}
+                                onMouseLeave={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
+                                onFocus={() => setHoveredRow(rowKey)}
+                                onBlur={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
+                                onClick={() => onNavigate && onNavigate(requisitionTab(req.status), reqIndex)}
+                                className="absolute rounded-lg flex items-center px-2.5"
+                                style={{
+                                  left: `${left}%`, width: `${width}%`, top, height: laneH,
+                                  background: s.soft, border: `1px solid ${s.color}`, cursor: "pointer",
+                                }}
+                              >
+                                <span className="text-[11.5px] font-bold truncate" style={{ color: s.color }}>{o.researcher}</span>
+                              </button>
+                              {/* hover detail card — visibility driven by React state (not a CSS-only hover selector) */}
+                              {isHovered && (
+                                <div
+                                  className="absolute z-20 rounded-xl p-3.5 text-left"
+                                  style={{ left: `${left}%`, top: top + laneH + 6, minWidth: 240, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 10px 30px -12px rgba(22,33,29,0.25)" }}
+                                >
+                                  <div className="text-[13px] font-extrabold mb-0.5">{o.researcher}</div>
+                                  <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>{piDisplay(o.labGroup)}</div>
+                                  <div className="text-[12px] mb-1" style={{ color: "var(--ink-soft)" }}>{o.project}</div>
+                                  <div className="text-[12px] font-semibold mb-1.5 flex items-center gap-1" style={{ color: "var(--ink-soft)" }}>
+                                    <MapPin size={11} />{u.id} · {FLOOR_LABEL[u.floor]}, {u.room}
+                                  </div>
+                                  <div className="text-[12px] font-bold" style={{ color: s.color }}>
+                                    {fmtGB(o.startDate)} → {fmtGB(o.endDate)}{s.key === "overdue" ? ` · +${Math.abs(daysUntil(o.endDate))}d overdue` : ""}
+                                  </div>
+                                  <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click bar to view requisition →</div>
+                                </div>
+                              )}
                             </div>
-                            <div className="text-[12px] font-bold" style={{ color: s.color }}>{fmtGB(o.startDate)} → {fmtGB(o.endDate)}</div>
-                            <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click bar to view requisition →</div>
-                          </div>
-                        )}
+                          );
+                        })}
                       </div>
-                      <span className="w-24 text-right flex-shrink-0 text-[12.5px] font-bold" style={{ color: s.color }}>
-                        {s.key === "overdue" ? `+${Math.abs(daysUntil(o.endDate))}d overdue` : fmtGB(o.endDate)}
-                      </span>
                     </div>
                   );
                 })}
