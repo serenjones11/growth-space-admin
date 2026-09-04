@@ -123,12 +123,22 @@ const TOKENS = `
   .gc-tag { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid transparent; display: inline-flex; align-items: center; gap: 4px; }
 `;
 
-const LAB_GROUPS = ["Okafor Lab", "Petrova Lab", "Chen Lab", "Singh Lab", "Martins Lab", "Whitfield Lab", "Al-Farsi Lab", "Novak Lab"];
-const PI_BY_LAB = {
-  "Okafor Lab": "James Okafor", "Petrova Lab": "Elena Petrova", "Chen Lab": "Wei Chen", "Singh Lab": "Amrit Singh",
-  "Martins Lab": "Sofia Martins", "Whitfield Lab": "Rachel Whitfield", "Al-Farsi Lab": "Yousef Al-Farsi", "Novak Lab": "Tomas Novak",
-};
+/* Live lab-group list, replacing the old hardcoded seed-data snapshot.
+   Populated by applyLabGroups() from GrowthCabinetApp's data-loading effect
+   (ALL lab groups — verified and pending — so a self-registered PI's
+   requisitions/bookings still display correctly everywhere an admin looks,
+   not just once approved). Every existing LAB_GROUPS/PI_BY_LAB/piDisplay()
+   call site below needs no changes — they keep reading these same module
+   bindings, just now backed by live data instead of a hardcoded snapshot.
+   The anonymous Request Space form never reads these — its PI picker uses
+   api.listLabGroups() directly (verified-only, RLS-safe for anon). */
+let LAB_GROUPS = [];
+let PI_BY_LAB = {};
 function piDisplay(labGroup) { return `PI: ${PI_BY_LAB[labGroup] || labGroup}`; }
+function applyLabGroups(rows) {
+  LAB_GROUPS = rows.map((g) => g.name);
+  PI_BY_LAB = Object.fromEntries(rows.map((g) => [g.name, g.piName]));
+}
 const DISCIPLINE_META = {
   plant: { label: "Plant Sciences", icon: Leaf, color: "#2F8F5B" },
   insect: { label: "Insect Sciences", icon: Bug, color: "#A6763F" },
@@ -226,7 +236,7 @@ function currentBooking(unit) {
   return unit.bookings.find((b) => new Date(b.startDate) <= TODAY) || null;
 }
 function upcomingBookings(unit) {
-  if (unit.type !== "reftech") return [];
+  if (!unit.bookings) return [];
   return unit.bookings.filter((b) => new Date(b.startDate) > TODAY).sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
 }
 function unitOccupant(unit) {
@@ -593,7 +603,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
   const series = LAB_GROUPS.map((lab, idx) => {
     const full = (labUsageHistory.series[lab] || []).slice();
     full[full.length - 1] = currentCounts[lab]; // latest real month = live count
-    return { lab, color: OKABE_ITO[idx], values: full.slice(fromIdx, toIdx + 1) };
+    return { lab, color: OKABE_ITO[idx % OKABE_ITO.length], values: full.slice(fromIdx, toIdx + 1) };
   });
 
   const maxV = Math.max(1, ...series.flatMap((s) => s.values)) * 1.2;
@@ -695,7 +705,67 @@ function LabUsageTrend({ units, labUsageHistory }) {
   );
 }
 
-function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory }) {
+/* Admin review queue for PIs who self-registered via the Request Space form
+   (role = "PI / Academic Staff", or a researcher picking "My PI isn't
+   listed") and haven't been verified yet. Hidden entirely when empty. */
+function PendingPIsPanel({ pendingLabGroups, verifiedLabGroups, onApprove, onMerge }) {
+  const [mergeTarget, setMergeTarget] = useState({});
+  if (pendingLabGroups.length === 0) return null;
+
+  return (
+    <div className="gc-card p-5">
+      <div className="mb-4">
+        <h3 className="gc-display font-bold text-sm">Pending PIs</h3>
+        <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>
+          Self-registered from the Request Space form — approve or merge before they appear in the PI picker.
+        </p>
+      </div>
+      <div className="space-y-3">
+        {pendingLabGroups.map((g) => (
+          <div key={g.id} className="rounded-xl p-3" style={{ background: "var(--surface-soft)" }}>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold truncate">{g.piName}</div>
+                <div className="text-xs truncate" style={{ color: "var(--ink-faint)" }}>
+                  {g.piEmail || "No email given"}{g.createdAt ? ` · added ${fmtGB(g.createdAt.slice(0, 10))}` : ""}
+                </div>
+              </div>
+              <button
+                onClick={() => onApprove(g.id)}
+                className="text-xs font-bold px-3 py-1.5 rounded-full text-white flex-shrink-0"
+                style={{ background: "var(--accent-dark)" }}
+              >
+                Approve
+              </button>
+            </div>
+            {verifiedLabGroups.length > 0 && (
+              <div className="flex items-center gap-2 mt-2.5">
+                <select
+                  className="gc-input text-xs flex-1"
+                  value={mergeTarget[g.id] || ""}
+                  onChange={(e) => setMergeTarget((m) => ({ ...m, [g.id]: e.target.value }))}
+                >
+                  <option value="">Merge into existing PI…</option>
+                  {verifiedLabGroups.map((v) => <option key={v.id} value={v.id}>{v.piName}</option>)}
+                </select>
+                <button
+                  disabled={!mergeTarget[g.id]}
+                  onClick={() => { onMerge(g.id, mergeTarget[g.id]); setMergeTarget((m) => ({ ...m, [g.id]: "" })); }}
+                  className="text-xs font-bold px-3 py-1.5 rounded-full disabled:opacity-40 flex-shrink-0"
+                  style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                >
+                  Merge
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory, labGroups, onApproveLabGroup, onMergeLabGroup }) {
   const [timelineFull, setTimelineFull] = useState(false);
   const [activityExpanded, setActivityExpanded] = useState(false);
 
@@ -725,6 +795,15 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
   return (
     <div className="space-y-5">
       <h1 className="gc-display text-2xl font-extrabold">Dashboard</h1>
+
+      {/* Pending PIs — surfaced right at the top so it's never missed; the
+          panel itself renders nothing once there's nothing pending. */}
+      <PendingPIsPanel
+        pendingLabGroups={labGroups.filter((g) => !g.isVerified)}
+        verifiedLabGroups={labGroups.filter((g) => g.isVerified)}
+        onApprove={onApproveLabGroup}
+        onMerge={onMergeLabGroup}
+      />
 
       {/* KPI readout row — same dark-chip language as the inventory cards, for a consistent system */}
       <div className="grid grid-cols-3 gap-2.5">
@@ -836,7 +915,7 @@ function DashboardPage({ units, requests, goInventory, goRequisitions, onSelectU
                   >
                     <span
                       className="inline-flex items-center justify-center rounded-lg text-[10px] font-bold px-2.5 py-1 mb-2"
-                      style={{ background: OKABE_ITO[idx], color: OKABE_ITO_TEXT[idx] }}
+                      style={{ background: OKABE_ITO[idx % OKABE_ITO.length], color: OKABE_ITO_TEXT[idx % OKABE_ITO_TEXT.length] }}
                     >
                       {l.lab.split(" ")[0].slice(0, 4).toUpperCase()}
                     </span>
@@ -1020,7 +1099,7 @@ function UnitCard({ unit, onClick }) {
   const s = displayStatus(unit);
   const isReftech = unit.type === "reftech";
   const occupant = unitOccupant(unit);
-  const upcoming = isReftech ? upcomingBookings(unit) : [];
+  const upcoming = upcomingBookings(unit);
   const dm = DISCIPLINE_META[unitDiscipline(unit)];
 
   // occupant / availability box colour follows the same status language used everywhere else
@@ -1032,7 +1111,11 @@ function UnitCard({ unit, onClick }) {
     { background: "var(--surface-soft)", ink: "var(--ink-soft)" };
 
   return (
-    <button onClick={onClick} className="group text-left rounded-2xl overflow-hidden border transition-all hover:-translate-y-0.5 hover:shadow-lg flex flex-col p-4" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+    <button
+      onClick={onClick}
+      className={`group text-left rounded-2xl overflow-hidden border transition-all hover:-translate-y-0.5 hover:shadow-lg flex flex-col p-4 ${isReftech ? "col-span-2" : ""}`}
+      style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+    >
       <div className="flex items-start justify-between mb-2 gap-2">
         <div className="gc-display text-lg font-extrabold leading-none">{unit.id}</div>
         <StatusTag unit={unit} />
@@ -1082,7 +1165,7 @@ function UnitCard({ unit, onClick }) {
             <div className="text-[11px] font-bold mt-2" style={{ color: boxStyle.ink, opacity: 0.9 }}>
               {s.key === "overdue" ? `Was due back ${fmtGB(occupant.endDate)}` : `Until ${fmtGB(occupant.endDate)}`}
             </div>
-            {isReftech && upcoming.length > 0 && (
+            {upcoming.length > 0 && (
               <div className="text-[11px] font-bold mt-1" style={{ color: "var(--accent-dark)" }}>+{upcoming.length} more requisition{upcoming.length !== 1 ? "s" : ""} ahead →</div>
             )}
           </>
@@ -1090,7 +1173,7 @@ function UnitCard({ unit, onClick }) {
           <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>
             Under maintenance{unit.serviceLog[0] ? ` · serviced ${fmtGB(unit.serviceLog[0].date)} by contractor ${unit.serviceLog[0].engineer}` : ""}
           </div>
-        ) : isReftech && upcoming.length > 0 ? (
+        ) : upcoming.length > 0 ? (
           <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>Free now — next requisition {fmtGB(upcoming[0].startDate)}</div>
         ) : (
           <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>Free and ready to book</div>
@@ -1685,6 +1768,12 @@ function UnitDetailContent({
           </>
         ) : unit.occupant ? (
           <BookingCard booking={unit.occupant} status={s} onOpenRequisition={linkFor(unit.occupant)} />
+        ) : upcoming.length > 0 ? (
+          <>
+            <p className="text-sm" style={{ color: "var(--ink-soft)" }}>Currently free.</p>
+            <div className="text-[11px] mt-2 mb-1.5 font-bold uppercase tracking-wide" style={{ color: "var(--ink-faint)" }}>Upcoming</div>
+            <div className="space-y-2">{upcoming.map((b) => <BookingCard key={b.id} booking={b} onOpenRequisition={linkFor(b)} />)}</div>
+          </>
         ) : (
           <p className="text-sm" style={{ color: "var(--ink-soft)" }}>{unit.status === "service" ? "Marked out of service — no active requisition." : "Currently free."}</p>
         )}
@@ -1724,8 +1813,48 @@ function UnitDetailContent({
   );
 }
 
-function UnitModal({ unit, onClose, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
+/* Generic confirm-before-destructive-action popup — matches the app's
+   existing overlay/card styling rather than a bare window.confirm(). */
+function ConfirmDialog({ title, message, confirmLabel = "Delete", onConfirm, onCancel }) {
+  return (
+    <div
+      className="flex items-center justify-center p-6"
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 60, background: "rgba(22,33,29,0.45)" }}
+      onClick={(e) => { e.stopPropagation(); onCancel(); }}
+    >
+      <div
+        className="rounded-2xl shadow-2xl p-6"
+        style={{ background: "var(--surface)", width: "100%", maxWidth: 380 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-3">
+          <span className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }}>
+            <AlertTriangle size={16} />
+          </span>
+          <h2 className="gc-display text-base font-extrabold">{title}</h2>
+        </div>
+        <p className="text-sm mb-5" style={{ color: "var(--ink-soft)" }}>{message}</p>
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={onCancel} className="text-sm font-semibold px-4 py-2 rounded-xl" style={{ background: "var(--surface-soft)" }}>Cancel</button>
+          <button onClick={onConfirm} className="text-sm font-bold px-4 py-2 rounded-xl text-white" style={{ background: "var(--overdue)" }}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!unit) return null;
+
+  const hasActiveBooking = !!unitOccupant(unit);
+  const handleDeleteClick = () => {
+    if (hasActiveBooking) {
+      window.alert("This unit currently has an active booking — complete or reassign that requisition before deleting it.");
+      return;
+    }
+    setConfirmingDelete(true);
+  };
 
   return (
     <div
@@ -1750,6 +1879,7 @@ function UnitModal({ unit, onClose, onEdit, onUpdateServiceLog, onAddDocument, o
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button onClick={() => onEdit(unit)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Edit"><Pencil size={15} /></button>
+            <button onClick={handleDeleteClick} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }} title="Delete"><Trash2 size={15} /></button>
             <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Close"><X size={16} /></button>
           </div>
         </div>
@@ -1763,6 +1893,15 @@ function UnitModal({ unit, onClose, onEdit, onUpdateServiceLog, onAddDocument, o
           />
         </div>
       </div>
+
+      {confirmingDelete && (
+        <ConfirmDialog
+          title={`Delete ${unit.id}?`}
+          message={`This permanently removes ${unit.id} and its maintenance history, documents, and photo. Requisitions that used it keep their record but lose the unit reference. This can't be undone.`}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => { setConfirmingDelete(false); onDelete(unit.id); }}
+        />
+      )}
     </div>
   );
 }
@@ -2103,8 +2242,8 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, star
   const statusColor = STATUS_STYLE[req.status].color;
   const statusSoft = STATUS_STYLE[req.status].soft;
   const labIdx = LAB_GROUPS.indexOf(req.labGroup);
-  const avatarColor = labIdx !== -1 ? OKABE_ITO[labIdx] : "var(--ink-faint)";
-  const avatarText = labIdx !== -1 ? OKABE_ITO_TEXT[labIdx] : "#fff";
+  const avatarColor = labIdx !== -1 ? OKABE_ITO[labIdx % OKABE_ITO.length] : "var(--ink-faint)";
+  const avatarText = labIdx !== -1 ? OKABE_ITO_TEXT[labIdx % OKABE_ITO_TEXT.length] : "#fff";
   const initials = req.researcher.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
   const overdueForCompletion = req.status === "approved" && new Date(req.endDate) < TODAY;
 
@@ -2511,6 +2650,10 @@ function FormSectionTitle({ children }) {
   );
 }
 
+// Sentinel value for the PI picker's "My PI isn't listed" option — never a
+// real lab_groups id, so it can't collide with one.
+const PI_NOT_LISTED = "__pi_not_listed__";
+
 function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
   const [mode, setMode] = useState(null); // 'new' | 'amend'
   const [spaceType, setSpaceType] = useState(null); // 'cabinet' | 'reftech'
@@ -2518,13 +2661,30 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
   const [amendIndex, setAmendIndex] = useState(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Verified PIs for the picker — fetched directly via the anon-safe
+  // list_lab_groups() RPC (this form works without a session, so it can't
+  // rely on the admin-side LAB_GROUPS/PI_BY_LAB lookup, which is never
+  // populated for an anonymous visitor).
+  const [piGroups, setPiGroups] = useState([]);
+  const [piGroupsLoading, setPiGroupsLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    api.listLabGroups()
+      .then((rows) => { if (!cancelled) setPiGroups(rows); })
+      .catch((err) => console.error(err))
+      .finally(() => { if (!cancelled) setPiGroupsLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const steps = mode === "amend" ? WIZARD_STEPS_AMEND : WIZARD_STEPS_NEW;
   const stepName = steps[stepIndex];
 
   const emptyForm = {
-    researcher: "", email: "", phone: "", pi: "", department: "",
-    labGroup: LAB_GROUPS[0], role: ROLES[0], emergencyNumber: "",
+    researcher: "", email: "", phone: "", department: "",
+    labGroupId: "", notListedPiName: "", notListedPiEmail: "",
+    role: ROLES[0], emergencyNumber: "",
     species: [], numberOfPlants: "", containmentLevel: CONTAINMENT_LEVELS[0], spaceDescription: "",
     projectTitle: "", projectDesc: "",
     setTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0], co2: "",
@@ -2627,9 +2787,20 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
               disabled={amendIndex === null}
               onClick={() => {
                 const r = requests[amendIndex];
+                // Reconcile the requisition's stored labGroup/pi (plain
+                // strings) back into the picker's id-based shape. If the
+                // PI is still a verified option, pre-select it; otherwise
+                // (role was PI themselves, or the PI is still pending)
+                // fall back to "not listed" pre-filled with their name —
+                // harmless either way since a matching find_or_create_lab_group
+                // call on resubmit just resolves back to the same row.
+                const matchingGroup = piGroups.find((g) => g.piName === r.pi);
                 setForm({
-                  researcher: r.researcher, email: r.email, phone: r.phone || "", pi: r.pi || "", department: r.department || "",
-                  labGroup: r.labGroup, role: r.role || ROLES[0], emergencyNumber: r.emergencyNumber || "",
+                  researcher: r.researcher, email: r.email, phone: r.phone || "", department: r.department || "",
+                  labGroupId: matchingGroup ? matchingGroup.id : (r.pi ? PI_NOT_LISTED : ""),
+                  notListedPiName: matchingGroup ? "" : (r.pi || ""),
+                  notListedPiEmail: "",
+                  role: r.role || ROLES[0], emergencyNumber: r.emergencyNumber || "",
                   species: r.species || [], numberOfPlants: r.numberOfPlants || "", containmentLevel: r.containmentLevel || CONTAINMENT_LEVELS[0],
                   spaceDescription: r.spaceDescription || "",
                   projectTitle: r.projectTitle, projectDesc: r.projectDesc || "",
@@ -2677,12 +2848,33 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
 
       <form
         className="gc-card p-6 space-y-7"
-        onSubmit={(e) => {
+        onSubmit={async (e) => {
           e.preventDefault();
-          const payload = { ...form, unitType: spaceType, discipline, status: "pending", submittedDate: fmt(TODAY) };
-          if (mode === "amend" && amendIndex !== null) onAmend(amendIndex, payload);
-          else onSubmit(payload);
-          setSubmitted(true);
+          if (submitting) return;
+          setSubmitting(true);
+          try {
+            const isPiThemself = form.role === "PI / Academic Staff";
+            let labGroupId, pi;
+            if (isPiThemself) {
+              labGroupId = await api.findOrCreateLabGroup(form.researcher.trim(), form.email.trim());
+              pi = form.researcher.trim();
+            } else if (form.labGroupId === PI_NOT_LISTED) {
+              labGroupId = await api.findOrCreateLabGroup(form.notListedPiName.trim(), form.notListedPiEmail.trim() || null);
+              pi = form.notListedPiName.trim();
+            } else {
+              labGroupId = form.labGroupId;
+              pi = (piGroups.find((g) => g.id === form.labGroupId) || {}).piName || "";
+            }
+            const payload = { ...form, labGroupId, pi, unitType: spaceType, discipline, status: "pending", submittedDate: fmt(TODAY) };
+            if (mode === "amend" && amendIndex !== null) await onAmend(amendIndex, payload);
+            else await onSubmit(payload);
+            setSubmitted(true);
+          } catch (err) {
+            console.error(err);
+            window.alert(err.message || "Something went wrong submitting this — please try again.");
+          } finally {
+            setSubmitting(false);
+          }
         }}
       >
         <section className="space-y-4">
@@ -2694,15 +2886,31 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="PI"><input value={form.pi} onChange={set("pi")} className="gc-input" placeholder="Optional, if different from you" /></Field>
+            <Field label="Email"><input required type="email" value={form.email} onChange={set("email")} className="gc-input" placeholder="a.reyes@university.ac.uk" /></Field>
             <Field label="Emergency Number *"><input required value={form.emergencyNumber} onChange={set("emergencyNumber")} className="gc-input" placeholder="Mobile number" /></Field>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Email"><input required type="email" value={form.email} onChange={set("email")} className="gc-input" placeholder="a.reyes@university.ac.uk" /></Field>
-            <Field label="Lab group">
-              <select value={form.labGroup} onChange={set("labGroup")} className="gc-input">{LAB_GROUPS.map((l) => <option key={l}>{l}</option>)}</select>
-            </Field>
-          </div>
+
+          {form.role === "PI / Academic Staff" ? (
+            <div className="rounded-xl p-3 text-sm font-medium" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
+              This requisition will be attached to you as PI.
+            </div>
+          ) : (
+            <>
+              <Field label="PI *">
+                <select required value={form.labGroupId} onChange={set("labGroupId")} className="gc-input" disabled={piGroupsLoading}>
+                  <option value="" disabled>{piGroupsLoading ? "Loading…" : "Select your PI…"}</option>
+                  {piGroups.map((g) => <option key={g.id} value={g.id}>{g.piName}</option>)}
+                  <option value={PI_NOT_LISTED}>My PI isn't listed</option>
+                </select>
+              </Field>
+              {form.labGroupId === PI_NOT_LISTED && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="PI's Full Name *"><input required value={form.notListedPiName} onChange={set("notListedPiName")} className="gc-input" placeholder="e.g. Jordan Ellis" /></Field>
+                  <Field label="PI's Email"><input type="email" value={form.notListedPiEmail} onChange={set("notListedPiEmail")} className="gc-input" placeholder="Optional — helps us match them later" /></Field>
+                </div>
+              )}
+            </>
+          )}
         </section>
 
         <section className="space-y-4">
@@ -2793,8 +3001,13 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
           </div>
         </section>
 
-        <button type="submit" className="w-full py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2" style={{ background: submitColor }}>
-          {mode === "amend" ? "Resubmit Request" : "Submit Request"} <ArrowUpRight size={16} />
+        <button
+          type="submit" disabled={submitting}
+          className="w-full py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-60"
+          style={{ background: submitColor }}
+        >
+          {submitting ? "Submitting…" : (mode === "amend" ? "Resubmit Request" : "Submit Request")}
+          {!submitting && <ArrowUpRight size={16} />}
         </button>
       </form>
     </div>
@@ -2858,6 +3071,7 @@ export default function GrowthCabinetApp() {
   const reload = async () => {
     try {
       const data = await api.fetchAdminData();
+      applyLabGroups(data.labGroups); // must run before setAppData — see LAB_GROUPS/PI_BY_LAB comment
       setAppData(data);
       setLoadError(null);
     } catch (err) {
@@ -2889,6 +3103,7 @@ export default function GrowthCabinetApp() {
   const categoryColors = appData ? appData.categoryColors : {};
   const categoryIdByName = appData ? appData.categoryIdByName : {};
   const labUsageHistory = appData ? appData.labUsageHistory : { labels: [], fullLabels: [], keys: [], series: {} };
+  const labGroups = appData ? appData.labGroups : [];
 
   // Wraps a mutation so a failed Supabase call (RLS denial, constraint
   // violation, network error) surfaces to the admin instead of failing
@@ -2905,6 +3120,12 @@ export default function GrowthCabinetApp() {
   const handleSaveUnit = withErrorAlert(async (data) => {
     await api.saveUnit(data);
     setEditingUnit(undefined);
+    setSelected(null);
+    await reload();
+  });
+
+  const handleDeleteUnit = withErrorAlert(async (unitId) => {
+    await api.deleteUnit(unitId);
     setSelected(null);
     await reload();
   });
@@ -2934,6 +3155,15 @@ export default function GrowthCabinetApp() {
   });
   const handleRemoveCategory = withErrorAlert(async (name) => {
     await api.removeMaintenanceCategory(name);
+    await reload();
+  });
+
+  const handleApproveLabGroup = withErrorAlert(async (id) => {
+    await api.approveLabGroup(id);
+    await reload();
+  });
+  const handleMergeLabGroup = withErrorAlert(async (fromId, intoId) => {
+    await api.mergeLabGroup(fromId, intoId);
     await reload();
   });
 
@@ -3050,7 +3280,11 @@ export default function GrowthCabinetApp() {
 
       <main className="flex-1 p-8 max-w-[1400px]">
         {page === "dashboard" && (
-          <DashboardPage units={units} requests={requests} goInventory={goInventory} goRequisitions={goRequisitions} onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} labUsageHistory={labUsageHistory} />
+          <DashboardPage
+            units={units} requests={requests} goInventory={goInventory} goRequisitions={goRequisitions}
+            onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} labUsageHistory={labUsageHistory}
+            labGroups={labGroups} onApproveLabGroup={handleApproveLabGroup} onMergeLabGroup={handleMergeLabGroup}
+          />
         )}
         {page === "inventory" && (
           <InventoryPage key={inventoryKey} units={units} onSelect={setSelected} onAddNew={() => setEditingUnit(null)} initialFilter={inventoryFilter} />
@@ -3079,6 +3313,7 @@ export default function GrowthCabinetApp() {
           unit={selected}
           onClose={() => setSelected(null)}
           onEdit={(u) => { setEditingUnit(u); }}
+          onDelete={handleDeleteUnit}
           onUpdateServiceLog={handleUpdateServiceLog}
           onAddDocument={handleAddDocument}
           onRemoveDocument={handleRemoveDocument}

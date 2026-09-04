@@ -1,26 +1,85 @@
 import { supabase } from "./supabaseClient";
 
-/* Lab groups aren't editable anywhere in the UI (no add/remove flow exists),
-   and the anonymous Request Space form can't read the lab_groups table at
-   all under RLS (it requires `authenticated`, and an anonymous submitter is
-   `anon`) — so rather than half-wire a dynamic fetch that only the admin
-   side could use, this mirrors the exact seed data from
-   supabase/migrations/20260904121300_seed_lab_groups.sql. If a lab group is
-   ever added/renamed in the database, update this map (and LAB_GROUPS in
-   App.jsx) to match. */
-export const LAB_GROUP_ID_BY_NAME = {
-  "Al-Farsi Lab": "b61c0b3b-aff4-42d5-a0ac-b1c1a0aee60e",
-  "Chen Lab": "eea483f8-122a-4561-8a61-e2fc073264af",
-  "Martins Lab": "75668509-8602-4c66-bcc9-c102f75390b7",
-  "Novak Lab": "c50534d6-0515-41cc-9d01-f070b4070542",
-  "Okafor Lab": "ed5594b8-66d6-414b-9c14-be1362efb74f",
-  "Petrova Lab": "805c5b4b-0907-45ca-8e7d-48648fb22d33",
-  "Singh Lab": "d508f13d-e70b-4ea0-b29a-cd857e7f6483",
-  "Whitfield Lab": "91158291-7d60-4e74-81ba-be9c9d5853d7",
-};
-export const LAB_GROUP_NAME_BY_ID = Object.fromEntries(
-  Object.entries(LAB_GROUP_ID_BY_NAME).map(([name, id]) => [id, name])
-);
+/* Live lab-group lookup, replacing the old hardcoded LAB_GROUP_ID_BY_NAME/
+   LAB_GROUP_NAME_BY_ID maps now that admins can read lab_groups directly
+   and self-registered (pending) PIs need to show up correctly too.
+   Populated by fetchLabGroups() (called at the top of fetchAdminData()) —
+   every admin-side read/write of a lab group name<->id goes through this
+   cache rather than a hardcoded snapshot of the seed data. The anonymous
+   Request Space form never touches this cache — it always resolves a real
+   id itself (via listLabGroups()/findOrCreateLabGroup()) before calling
+   into anything here, since RLS wouldn't let it populate this cache. */
+let labGroupCache = { idByName: {}, nameById: {}, piById: {} };
+
+function setLabGroupCache(rows) {
+  const idByName = {}, nameById = {}, piById = {};
+  rows.forEach((r) => {
+    idByName[r.name] = r.id;
+    nameById[r.id] = r.name;
+    piById[r.id] = r.pi_name;
+  });
+  labGroupCache = { idByName, nameById, piById };
+}
+
+/* Admin-side: ALL lab groups, verified and pending — this is what the
+   Dashboard/Inventory/Requisitions displays and the pending-PIs review
+   panel need. Admins already have direct RLS read access to lab_groups,
+   no RPC needed. */
+export async function fetchLabGroups() {
+  const { data, error } = await supabase.from("lab_groups").select("*").order("pi_name");
+  if (error) throw error;
+  setLabGroupCache(data);
+  return data.map((r) => ({
+    id: r.id, name: r.name, piName: r.pi_name, piEmail: r.pi_email,
+    isVerified: r.is_verified, createdAt: r.created_at,
+  }));
+}
+
+/* Public/anonymous-safe: verified lab groups only, via the SECURITY DEFINER
+   list_lab_groups() RPC (anon can't read lab_groups directly under RLS).
+   Used exclusively by the Request Space form's PI picker — never by the
+   admin side, which must see pending entries too. */
+export async function listLabGroups() {
+  const { data, error } = await supabase.rpc("list_lab_groups");
+  if (error) throw error;
+  return data.map((r) => ({ id: r.id, name: r.name, piName: r.pi_name }));
+}
+
+/* Resolves (or creates, unverified) a lab group for a PI by name/email via
+   the find_or_create_lab_group() RPC. Used by the Request Space form both
+   when a PI fills the form in themselves and when a researcher picks "My
+   PI isn't listed". */
+export async function findOrCreateLabGroup(piName, piEmail) {
+  const { data, error } = await supabase.rpc("find_or_create_lab_group", {
+    p_pi_name: piName,
+    p_pi_email: piEmail || null,
+  });
+  if (error) throw error;
+  return data;
+}
+
+/* Admin review actions for pending (is_verified = false) lab groups. Both
+   are plain authenticated writes — admins already have full RLS access to
+   lab_groups/requisitions/bookings, no dedicated RPC needed. */
+export async function approveLabGroup(id) {
+  const { error } = await supabase.from("lab_groups").update({ is_verified: true }).eq("id", id);
+  if (error) throw error;
+}
+
+/* Re-points every requisition/booking referencing the pending lab group to
+   the chosen existing one, then deletes the now-unreferenced pending row.
+   There's no plain "reject" — a pending row always has at least one
+   referencing requisition (that's how it was created), and lab_groups has
+   no ON DELETE CASCADE from those tables, so an unmerged delete would just
+   fail on the foreign key. */
+export async function mergeLabGroup(fromId, intoId) {
+  let res = await supabase.from("requisitions").update({ lab_group_id: intoId }).eq("lab_group_id", fromId);
+  if (res.error) throw res.error;
+  res = await supabase.from("bookings").update({ lab_group_id: intoId }).eq("lab_group_id", fromId);
+  if (res.error) throw res.error;
+  res = await supabase.from("lab_groups").delete().eq("id", fromId);
+  if (res.error) throw res.error;
+}
 
 const UNIT_FILES_BUCKET = "unit-files";
 
@@ -75,8 +134,10 @@ export async function fetchLabUsageHistory() {
   const { data, error } = await supabase.from("bookings").select("unit_id, lab_group_id, start_date, end_date");
   if (error) throw error;
 
+  // Relies on labGroupCache already being populated — fetchAdminData() calls
+  // fetchLabGroups() before this, which is the only caller of this function.
   const series = {};
-  Object.keys(LAB_GROUP_ID_BY_NAME).forEach((lab) => { series[lab] = new Array(keys.length).fill(0); });
+  Object.values(labGroupCache.nameById).forEach((lab) => { series[lab] = new Array(keys.length).fill(0); });
 
   keys.forEach((key, i) => {
     const [y, m] = key.split("-").map(Number);
@@ -84,7 +145,7 @@ export async function fetchLabUsageHistory() {
     const monthEnd = new Date(y, m, 0); // last day of the month
     const unitsByLab = {};
     data.forEach((b) => {
-      const lab = LAB_GROUP_NAME_BY_ID[b.lab_group_id];
+      const lab = labGroupCache.nameById[b.lab_group_id];
       if (!lab) return;
       if (new Date(b.start_date) > monthEnd || new Date(b.end_date) < monthStart) return;
       (unitsByLab[lab] ||= new Set()).add(b.unit_id);
@@ -144,7 +205,7 @@ function mapBookingRow(b) {
     requisitionId: b.requisition_id,
     researcher: b.researcher_name,
     role: b.role,
-    labGroup: LAB_GROUP_NAME_BY_ID[b.lab_group_id] || "",
+    labGroup: labGroupCache.nameById[b.lab_group_id] || "",
     project: b.project_title,
     discipline: b.discipline,
     setTemp: b.set_temp,
@@ -190,7 +251,8 @@ function mapRequisitionRow(r) {
     email: r.email,
     role: r.role || "",
     emergencyNumber: r.emergency_number || "",
-    labGroup: LAB_GROUP_NAME_BY_ID[r.lab_group_id] || "",
+    labGroupId: r.lab_group_id,
+    labGroup: labGroupCache.nameById[r.lab_group_id] || "",
     pi: r.pi_name || "",
     unitType: r.unit_type,
     discipline: r.discipline,
@@ -224,6 +286,11 @@ function mapRequisitionRow(r) {
    occupancy the moment its requisition is completed (or if it was never
    approved), matching the unit_current_bookings view's semantics. */
 export async function fetchAdminData() {
+  // Must resolve before the Promise.all below — fetchLabUsageHistory() and
+  // the row mappers used inside it all read the module-level
+  // labGroupCache that this call populates.
+  const labGroups = await fetchLabGroups();
+
   const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory] = await Promise.all([
     supabase.from("units").select("*"),
     supabase.from("bookings").select("*, requisitions!inner(status)").eq("requisitions.status", "approved"),
@@ -283,7 +350,10 @@ export async function fetchAdminData() {
     } else {
       status = "free";
     }
-    return { ...base, status, urgency, occupant: current, serviceLog, documents };
+    // `bookings` is kept here too (not just on reftech units) so a free
+    // cabinet with a future-dated approved booking can still show it as
+    // upcoming instead of looking identical to one with nothing booked.
+    return { ...base, status, urgency, occupant: current, bookings, serviceLog, documents };
   });
 
   // photoDataUrl holds a raw storage path from mapUnitRow (units.photo_url)
@@ -309,7 +379,7 @@ export async function fetchAdminData() {
     categoryIdByName[c.name] = c.id;
   });
 
-  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory };
+  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -394,6 +464,17 @@ export async function saveUnit(data) {
   if (error) throw error;
 }
 
+/* bookings/service_log/documents cascade-delete with the unit. requisitions
+   referencing it via assigned_unit_id keep existing (ON DELETE SET NULL) —
+   see supabase/schema.sql's requisitions table comment. The caller is
+   responsible for checking the unit has no active booking first (the app
+   blocks the delete with a message in that case rather than relying on a
+   DB-level guard). */
+export async function deleteUnit(unitId) {
+  const { error } = await supabase.from("units").delete().eq("id", unitId);
+  if (error) throw error;
+}
+
 /* Diffs the whole-array callback the UI already uses (ServiceLogEditor
    always calls onUpdate with the complete new log for a unit) against the
    last-fetched log, translating add/edit/remove into real INSERT/UPDATE/
@@ -464,7 +545,12 @@ function requisitionFieldsToRow(payload) {
     email: payload.email,
     role: nullIfEmpty(payload.role),
     emergency_number: nullIfEmpty(payload.emergencyNumber),
-    lab_group_id: LAB_GROUP_ID_BY_NAME[payload.labGroup] ?? null,
+    // RequestSpacePage always resolves and supplies labGroupId directly
+    // (it can't rely on the admin-only labGroupCache — an anonymous
+    // submitter never populates it). RequisitionEditForm's admin edit path
+    // still only knows the lab group's name, so falls back to the cache,
+    // which IS populated for any session that can reach that form.
+    lab_group_id: payload.labGroupId ?? labGroupCache.idByName[payload.labGroup] ?? null,
     pi_name: nullIfEmpty(payload.pi),
     unit_type: payload.unitType,
     discipline: payload.discipline,
@@ -520,7 +606,7 @@ export async function decideRequisition(req, decision, unitId, decidedByUserId) 
       requisition_id: req.id,
       researcher_name: req.researcher,
       role: nullIfEmpty(req.role),
-      lab_group_id: LAB_GROUP_ID_BY_NAME[req.labGroup] ?? null,
+      lab_group_id: req.labGroupId ?? null,
       project_title: req.projectTitle,
       discipline: req.discipline,
       set_temp: numOrNull(req.setTemp),

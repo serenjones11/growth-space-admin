@@ -69,11 +69,16 @@ create type maintenance_status as enum ('completed', 'scheduled');
 -- A real table instead of a hardcoded list in the frontend, so an admin can
 -- add a new lab group without a code change.
 create table lab_groups (
-  id          uuid primary key default gen_random_uuid(),
-  name        text not null unique,        -- e.g. "Okafor Lab"
-  pi_name     text not null,               -- e.g. "James Okafor"
-  colour_hex  text,                        -- optional: pin a chart colour per lab
-  created_at  timestamptz not null default now()
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null unique,        -- e.g. "Okafor Lab"
+  pi_name      text not null,               -- e.g. "James Okafor"
+  pi_email     text,                        -- used to de-duplicate self-registered PIs
+  colour_hex   text,                        -- optional: pin a chart colour per lab
+  -- Seeded rows are verified on creation. A lab group created via
+  -- find_or_create_lab_group() (a PI self-registering, or a researcher
+  -- picking "My PI isn't listed") starts unverified — see section 15.
+  is_verified  boolean not null default true,
+  created_at   timestamptz not null default now()
 );
 
 
@@ -232,7 +237,10 @@ create table requisitions (
 
   -- lifecycle
   status            requisition_status not null default 'pending',
-  assigned_unit_id  text references units(id),
+  -- ON DELETE SET NULL: deleting a unit (see units' delete policy) clears
+  -- this reference rather than being blocked by, or cascading away, the
+  -- requisition's own history (researcher, PI, dates, status).
+  assigned_unit_id  text references units(id) on delete set null,
   submitted_date    timestamptz not null default now(),
   decided_date      timestamptz,
   decided_by        uuid references profiles(id),
@@ -535,6 +543,111 @@ insert into lab_groups (name, pi_name) values
   ('Whitfield Lab', 'Rachel Whitfield'),
   ('Al-Farsi Lab',  'Yousef Al-Farsi'),
   ('Novak Lab',     'Tomas Novak');
+
+
+-- ----------------------------------------------------------------------------
+-- 15. LAB GROUP / PI LOOKUP FUNCTIONS
+-- ----------------------------------------------------------------------------
+-- Supports the Request Space form's PI field: a PI filling in the form
+-- themselves (role = "PI / Academic Staff") has the requisition attached
+-- directly to them, or a researcher filling it in on someone else's behalf
+-- can pick "My PI isn't listed". Either way, if the PI isn't already in
+-- the database, find_or_create_lab_group() creates a new row for them with
+-- is_verified = false, checking first for a confident (exact, not fuzzy)
+-- name or email match so the same PI submitting more than once doesn't
+-- spawn duplicate pending rows. An admin reviews pending entries via the
+-- app's pending-PIs view — approving (flip is_verified) or merging a
+-- duplicate into an existing verified lab group both happen as plain
+-- authenticated writes, no dedicated RPC needed, since admins already have
+-- full RLS write access to lab_groups/requisitions/bookings.
+--
+-- The anonymous Request Space form can't read or write lab_groups directly
+-- (RLS requires `authenticated` for reads, `is_admin()` for writes) — these
+-- two SECURITY DEFINER functions give it a narrow, safe surface instead of
+-- broadening the table's RLS itself. list_lab_groups() only ever returns
+-- verified rows (it's for the public PI picker); admins list pending ones
+-- by reading the table directly (`select * from lab_groups where not
+-- is_verified`), which their existing RLS access already allows.
+create or replace function list_lab_groups()
+returns table(id uuid, name text, pi_name text)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select id, name, pi_name from lab_groups where is_verified = true order by pi_name;
+$$;
+
+revoke execute on function list_lab_groups() from public;
+grant execute on function list_lab_groups() to anon, authenticated;
+
+create or replace function find_or_create_lab_group(p_pi_name text, p_pi_email text default null)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+  v_norm_name text;
+  v_surname text;
+  v_name text;
+  v_suffix int := 0;
+begin
+  p_pi_name := trim(p_pi_name);
+  if p_pi_name = '' then
+    raise exception 'PI name must not be empty';
+  end if;
+  p_pi_email := nullif(trim(p_pi_email), '');
+
+  -- Strongest identity signal first: an exact email match, verified or not
+  -- (so the same not-yet-verified PI submitting again reuses their pending
+  -- row instead of spawning another one).
+  if p_pi_email is not null then
+    select id into v_id from lab_groups where lower(pi_email) = lower(p_pi_email) limit 1;
+    if v_id is not null then
+      return v_id;
+    end if;
+  end if;
+
+  -- Otherwise, an exact (whitespace/case-normalized) name match — avoids an
+  -- obvious duplicate for the same PI. Deliberately NOT fuzzy/similarity
+  -- matching: a near-miss (e.g. "J. Okafor" vs "James Okafor") still
+  -- creates a new pending row rather than risking a wrong auto-merge —
+  -- that's what the admin merge tool is for.
+  v_norm_name := regexp_replace(lower(p_pi_name), '\s+', ' ', 'g');
+  select id into v_id from lab_groups
+    where regexp_replace(lower(pi_name), '\s+', ' ', 'g') = v_norm_name
+    limit 1;
+  if v_id is not null then
+    -- Backfill the email if this row doesn't have one yet, so a later call
+    -- with a differently-spelled name but the same email can still match
+    -- by email instead of creating an avoidable duplicate.
+    if p_pi_email is not null then
+      update lab_groups set pi_email = p_pi_email where id = v_id and pi_email is null;
+    end if;
+    return v_id;
+  end if;
+
+  -- No confident match — create a new, unverified entry for an admin to
+  -- review. Name matches the existing seed convention ("James Okafor" ->
+  -- "Okafor Lab").
+  v_surname := (regexp_match(p_pi_name, '(\S+)$'))[1];
+  v_name := v_surname || ' Lab';
+  while exists (select 1 from lab_groups where name = v_name) loop
+    v_suffix := v_suffix + 1;
+    v_name := v_surname || ' Lab ' || v_suffix;
+  end loop;
+
+  insert into lab_groups (name, pi_name, pi_email, is_verified)
+    values (v_name, p_pi_name, p_pi_email, false)
+    returning id into v_id;
+  return v_id;
+end;
+$$;
+
+revoke execute on function find_or_create_lab_group(text, text) from public;
+grant execute on function find_or_create_lab_group(text, text) to anon, authenticated;
 
 -- ============================================================================
 -- End of schema. Next steps once this has run cleanly:
