@@ -818,22 +818,22 @@ function LabUsageTrend({ units, labUsageHistory }) {
         </svg>
       </div>
 
-      <div className="flex flex-wrap gap-x-4 gap-y-2 mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+      <div className="flex flex-wrap gap-x-5 gap-y-3 mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
         {series.map((s) => (
           <button
             key={s.lab}
             onClick={() => setIsolatedLab((cur) => (cur === s.lab ? null : s.lab))}
             onMouseEnter={() => setHoveredLab(s.lab)}
             onMouseLeave={() => setHoveredLab(null)}
-            className="flex items-center gap-1.5 text-[11.5px] font-semibold"
+            className="flex items-center gap-2 text-sm font-semibold"
             style={{ color: isolatedLab === s.lab ? s.color : "var(--ink-soft)", opacity: isolatedLab && isolatedLab !== s.lab ? 0.4 : 1 }}
           >
-            <svg width="10" height="10"><LineMarker cx={5} cy={5} color={s.color} r={3.4} /></svg>
+            <svg width="14" height="14"><LineMarker cx={7} cy={7} color={s.color} r={5} /></svg>
             {piDisplay(s.lab)}
           </button>
         ))}
         {isolatedLab && (
-          <button onClick={() => setIsolatedLab(null)} className="text-[11.5px] font-bold underline" style={{ color: "var(--accent-dark)" }}>Show all</button>
+          <button onClick={() => setIsolatedLab(null)} className="text-sm font-bold underline" style={{ color: "var(--accent-dark)" }}>Show all</button>
         )}
       </div>
     </div>
@@ -1279,7 +1279,7 @@ function buildMonthRange(yearsBack, yearsForward) {
   const end = new Date(TODAY.getFullYear() + yearsForward, TODAY.getMonth(), 1);
   while (d <= end) {
     keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-    fullLabels.push(d.toLocaleDateString("en-GB", { month: "long", year: "numeric" }));
+    fullLabels.push(d.toLocaleDateString("en-GB", { month: "short", year: "numeric" }));
     d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
   }
   return { keys, fullLabels };
@@ -1647,24 +1647,56 @@ const FILTER_CHIPS = [
   { key: "warning", label: "Ending soon" }, { key: "overdue", label: "Overdue" }, { key: "service", label: "Out of Service" },
 ];
 
-function exportUnitsCSV(units) {
-  const headers = ["ID", "Type", "Floor", "Room", "Manufacturer", "Model", "Discipline", "Status", "Researcher", "PI", "Until"];
-  const rows = units.map((u) => {
-    const s = displayStatus(u);
-    const occ = unitOccupant(u);
-    return [
-      u.id, u.type === "reftech" ? "Reftech Room" : "Growth Cabinet", FLOOR_LABEL[u.floor], u.room,
-      u.manufacturer, u.model, unitDiscipline(u) ? DISCIPLINE_META[unitDiscipline(u)].label : "", s.label,
-      occ ? occ.researcher : "", occ ? (PI_BY_LAB[occ.labGroup] || "") : "", occ ? fmtGB(occ.endDate) : "",
-    ];
-  });
-  const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+function downloadCSV(headers, rows, filename) {
+  const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = `inventory-${fmt(TODAY)}.csv`;
+  a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function exportUnitsCSV(units) {
+  const headers = [
+    "ID", "Type", "Floor", "Room", "Manufacturer", "Model", "Serial Number", "Asset Number", "TSCAN ID",
+    "Install Date", "Next Service Due", "Temp Range (°C)", "Humidity Range (%)", "Status",
+    "Researcher(s)", "PI(s)", "Discipline(s)", "Until", "Notes",
+  ];
+  const rows = units.map((u) => {
+    const s = displayStatus(u);
+    // Every currently-active booking, not just unitOccupant()'s first one
+    // — a reftech room's normal simultaneous occupants, or a cabinet
+    // clash, would otherwise silently drop out of the export.
+    const current = currentBookingsList(u);
+    const disciplines = [...new Set(current.map((b) => DISCIPLINE_META[b.discipline]?.label).filter(Boolean))];
+    return [
+      u.id, u.type === "reftech" ? "Reftech Room" : "Growth Cabinet", FLOOR_LABEL[u.floor], u.room,
+      u.manufacturer, u.model, u.serialNumber, u.assetNumber, u.tscanId,
+      fmtGB(u.installDate), fmtGB(u.nextServiceDue), `${u.tempRange[0]}–${u.tempRange[1]}`, `${u.humidityRange[0]}–${u.humidityRange[1]}`, s.label,
+      current.map((b) => b.researcher).join("; "), current.map((b) => PI_BY_LAB[b.labGroup] || "").join("; "),
+      disciplines.join("; "), current.map((b) => fmtGB(b.endDate)).join("; "), u.notes,
+    ];
+  });
+  downloadCSV(headers, rows, `inventory-${fmt(TODAY)}.csv`);
+}
+
+const REQUISITION_STATUS_LABEL = { pending: "Pending review", approved: "Ongoing", completed: "Completed", declined: "Declined" };
+function exportRequisitionsCSV(requests) {
+  const headers = [
+    "Researcher", "Email", "Role", "PI", "Lab Group", "Unit Type", "Discipline", "Species", "Containment Level",
+    "Project Title", "Preferred Floor", "Assigned Unit", "Status", "Start Date", "End Date",
+    "Submitted", "Decided", "Completed", "Admin Notes",
+  ];
+  const rows = requests.map((r) => [
+    r.researcher, r.email, r.role, r.pi, r.labGroup,
+    r.unitType === "reftech" ? "Reftech Room" : "Growth Cabinet", DISCIPLINE_META[r.discipline]?.label || r.discipline,
+    (r.species || []).join("; "), r.containmentLevel, r.projectTitle,
+    r.preferredFloor === "any" ? "Any" : FLOOR_LABEL[r.preferredFloor] || r.preferredFloor, r.assignedUnitId || "",
+    REQUISITION_STATUS_LABEL[r.status] || r.status, fmtGB(r.startDate), fmtGB(r.endDate),
+    fmtGB(r.submittedDate), fmtGB(r.decidedDate), fmtGB(r.completedDate), r.adminNotes,
+  ]);
+  downloadCSV(headers, rows, `requisitions-${fmt(TODAY)}.csv`);
 }
 
 function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
@@ -1722,7 +1754,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
             Export CSV
           </button>
           <button onClick={onAddNew} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl text-white" style={{ background: "var(--accent-dark)" }}>
-            <PlusCircle size={15} /> Add Space
+            <PlusCircle size={15} /> Add CER
           </button>
         </div>
       </div>
@@ -3078,6 +3110,11 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
   const cabinetCount = relevantForCounts.filter((r) => r.unitType === "cabinet").length;
   const reftechCount = relevantForCounts.filter((r) => r.unitType === "reftech").length;
 
+  // Exports whichever set is actually on screen — Active (pending + ongoing)
+  // or the filtered Completed/Declined history — matching the inventory
+  // page's "export what's currently shown" behaviour.
+  const visibleForExport = (tab === "pending" ? [...awaitingReview, ...ongoing] : filteredHistoric).map(({ r }) => r);
+
   return (
     <div>
       {returnUnitId && (
@@ -3094,13 +3131,18 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           <h1 className="gc-display text-2xl font-extrabold">Requisitions</h1>
           <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>{requests.length} requests submitted via the request-space form</p>
         </div>
-        <div className="flex items-center rounded-xl border p-1" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-          <button onClick={() => setTab("pending")} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "pending" ? "var(--sidebar-bg)" : "transparent", color: tab === "pending" ? "#fff" : "var(--ink-soft)" }}>
-            <Clock size={14} /> Active {activeCount > 0 && <span className="text-[10px] font-bold">({activeCount})</span>}
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          <button onClick={() => exportRequisitionsCSV(visibleForExport)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--ink)" }}>
+            Export CSV
           </button>
-          <button onClick={() => setTab("completed")} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "completed" ? "var(--sidebar-bg)" : "transparent", color: tab === "completed" ? "#fff" : "var(--ink-soft)" }}>
-            <History size={14} /> Completed
-          </button>
+          <div className="flex items-center rounded-xl border p-1" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+            <button onClick={() => setTab("pending")} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "pending" ? "var(--sidebar-bg)" : "transparent", color: tab === "pending" ? "#fff" : "var(--ink-soft)" }}>
+              <Clock size={14} /> Active {activeCount > 0 && <span className="text-[10px] font-bold">({activeCount})</span>}
+            </button>
+            <button onClick={() => setTab("completed")} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "completed" ? "var(--sidebar-bg)" : "transparent", color: tab === "completed" ? "#fff" : "var(--ink-soft)" }}>
+              <History size={14} /> Completed
+            </button>
+          </div>
         </div>
       </div>
 
