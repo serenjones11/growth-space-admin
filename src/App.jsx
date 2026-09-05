@@ -42,6 +42,7 @@ import {
   Trash2,
   CalendarPlus,
   Refrigerator,
+  Calendar,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -124,8 +125,37 @@ const TOKENS = `
   .gc-input {
     width: 100%; border: 1px solid var(--border); border-radius: 10px;
     padding: 9px 11px; font-size: 14px; background: var(--surface); outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .gc-input:focus { border-color: var(--accent); }
+  .gc-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .gc-input[type="date"] {
+    padding-left: 34px; cursor: pointer; color-scheme: light;
+  }
+  .gc-input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer; padding: 3px; border-radius: 6px; opacity: 0.55; transition: opacity 0.15s, background 0.15s;
+  }
+  .gc-input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; background: var(--surface-soft); }
+  /* Modern slider: thin two-tone track (filled portion painted by
+     --gc-slider-fill, set inline per-instance) with a larger bordered
+     thumb, in place of the browser's default thin grey scrubber. */
+  .gc-slider {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 999px;
+    background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--gc-slider-fill, 0%), var(--border) var(--gc-slider-fill, 0%), var(--border) 100%);
+    outline: none; cursor: pointer;
+  }
+  .gc-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--surface); border: 3px solid var(--accent); box-shadow: 0 2px 6px rgba(22,33,29,0.25);
+    cursor: pointer; transition: transform 0.12s;
+  }
+  .gc-slider::-webkit-slider-thumb:hover { transform: scale(1.12); }
+  .gc-slider::-moz-range-track { height: 6px; border-radius: 999px; background: var(--border); }
+  .gc-slider::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--accent); }
+  .gc-slider::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--surface); border: 3px solid var(--accent);
+    box-shadow: 0 2px 6px rgba(22,33,29,0.25); cursor: pointer; transition: transform 0.12s;
+  }
+  .gc-slider::-moz-range-thumb:hover { transform: scale(1.12); }
   .gc-clickable { cursor: pointer; transition: transform 0.12s ease, box-shadow 0.12s ease; }
   .gc-clickable:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -14px rgba(22,33,29,0.16); }
   .gc-readout { background: var(--chip-bg); border-radius: 10px; padding: 9px 4px; text-align: center; }
@@ -404,6 +434,35 @@ function Field({ label, children }) {
       <span className="text-xs font-medium block mb-1" style={{ color: "var(--ink-soft)" }}>{label}</span>
       {children}
     </label>
+  );
+}
+
+/* Date input with a leading calendar glyph — used everywhere a plain
+   type="date" input used to sit alone, so every date picker in the app
+   looks and behaves the same way instead of varying by whichever form
+   happened to add one. */
+function DateField({ label, value, onChange, required = false }) {
+  return (
+    <Field label={label}>
+      <div className="relative">
+        <Calendar size={15} className="pointer-events-none" style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--ink-faint)" }} />
+        <input required={required} type="date" value={value} onChange={onChange} className="gc-input gc-date" />
+      </div>
+    </Field>
+  );
+}
+
+/* Checkbox styled to match the height/border of the other gc-input fields
+   it sits beside in a form grid, instead of a bare checkbox that needs a
+   manual top-margin fudge to line up with its neighbours. */
+function CheckField({ label, checked, onChange }) {
+  return (
+    <Field label={label}>
+      <label className="gc-input flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+        <input type="checkbox" checked={checked} onChange={onChange} style={{ accentColor: "var(--accent)" }} />
+        <span className="text-sm font-medium">{checked ? "Yes" : "No"}</span>
+      </label>
+    </Field>
   );
 }
 
@@ -2013,7 +2072,7 @@ function SectionLabel({ children }) {
 }
 /* Grey box heading used for the spec boxes (Asset Info / Environment & Controls / requisition sections) */
 function BoxLabel({ children }) {
-  return <h3 className="gc-display text-[13px] font-bold mb-1" style={{ color: "var(--ink)" }}>{children}</h3>;
+  return <h3 className="gc-display text-[13px] font-bold mb-2.5" style={{ color: "var(--ink)" }}>{children}</h3>;
 }
 /* Definition-list style field row — label left, value right, a hairline divider between rows.
    Arranged two-up by the caller (FieldGrid) so it stays compact without feeling like a spreadsheet. */
@@ -2178,7 +2237,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
           )}
 
           <div className="grid grid-cols-2 gap-2.5">
-            <Field label={status === "scheduled" ? "Date due" : "Date completed"}><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="gc-input" /></Field>
+            <DateField label={status === "scheduled" ? "Date due" : "Date completed"} value={date} onChange={(e) => setDate(e.target.value)} />
             <Field label={status === "scheduled" ? "Contractor (optional)" : "Contractor"}><input value={engineer} onChange={(e) => setEngineer(e.target.value)} className="gc-input" placeholder="e.g. R. Adeyemi" /></Field>
           </div>
           <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="gc-input" placeholder="What was done, or what's planned…" /></Field>
@@ -2738,7 +2797,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
           {form.type === "cabinet" && (
             <Field label="Shelves"><input type="number" min={1} value={form.shelves} onChange={set("shelves")} className="gc-input" /></Field>
           )}
-          <Field label="Install date"><input type="date" value={form.installDate} onChange={set("installDate")} className="gc-input" /></Field>
+          <DateField label="Install date" value={form.installDate} onChange={set("installDate")} />
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Temp range (°C)">
@@ -2883,12 +2942,12 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
     : [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <Field label="Project title"><input value={form.projectTitle} onChange={set("projectTitle")} className="gc-input font-semibold" /></Field>
 
       <InfoBox>
         <BoxLabel>Requester</BoxLabel>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3.5">
           <Field label="Name"><input value={form.researcher} onChange={set("researcher")} className="gc-input" /></Field>
           <Field label="Role"><select value={form.role || ROLES[0]} onChange={set("role")} className="gc-input">{ROLES.map((r) => <option key={r}>{r}</option>)}</select></Field>
           <Field label="Email"><input value={form.email} onChange={set("email")} className="gc-input" /></Field>
@@ -2907,7 +2966,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
 
       <InfoBox>
         <BoxLabel>Space &amp; Environment</BoxLabel>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3.5">
           <Field label="Space type">
             <select value={form.unitType} onChange={set("unitType")} className="gc-input">
               <option value="cabinet">Growth cabinet</option>
@@ -2937,19 +2996,19 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
             </select>
           </Field>
           {isPlant ? (
-            <Field label="Pest outbreak consent"><label className="flex items-center gap-2 text-sm mt-2.5"><input type="checkbox" checked={!!form.pestConsent} onChange={setBool("pestConsent")} /> Consented</label></Field>
+            <CheckField label="Pest outbreak consent" checked={!!form.pestConsent} onChange={setBool("pestConsent")} />
           ) : (
-            <Field label="Dimming required"><label className="flex items-center gap-2 text-sm mt-2.5"><input type="checkbox" checked={!!form.dimmingRequired} onChange={setBool("dimmingRequired")} /> Required</label></Field>
+            <CheckField label="Dimming required" checked={!!form.dimmingRequired} onChange={setBool("dimmingRequired")} />
           )}
-          <Field label="Safety compliance"><label className="flex items-center gap-2 text-sm mt-2.5"><input type="checkbox" checked={!!form.safetyCompliance} onChange={setBool("safetyCompliance")} /> Confirmed</label></Field>
+          <CheckField label="Safety compliance" checked={!!form.safetyCompliance} onChange={setBool("safetyCompliance")} />
         </div>
       </InfoBox>
 
       <InfoBox>
         <BoxLabel>Schedule</BoxLabel>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Start date"><input type="date" value={form.startDate} onChange={set("startDate")} className="gc-input" /></Field>
-          <Field label="End date"><input type="date" value={form.endDate} onChange={set("endDate")} className="gc-input" /></Field>
+        <div className="grid grid-cols-2 gap-3.5">
+          <DateField label="Start date" value={form.startDate} onChange={set("startDate")} />
+          <DateField label="End date" value={form.endDate} onChange={set("endDate")} />
           <Field label="Preferred floor">
             <select value={form.preferredFloor} onChange={set("preferredFloor")} className="gc-input">
               <option value="any">No preference</option>
@@ -2958,7 +3017,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
           </Field>
         </div>
         {clashes.length > 0 && (
-          <div className="mt-3 rounded-xl p-3 flex items-start gap-2" style={{ background: "var(--warning-soft)", border: "1px solid var(--warning)" }}>
+          <div className="mt-3.5 rounded-xl p-3 flex items-start gap-2" style={{ background: "var(--warning-soft)", border: "1px solid var(--warning)" }}>
             <AlertTriangle size={15} style={{ color: "var(--warning)", flexShrink: 0, marginTop: 1 }} />
             <div className="text-xs" style={{ color: "var(--accent-ink)" }}>
               <strong>These dates clash with {clashes.length} other booking{clashes.length !== 1 ? "s" : ""} on {assignedUnit.id}:</strong>{" "}
@@ -2968,9 +3027,14 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
         )}
       </InfoBox>
 
-      <Field label="Space required"><textarea value={form.spaceDescription || ""} onChange={set("spaceDescription")} rows={2} className="gc-input" /></Field>
-      <Field label="Purpose of project"><textarea value={form.projectDesc || ""} onChange={set("projectDesc")} rows={3} className="gc-input" /></Field>
-      <Field label="Additional notes"><textarea value={form.notes || ""} onChange={set("notes")} rows={2} className="gc-input" /></Field>
+      <InfoBox>
+        <BoxLabel>Details</BoxLabel>
+        <div className="space-y-3.5">
+          <Field label="Space required"><textarea value={form.spaceDescription || ""} onChange={set("spaceDescription")} rows={2} className="gc-input" /></Field>
+          <Field label="Purpose of project"><textarea value={form.projectDesc || ""} onChange={set("projectDesc")} rows={3} className="gc-input" /></Field>
+          <Field label="Additional notes"><textarea value={form.notes || ""} onChange={set("notes")} rows={2} className="gc-input" /></Field>
+        </div>
+      </InfoBox>
 
       <div className="flex gap-2 pt-1">
         <button onClick={() => onSave(form)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl text-white" style={{ background: "var(--accent-dark)" }}>
@@ -3494,14 +3558,21 @@ const WIZARD_STEPS_NEW = ["mode", "spaceType", "discipline", "form"];
 const WIZARD_STEPS_AMEND = ["mode", "spaceType", "discipline", "pickExisting", "form"];
 
 /* Small components used only by the discipline-specific request forms */
-function SliderField({ label, value, onChange, min, max, unit }) {
+function SliderField({ label, value, onChange, min, max, unit, icon: Icon }) {
+  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
   return (
     <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--ink-soft)" }}>{label}</span>
-        <span className="text-sm font-bold gc-mono">{value}{unit}</span>
+      <div className="flex items-center justify-between mb-2">
+        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--ink-soft)" }}>
+          {Icon && <Icon size={13} style={{ color: "var(--accent-dark)" }} />}
+          {label}
+        </span>
+        <span className="text-sm font-extrabold gc-mono px-2 py-0.5 rounded-lg" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>{value}{unit}</span>
       </div>
-      <input type="range" min={min} max={max} value={value} onChange={onChange} className="w-full" style={{ accentColor: "var(--accent)" }} />
+      <input
+        type="range" min={min} max={max} value={value} onChange={onChange}
+        className="w-full gc-slider" style={{ "--gc-slider-fill": `${pct}%` }}
+      />
     </div>
   );
 }
@@ -3943,7 +4014,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
               <span className="text-sm font-bold" style={{ color: "var(--accent-ink)" }}>Safety Compliance</span>
             </div>
             <label className="flex items-start gap-2 text-sm">
-              <input type="checkbox" className="mt-0.5" checked={form.safetyCompliance} onChange={setBool("safetyCompliance")} />
+              <input type="checkbox" className="mt-0.5" checked={form.safetyCompliance} onChange={setBool("safetyCompliance")} style={{ accentColor: "var(--accent)" }} />
               <span>
                 All relevant safety information is in place (risk assessments, SOPs{isPlant ? "" : ", containment protocols"}, etc.)
               </span>
@@ -3959,8 +4030,8 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
             </p>
           )}
           <div className="grid grid-cols-2 gap-5">
-            <SliderField label={`Temperature${isReftech ? " (optional)" : ""}`} value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" />
-            <SliderField label={`Humidity${isReftech ? " (optional)" : ""}`} value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" />
+            <SliderField label={`Temperature${isReftech ? " (optional)" : ""}`} value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" icon={Thermometer} />
+            <SliderField label={`Humidity${isReftech ? " (optional)" : ""}`} value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" icon={Droplets} />
           </div>
           <div className="grid grid-cols-2 gap-3 items-end">
             <Field label={`Light Cycle${isReftech ? " (optional)" : ""}`}>
@@ -3970,14 +4041,16 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
               <div className="rounded-xl p-3" style={{ background: "var(--overdue-soft)", border: "1px solid var(--overdue)" }}>
                 <div className="text-xs font-bold mb-1.5" style={{ color: "var(--overdue)" }}>Pest Outbreak Protocol</div>
                 <label className="flex items-start gap-2 text-xs">
-                  <input type="checkbox" className="mt-0.5" checked={form.pestConsent} onChange={setBool("pestConsent")} />
+                  <input type="checkbox" className="mt-0.5" checked={form.pestConsent} onChange={setBool("pestConsent")} style={{ accentColor: "var(--overdue)" }} />
                   <span>If required due to a pest outbreak, I consent to pesticides being sprayed</span>
                 </label>
               </div>
             ) : (
-              <label className="flex items-center gap-2 text-sm h-11">
-                <input type="checkbox" checked={form.dimmingRequired} onChange={setBool("dimmingRequired")} /> Dimming required
-              </label>
+              <div className="rounded-xl p-3 flex items-center" style={{ background: "var(--surface-soft)", border: "1px solid var(--border)" }}>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={form.dimmingRequired} onChange={setBool("dimmingRequired")} style={{ accentColor: "var(--accent)" }} /> Dimming required
+                </label>
+              </div>
             )}
           </div>
         </section>
@@ -3985,8 +4058,8 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
         <section className="space-y-4">
           <FormSectionTitle>Scheduling</FormSectionTitle>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Start Date *"><input required type="date" value={form.startDate} onChange={set("startDate")} className="gc-input" /></Field>
-            <Field label="End Date *"><input required type="date" value={form.endDate} onChange={set("endDate")} className="gc-input" /></Field>
+            <DateField label="Start Date *" value={form.startDate} onChange={set("startDate")} required />
+            <DateField label="End Date *" value={form.endDate} onChange={set("endDate")} required />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Preferred Floor">
@@ -3995,7 +4068,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
                 {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
               </select>
             </Field>
-            <Field label="Additional Notes"><textarea value={form.notes} onChange={set("notes")} className="gc-input" rows={1} placeholder="Special requirements…" /></Field>
+            <Field label="Additional Notes"><textarea value={form.notes} onChange={set("notes")} className="gc-input" rows={2} placeholder="Special requirements…" /></Field>
           </div>
 
           <div className="flex items-start gap-2.5 rounded-xl p-3.5 text-sm" style={{ background: "var(--occupied-soft)", color: "var(--ink)" }}>
