@@ -2838,7 +2838,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
           <Field label="Role"><select value={form.role || ROLES[0]} onChange={set("role")} className="gc-input">{ROLES.map((r) => <option key={r}>{r}</option>)}</select></Field>
           <Field label="Email"><input value={form.email} onChange={set("email")} className="gc-input" /></Field>
           <Field label="Emergency number"><input value={form.emergencyNumber || ""} onChange={set("emergencyNumber")} className="gc-input" /></Field>
-          <Field label="PI">
+          <Field label="PI/Supervisor">
             <select
               value={form.labGroup}
               onChange={(e) => { const lab = e.target.value; setForm((f) => ({ ...f, labGroup: lab, pi: PI_BY_LAB[lab] || "" })); }}
