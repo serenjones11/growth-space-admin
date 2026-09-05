@@ -128,13 +128,6 @@ const TOKENS = `
     transition: border-color 0.15s, box-shadow 0.15s;
   }
   .gc-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-  .gc-input[type="date"] {
-    padding-left: 34px; cursor: pointer; color-scheme: light;
-  }
-  .gc-input[type="date"]::-webkit-calendar-picker-indicator {
-    cursor: pointer; padding: 3px; border-radius: 6px; opacity: 0.55; transition: opacity 0.15s, background 0.15s;
-  }
-  .gc-input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; background: var(--surface-soft); }
   /* Modern slider: thin two-tone track (filled portion painted by
      --gc-slider-fill, set inline per-instance) with a larger bordered
      thumb, in place of the browser's default thin grey scrubber. */
@@ -437,16 +430,87 @@ function Field({ label, children }) {
   );
 }
 
-/* Date input with a leading calendar glyph — used everywhere a plain
-   type="date" input used to sit alone, so every date picker in the app
-   looks and behaves the same way instead of varying by whichever form
-   happened to add one. */
-function DateField({ label, value, onChange, required = false }) {
+const WEEKDAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+function isSameDate(a, b) { return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+
+/* Custom calendar popup replacing the browser's native type="date" input —
+   that native control can't be restyled beyond its edges (the actual
+   picker is drawn by the OS, not the page), so it never stopped looking
+   dated no matter how the surrounding field was styled. This one is built
+   entirely out of the app's own components/colours instead, the same way
+   MonthPickerButton already does for month-only pickers. Still emits a
+   plain {target:{value}} on change so every existing onChange={set(...)}
+   call site works unmodified. */
+function DateField({ label, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? new Date(value + "T00:00:00") : null;
+  const [viewDate, setViewDate] = useState(selected || TODAY);
+
+  useEffect(() => { if (open) setViewDate(selected || TODAY); }, [open]);
+
+  const pick = (d) => { onChange({ target: { value: isoDate(d) } }); setOpen(false); };
+
+  const monthStart = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+  const leadingBlanks = (monthStart.getDay() + 6) % 7; // week starts Monday
+  const daysInMonth = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0).getDate();
+  const cells = [...Array(leadingBlanks).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+
   return (
     <Field label={label}>
       <div className="relative">
-        <Calendar size={15} className="pointer-events-none" style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: "var(--ink-faint)" }} />
-        <input required={required} type="date" value={value} onChange={onChange} className="gc-input gc-date" />
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="gc-input flex items-center gap-2 text-left"
+          style={{ color: value ? "var(--ink)" : "var(--ink-faint)" }}
+        >
+          <Calendar size={15} style={{ color: "var(--ink-faint)", flexShrink: 0 }} />
+          {value ? fmtGB(value) : "Select a date"}
+        </button>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+            <div
+              className="absolute z-30 mt-2 rounded-2xl p-3.5"
+              style={{ width: 268, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 18px 44px -18px rgba(22,33,29,0.35)" }}
+            >
+              <div className="flex items-center justify-between mb-2.5">
+                <button type="button" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1))} className="w-7 h-7 flex items-center justify-center rounded-lg" style={{ color: "var(--ink-soft)" }}><ChevronLeft size={14} /></button>
+                <span className="gc-display text-xs font-bold">{viewDate.toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</span>
+                <button type="button" onClick={() => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1))} className="w-7 h-7 flex items-center justify-center rounded-lg" style={{ color: "var(--ink-soft)" }}><ChevronRight size={14} /></button>
+              </div>
+              <div className="grid grid-cols-7 mb-1">
+                {WEEKDAY_LETTERS.map((d, i) => <span key={i} className="text-[10px] font-bold text-center" style={{ color: "var(--ink-faint)" }}>{d}</span>)}
+              </div>
+              <div className="grid grid-cols-7 gap-y-1">
+                {cells.map((d, i) => {
+                  if (d === null) return <span key={i} />;
+                  const cellDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), d);
+                  const isSelected = isSameDate(cellDate, selected);
+                  const isToday = isSameDate(cellDate, TODAY);
+                  return (
+                    <button
+                      key={i} type="button" onClick={() => pick(cellDate)}
+                      className="text-[12px] font-semibold rounded-lg mx-auto"
+                      style={{
+                        width: 30, height: 30,
+                        background: isSelected ? "var(--accent)" : "transparent",
+                        color: isSelected ? "#fff" : "var(--ink)",
+                        border: isToday && !isSelected ? "1px solid var(--accent)" : "1px solid transparent",
+                      }}
+                    >
+                      {d}
+                    </button>
+                  );
+                })}
+              </div>
+              <button type="button" onClick={() => pick(TODAY)} className="w-full mt-2.5 text-xs font-bold py-1.5 rounded-lg" style={{ background: "var(--surface-soft)", color: "var(--accent-dark)" }}>
+                Today
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </Field>
   );
@@ -3677,18 +3741,47 @@ function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
   );
 }
 
+/* Checkbox dropdown — open once, tick several species, close — instead of
+   the old "pick one from a select, it gets added and the select resets,
+   repeat" flow, which only supported multiple species one re-open at a
+   time. */
 function SpeciesPicker({ species, onChange, options }) {
+  const [open, setOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
-  const addSpecies = (val) => { if (!val || species.includes(val)) return; onChange([...species, val]); };
+  const toggleSpecies = (val) => onChange(species.includes(val) ? species.filter((s) => s !== val) : [...species, val]);
   const removeSpecies = (val) => onChange(species.filter((s) => s !== val));
+  const addCustom = (val) => { if (!val || species.includes(val)) return; onChange([...species, val]); };
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
-        <select className="gc-input flex-1" value="" onChange={(e) => addSpecies(e.target.value)}>
-          <option value="">— Add a species —</option>
-          {options.filter((o) => !species.includes(o)).map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
+        <div className="relative flex-1">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="gc-input w-full flex items-center justify-between text-left"
+            style={{ color: species.length ? "var(--ink)" : "var(--ink-faint)" }}
+          >
+            {species.length ? `${species.length} species selected` : "Select species…"}
+            <ChevronDown size={14} style={{ color: "var(--ink-faint)", flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+          </button>
+          {open && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+              <div
+                className="gc-scroll absolute z-30 mt-2 rounded-2xl p-2"
+                style={{ width: "100%", maxHeight: 240, overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 18px 44px -18px rgba(22,33,29,0.35)" }}
+              >
+                {options.map((o) => (
+                  <label key={o} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm cursor-pointer" style={{ background: species.includes(o) ? "var(--accent-soft)" : "transparent" }}>
+                    <input type="checkbox" checked={species.includes(o)} onChange={() => toggleSpecies(o)} style={{ accentColor: "var(--accent)" }} />
+                    {o}
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
         <button type="button" onClick={() => setCustomOpen((v) => !v)} className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface)" }} title="Add a custom species">
           <PlusCircle size={16} style={{ color: "var(--accent-ink)" }} />
         </button>
@@ -3696,7 +3789,7 @@ function SpeciesPicker({ species, onChange, options }) {
       {customOpen && (
         <div className="flex gap-2">
           <input className="gc-input flex-1" placeholder="Custom species name" value={customValue} onChange={(e) => setCustomValue(e.target.value)} />
-          <button type="button" onClick={() => { addSpecies(customValue.trim()); setCustomValue(""); setCustomOpen(false); }} className="px-3 rounded-xl text-sm font-semibold text-white flex-shrink-0" style={{ background: "var(--gradient)" }}>Add</button>
+          <button type="button" onClick={() => { addCustom(customValue.trim()); setCustomValue(""); setCustomOpen(false); }} className="px-3 rounded-xl text-sm font-semibold text-white flex-shrink-0" style={{ background: "var(--gradient)" }}>Add</button>
         </div>
       )}
       {species.length > 0 && (
@@ -3715,7 +3808,7 @@ function SpeciesPicker({ species, onChange, options }) {
 /* Form section heading styled to match the reference requisition forms */
 function FormSectionTitle({ children }) {
   return (
-    <h3 className="text-xs font-bold uppercase tracking-wider pb-2 border-b" style={{ color: "var(--ink-faint)", borderColor: "var(--border)" }}>
+    <h3 className="gc-display text-xs font-bold uppercase tracking-wider pb-2 border-b" style={{ color: "var(--ink-faint)", borderColor: "var(--border)" }}>
       {children}
     </h3>
   );
@@ -3923,6 +4016,13 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
         onSubmit={async (e) => {
           e.preventDefault();
           if (submitting) return;
+          // DateField is a custom picker (not a real <input>), so a native
+          // "required" attribute can't stop submission the way it does for
+          // the other fields above — check explicitly instead.
+          if (!form.startDate || !form.endDate) {
+            window.alert("Please select a start and end date.");
+            return;
+          }
           setSubmitting(true);
           try {
             const isPiThemself = form.role === "PI / Academic Staff";
@@ -4008,14 +4108,14 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
             <textarea value={form.projectDesc} onChange={set("projectDesc")} className="gc-input" rows={3} />
           </Field>
 
-          <div className="rounded-2xl p-4" style={{ background: "var(--warning-soft)", border: "1px solid var(--warning)" }}>
+          <div className="rounded-xl p-4" style={{ background: "var(--surface-soft)", borderLeft: "3px solid var(--accent)" }}>
             <div className="flex items-center gap-2 mb-2">
-              <ShieldAlert size={15} style={{ color: "var(--warning)" }} />
-              <span className="text-sm font-bold" style={{ color: "var(--accent-ink)" }}>Safety Compliance</span>
+              <ShieldAlert size={15} style={{ color: "var(--accent-dark)" }} />
+              <span className="text-sm font-bold">Safety Compliance</span>
             </div>
             <label className="flex items-start gap-2 text-sm">
               <input type="checkbox" className="mt-0.5" checked={form.safetyCompliance} onChange={setBool("safetyCompliance")} style={{ accentColor: "var(--accent)" }} />
-              <span>
+              <span style={{ color: "var(--ink-soft)" }}>
                 All relevant safety information is in place (risk assessments, SOPs{isPlant ? "" : ", containment protocols"}, etc.)
               </span>
             </label>
@@ -4038,11 +4138,11 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
               <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={LIGHT_CYCLES} label="light cycle" />
             </Field>
             {isPlant ? (
-              <div className="rounded-xl p-3" style={{ background: "var(--overdue-soft)", border: "1px solid var(--overdue)" }}>
-                <div className="text-xs font-bold mb-1.5" style={{ color: "var(--overdue)" }}>Pest Outbreak Protocol</div>
+              <div className="rounded-xl p-3" style={{ background: "var(--surface-soft)", borderLeft: "3px solid var(--warning)" }}>
+                <div className="text-xs font-bold mb-1.5" style={{ color: "var(--warning)" }}>Pest Outbreak Protocol</div>
                 <label className="flex items-start gap-2 text-xs">
-                  <input type="checkbox" className="mt-0.5" checked={form.pestConsent} onChange={setBool("pestConsent")} style={{ accentColor: "var(--overdue)" }} />
-                  <span>If required due to a pest outbreak, I consent to pesticides being sprayed</span>
+                  <input type="checkbox" className="mt-0.5" checked={form.pestConsent} onChange={setBool("pestConsent")} style={{ accentColor: "var(--warning)" }} />
+                  <span style={{ color: "var(--ink-soft)" }}>If required due to a pest outbreak, I consent to pesticides being sprayed</span>
                 </label>
               </div>
             ) : (
@@ -4058,8 +4158,8 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
         <section className="space-y-4">
           <FormSectionTitle>Scheduling</FormSectionTitle>
           <div className="grid grid-cols-2 gap-3">
-            <DateField label="Start Date *" value={form.startDate} onChange={set("startDate")} required />
-            <DateField label="End Date *" value={form.endDate} onChange={set("endDate")} required />
+            <DateField label="Start Date *" value={form.startDate} onChange={set("startDate")} />
+            <DateField label="End Date *" value={form.endDate} onChange={set("endDate")} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Preferred Floor">
@@ -4073,7 +4173,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
 
           <div className="flex items-start gap-2.5 rounded-xl p-3.5 text-sm" style={{ background: "var(--occupied-soft)", color: "var(--ink)" }}>
             <ClipboardList size={16} className="mt-0.5 flex-shrink-0" style={{ color: "var(--occupied)" }} />
-            For specific programming requirements, please contact a facilities technician.
+            For more specific programming requirements, please email a facilities technician.
           </div>
         </section>
 
