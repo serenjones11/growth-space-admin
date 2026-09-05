@@ -2749,8 +2749,7 @@ function RequisitionDetailFields({ req }) {
           <FieldPair label="Role" value={req.role || "—"} />
           <FieldPair label="Email" value={req.email} />
           <FieldPair label="Emergency number" value={req.emergencyNumber || "—"} />
-          <FieldPair label="Lab group" value={piDisplay(req.labGroup)} />
-          <FieldPair label="PI / supervisor" value={req.pi || "—"} />
+          <FieldPair label="PI/Supervisor" value={req.pi || "—"} />
         </FieldGrid>
       </InfoBox>
 
