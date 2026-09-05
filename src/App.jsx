@@ -1515,38 +1515,52 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-2.5 mb-5">
-        <select value={floorFilter} onChange={(e) => setFloorFilter(e.target.value)} className="gc-input w-auto font-semibold" style={{ maxWidth: 150 }}>
-          <option value="all">All Floors</option>
-          {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
-        </select>
-        <DisciplineFilterPills value={disciplineFilter} onChange={setDisciplineFilter} />
-        <div className="flex flex-wrap items-center gap-1.5">
-          {TIMELINE_STATUS_OPTIONS.map((o) => {
-            const active = urgencyFilters.has(o.key);
-            return (
-              <button
-                key={o.key}
-                onClick={() => toggleUrgency(o.key)}
-                className="px-3 py-1.5 rounded-full text-xs font-bold border"
-                style={{ background: active ? o.color : o.soft, color: active ? "#fff" : o.color, borderColor: o.color }}
-              >
-                {o.label}
-              </button>
-            );
-          })}
-          {urgencyFilters.size > 0 && (
-            <button onClick={() => setUrgencyFilters(new Set())} className="text-xs font-bold underline px-1" style={{ color: "var(--ink-faint)" }}>Clear</button>
-          )}
-        </div>
-        {!compact && (
-          <div className="flex items-center gap-2 ml-auto">
-            <MonthPickerButton label="From" value={fromKey} keys={TIMELINE_MONTH_RANGE.keys} fullLabels={TIMELINE_MONTH_RANGE.fullLabels} onSelect={handleFrom} align="left" />
-            <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
-            <MonthPickerButton label="To" value={toKey} keys={TIMELINE_MONTH_RANGE.keys} fullLabels={TIMELINE_MONTH_RANGE.fullLabels} onSelect={handleTo} align="right" />
+      {/* Filters are full-screen only — the dashboard preview is a fixed
+          highlights list, not something worth narrowing down. Split into
+          two calmer rows instead of one crowded line: scope (floor, area,
+          date range) on top, status — the only row that's inherently
+          colourful, since its colours double as the bar-colour legend —
+          on its own line below, muted to neutral until a status is
+          actually toggled on so it doesn't compete with everything else. */}
+      {!compact && (
+        <div className="mb-5 space-y-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <select value={floorFilter} onChange={(e) => setFloorFilter(e.target.value)} className="gc-input w-auto font-semibold" style={{ maxWidth: 150 }}>
+              <option value="all">All Floors</option>
+              {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
+            </select>
+            <DisciplineFilterPills value={disciplineFilter} onChange={setDisciplineFilter} />
+            <div className="flex items-center gap-2 ml-auto">
+              <MonthPickerButton label="From" value={fromKey} keys={TIMELINE_MONTH_RANGE.keys} fullLabels={TIMELINE_MONTH_RANGE.fullLabels} onSelect={handleFrom} align="left" />
+              <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
+              <MonthPickerButton label="To" value={toKey} keys={TIMELINE_MONTH_RANGE.keys} fullLabels={TIMELINE_MONTH_RANGE.fullLabels} onSelect={handleTo} align="right" />
+            </div>
           </div>
-        )}
-      </div>
+          <div className="flex flex-wrap items-center gap-1.5 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+            {TIMELINE_STATUS_OPTIONS.map((o) => {
+              const active = urgencyFilters.has(o.key);
+              return (
+                <button
+                  key={o.key}
+                  onClick={() => toggleUrgency(o.key)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border"
+                  style={{
+                    background: active ? o.color : "var(--surface)",
+                    color: active ? "#fff" : "var(--ink-soft)",
+                    borderColor: active ? o.color : "var(--border)",
+                  }}
+                >
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: active ? "#fff" : o.color, flexShrink: 0 }} />
+                  {o.label}
+                </button>
+              );
+            })}
+            {urgencyFilters.size > 0 && (
+              <button onClick={() => setUrgencyFilters(new Set())} className="text-xs font-bold underline px-1" style={{ color: "var(--ink-faint)" }}>Clear</button>
+            )}
+          </div>
+        </div>
+      )}
 
       {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No cabinets or Reftech rooms match these filters.</p>}
 
