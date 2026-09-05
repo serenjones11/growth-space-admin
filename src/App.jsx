@@ -41,6 +41,8 @@ import {
   FileText,
   ImagePlus,
   Trash2,
+  CalendarPlus,
+  Refrigerator,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -70,11 +72,18 @@ const TOKENS = `
     --ink-soft: #5C6D65;
     --ink-faint: #93A29B;
 
-    --accent: #16A34A;
-    --accent-dark: #0F7A38;
-    --accent-soft: #DCFCE7;
-    --accent-ink: #14532D;
-    --gradient: linear-gradient(135deg, #34D399 0%, #16A34A 100%);
+    /* Same hue as Heather Whitney's line on the space-usage graph
+       (OKABE_ITO[2], #009E73 — she's index 2 once lab groups are sorted
+       by PI name). --accent uses that exact hex; --accent-dark is a
+       darker step of the same hue rather than the identical value, since
+       it's what solid buttons put white text on and #009E73 itself only
+       clears ~3.4:1 there (WCAG needs 4.5:1 for text that size) — this
+       stays visibly "that same green" while keeping button text legible. */
+    --accent: #009E73;
+    --accent-dark: #007A5A;
+    --accent-soft: #E1F7F0;
+    --accent-ink: #053D2C;
+    --gradient: linear-gradient(135deg, #5EEDC7 0%, #009E73 100%);
 
     --free: #2F8F5B;
     --free-soft: #E7F2EA;
@@ -474,7 +483,7 @@ function Sidebar({ page, setPage, pendingCount }) {
             className="w-full flex items-center justify-center gap-2.5 px-3.5 py-3 rounded-xl text-sm font-bold text-white"
             style={{ background: page === "request" ? "var(--gradient)" : "var(--accent-dark)" }}
           >
-            <Send size={16} />
+            <CalendarPlus size={16} />
             Request Space
           </button>
         </div>
@@ -1851,7 +1860,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
             Export CSV
           </button>
           <button onClick={onAddNew} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl text-white" style={{ background: "var(--accent-dark)" }}>
-            <PlusCircle size={15} /> Add CER
+            <Refrigerator size={15} /> Add CER
           </button>
         </div>
       </div>
@@ -2830,8 +2839,15 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
           <Field label="Role"><select value={form.role || ROLES[0]} onChange={set("role")} className="gc-input">{ROLES.map((r) => <option key={r}>{r}</option>)}</select></Field>
           <Field label="Email"><input value={form.email} onChange={set("email")} className="gc-input" /></Field>
           <Field label="Emergency number"><input value={form.emergencyNumber || ""} onChange={set("emergencyNumber")} className="gc-input" /></Field>
-          <Field label="Lab group"><select value={form.labGroup} onChange={set("labGroup")} className="gc-input">{LAB_GROUPS.map((l) => <option key={l}>{l}</option>)}</select></Field>
-          <Field label="PI / supervisor"><input value={form.pi || ""} onChange={set("pi")} className="gc-input" /></Field>
+          <Field label="PI">
+            <select
+              value={form.labGroup}
+              onChange={(e) => { const lab = e.target.value; setForm((f) => ({ ...f, labGroup: lab, pi: PI_BY_LAB[lab] || "" })); }}
+              className="gc-input"
+            >
+              {LAB_GROUPS.map((l) => <option key={l} value={l}>{PI_BY_LAB[l] || l}</option>)}
+            </select>
+          </Field>
         </div>
       </InfoBox>
 
