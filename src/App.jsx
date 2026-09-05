@@ -1233,12 +1233,15 @@ function PIManagementModal({ labGroups, onAdd, onUpdate, onDelete, onClose }) {
 /* ---------------------------------------------------------------------- */
 /* Timeline (used on dashboard, compact or full)                          */
 /* ---------------------------------------------------------------------- */
+/* Colour/soft values here are the exact same ones bookingStatus()/
+   timelineRowStatus() hand back per row, so a filter pill always matches
+   the bars it filters — see those functions below. */
 const TIMELINE_STATUS_OPTIONS = [
-  { key: "occupied", label: "Occupied" },
-  { key: "warning", label: "Ending soon" },
-  { key: "overdue", label: "Overdue" },
-  { key: "upcoming", label: "Upcoming" },
-  { key: "completed", label: "Completed" },
+  { key: "occupied", label: "Occupied", color: "var(--occupied)", soft: "var(--occupied-soft)" },
+  { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" },
+  { key: "overdue", label: "Overdue", color: "var(--overdue)", soft: "var(--overdue-soft)" },
+  { key: "upcoming", label: "Upcoming", color: "var(--accent-dark)", soft: "var(--accent-soft)" },
+  { key: "completed", label: "Completed", color: "var(--service)", soft: "var(--service-soft)" },
 ];
 
 /* Same colour language as bookingStatus(), plus a distinct grey for
@@ -1263,23 +1266,67 @@ function assignLanes(items) {
   });
 }
 
+/* Month-key/full-label range TimelineView's date pickers choose from —
+   generated independently of any single data source (unlike
+   labUsageHistory's keys) since the timeline spans arbitrary past/future
+   scheduling, not just months with recorded usage. */
+function buildMonthRange(yearsBack, yearsForward) {
+  const keys = [], fullLabels = [];
+  let d = new Date(TODAY.getFullYear() - yearsBack, TODAY.getMonth(), 1);
+  const end = new Date(TODAY.getFullYear() + yearsForward, TODAY.getMonth(), 1);
+  while (d <= end) {
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    fullLabels.push(d.toLocaleDateString("en-GB", { month: "long", year: "numeric" }));
+    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  }
+  return { keys, fullLabels };
+}
+const TIMELINE_MONTH_RANGE = buildMonthRange(5, 5);
+function monthKeyOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
+function monthKeyToDate(key) {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1);
+}
+
 function TimelineView({ units, requests = [], onNavigate, compact = false }) {
   const [floorFilter, setFloorFilter] = useState("all");
   const [urgencyFilters, setUrgencyFilters] = useState(new Set()); // empty = show all
   const [disciplineFilter, setDisciplineFilter] = useState("all");
   const [hoveredRow, setHoveredRow] = useState(null);
+  // Default window matches the old fixed one (~2 weeks back, ~3.5 months
+  // forward) so nothing changes until an admin actually picks a range.
+  const [fromKey, setFromKey] = useState(() => monthKeyOf(addDays(TODAY, -14)));
+  const [toKey, setToKey] = useState(() => monthKeyOf(addDays(TODAY, 106)));
   const toggleUrgency = (key) => setUrgencyFilters((prev) => {
     const next = new Set(prev);
     if (next.has(key)) next.delete(key); else next.add(key);
     return next;
   });
+  const handleFrom = (key) => { setFromKey(key); if (TIMELINE_MONTH_RANGE.keys.indexOf(key) > TIMELINE_MONTH_RANGE.keys.indexOf(toKey)) setToKey(key); };
+  const handleTo = (key) => { setToKey(key); if (TIMELINE_MONTH_RANGE.keys.indexOf(key) < TIMELINE_MONTH_RANGE.keys.indexOf(fromKey)) setFromKey(key); };
 
-  const rangeStart = addDays(TODAY, -14);
-  const rangeEnd = addDays(TODAY, 106);
+  const rangeStart = monthKeyToDate(fromKey);
+  const toMonth = monthKeyToDate(toKey);
+  const rangeEnd = new Date(toMonth.getFullYear(), toMonth.getMonth() + 1, 0); // last day of the "to" month
   const totalMs = rangeEnd - rangeStart;
   const pct = (date) => Math.max(0, Math.min(100, ((date - rangeStart) / totalMs) * 100));
-  const shortDate = (d) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-  const axisMarks = [rangeStart, addDays(TODAY, 30), addDays(TODAY, 60), addDays(TODAY, 90), rangeEnd].map((d) => ({ label: shortDate(d), pct: pct(d) }));
+
+  // Month-boundary ticks instead of the old fixed 5 — more detail on a
+  // short window, thinned as the span grows so labels never crowd.
+  const spanMonths = Math.max(1, Math.round(totalMs / (30.44 * 86400000)));
+  const tickEvery = spanMonths > 24 ? 4 : spanMonths > 12 ? 2 : 1;
+  const axisMarks = [];
+  {
+    let cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1), i = 0;
+    while (cur <= rangeEnd) {
+      if (i % tickEvery === 0) {
+        const d = cur < rangeStart ? rangeStart : cur;
+        axisMarks.push({ label: d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }), pct: pct(d) });
+      }
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      i++;
+    }
+  }
 
   // Built from requests, not units.bookings — a completed requisition's
   // booking is deliberately excluded from unit.bookings upstream (it no
@@ -1295,6 +1342,7 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
     if (urgencyFilters.size > 0 && !urgencyFilters.has(s.key)) return [];
     const start = new Date(r.startDate);
     const end = new Date(r.endDate);
+    if (end < rangeStart || start > rangeEnd) return []; // entirely outside the selected window
     const o = { researcher: r.researcher, labGroup: r.labGroup, project: r.projectTitle, discipline: r.discipline, startDate: r.startDate, endDate: r.endDate };
     return [{ u, o, s, reqIndex, start: start < rangeStart ? rangeStart : start, end }];
   });
@@ -1314,6 +1362,70 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
       .map((row) => ({ u: row.u, items: assignLanes(row.items.sort((a, b) => a.start - b.start)) }));
     return { floor: f, unitRows };
   }).filter((g) => g.unitRows.length).slice(0, compact ? 2 : undefined);
+
+  // Renders one unit's row — its requisitions all land on this single row,
+  // in lanes only where their dates genuinely overlap, so a gap in the row
+  // reads as free time and a lane stack reads as a clash.
+  const renderUnitRow = ({ u, items }) => {
+    const dm = DISCIPLINE_META[items[0].o.discipline] || DISCIPLINE_META.plant;
+    const laneH = 28, laneGap = 4;
+    const laneCount = Math.max(...items.map((it) => it.lane)) + 1;
+    const rowH = laneCount * laneH + (laneCount - 1) * laneGap;
+    return (
+      <div key={u.id} className="flex items-start gap-2 text-xs">
+        <span className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold" style={{ height: laneH, color: "var(--ink-soft)" }}>
+          <dm.icon size={11} style={{ color: dm.color }} />{u.id}
+        </span>
+        <div className="relative flex-1 rounded-lg" style={{ height: rowH, background: "var(--surface-soft)" }}>
+          {items.map(({ o, s, reqIndex, start, end, lane }) => {
+            const left = pct(start);
+            const width = Math.max(1.2, pct(end) - left);
+            const top = lane * (laneH + laneGap);
+            const req = requests[reqIndex];
+            const rowKey = u.id + reqIndex;
+            const isHovered = hoveredRow === rowKey;
+            return (
+              <div key={rowKey}>
+                <button
+                  type="button"
+                  onMouseEnter={() => setHoveredRow(rowKey)}
+                  onMouseLeave={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
+                  onFocus={() => setHoveredRow(rowKey)}
+                  onBlur={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
+                  onClick={() => onNavigate && onNavigate(requisitionTab(req.status), reqIndex)}
+                  className="absolute rounded-lg flex items-center px-2.5"
+                  style={{
+                    left: `${left}%`, width: `${width}%`, top, height: laneH,
+                    background: s.soft, border: `1px solid ${s.color}`, cursor: "pointer",
+                  }}
+                >
+                  <span className="text-[11.5px] font-bold truncate" style={{ color: s.color }}>{o.researcher}</span>
+                </button>
+                {/* hover detail card — visibility driven by React state (not a CSS-only hover selector) */}
+                {isHovered && (
+                  <div
+                    className="absolute z-20 rounded-xl p-3.5 text-left"
+                    style={{ left: `${left}%`, top: top + laneH + 6, minWidth: 240, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 10px 30px -12px rgba(22,33,29,0.25)" }}
+                  >
+                    <div className="text-[13px] font-extrabold mb-0.5">{o.researcher}</div>
+                    <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>{piDisplay(o.labGroup)}</div>
+                    <div className="text-[12px] mb-1" style={{ color: "var(--ink-soft)" }}>{o.project}</div>
+                    <div className="text-[12px] font-semibold mb-1.5 flex items-center gap-1" style={{ color: "var(--ink-soft)" }}>
+                      <MapPin size={11} />{u.id} · {FLOOR_LABEL[u.floor]}, {u.room}
+                    </div>
+                    <div className="text-[12px] font-bold" style={{ color: s.color }}>
+                      {fmtGB(o.startDate)} → {fmtGB(o.endDate)}{s.key === "overdue" ? ` · +${Math.abs(daysUntil(o.endDate))}d overdue` : ""}
+                    </div>
+                    <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click bar to view requisition →</div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -1335,24 +1447,30 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
           <option value="insect">Insect Sciences</option>
         </select>
         <div className="flex flex-wrap items-center gap-1.5">
-          {TIMELINE_STATUS_OPTIONS.map((o) => (
-            <button
-              key={o.key}
-              onClick={() => toggleUrgency(o.key)}
-              className="px-3 py-1.5 rounded-full text-xs font-bold border"
-              style={{
-                background: urgencyFilters.has(o.key) ? "var(--sidebar-bg)" : "var(--surface)",
-                color: urgencyFilters.has(o.key) ? "#fff" : "var(--ink-soft)",
-                borderColor: urgencyFilters.has(o.key) ? "var(--sidebar-bg)" : "var(--border)",
-              }}
-            >
-              {o.label}
-            </button>
-          ))}
+          {TIMELINE_STATUS_OPTIONS.map((o) => {
+            const active = urgencyFilters.has(o.key);
+            return (
+              <button
+                key={o.key}
+                onClick={() => toggleUrgency(o.key)}
+                className="px-3 py-1.5 rounded-full text-xs font-bold border"
+                style={{ background: active ? o.color : o.soft, color: active ? "#fff" : o.color, borderColor: o.color }}
+              >
+                {o.label}
+              </button>
+            );
+          })}
           {urgencyFilters.size > 0 && (
             <button onClick={() => setUrgencyFilters(new Set())} className="text-xs font-bold underline px-1" style={{ color: "var(--ink-faint)" }}>Clear</button>
           )}
         </div>
+        {!compact && (
+          <div className="flex items-center gap-2 ml-auto">
+            <MonthPickerButton label="From" value={fromKey} keys={TIMELINE_MONTH_RANGE.keys} fullLabels={TIMELINE_MONTH_RANGE.fullLabels} onSelect={handleFrom} align="left" />
+            <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
+            <MonthPickerButton label="To" value={toKey} keys={TIMELINE_MONTH_RANGE.keys} fullLabels={TIMELINE_MONTH_RANGE.fullLabels} onSelect={handleTo} align="right" />
+          </div>
+        )}
       </div>
 
       {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No requisitions match these filters.</p>}
@@ -1366,82 +1484,40 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
       <div className="relative">
         <div className="absolute top-0 bottom-0 border-l border-dashed ml-24 pointer-events-none z-10" style={{ left: `${pct(TODAY)}%`, borderColor: "var(--ink-faint)" }} />
         <div className="space-y-5">
-          {groups.map((g) => (
-            <div key={g.floor}>
-              <div className="flex items-center gap-2 mb-2">
-                <span style={{ width: 3, height: 13, borderRadius: 2, background: "var(--accent-dark)" }} />
-                <span className="text-[13px] font-extrabold gc-display">{FLOOR_LABEL[g.floor]}</span>
-              </div>
-              <div className="space-y-1.5">
-                {/* One row per unit — every requisition for that unit lands
-                    on this same row (in lanes only when their dates
-                    genuinely overlap), so a gap in the row reads as free
-                    time and a lane stack reads as a clash, instead of the
-                    unit's requisitions being scattered across separate
-                    rows sorted by end date. */}
-                {(compact ? g.unitRows.slice(0, 3) : g.unitRows).map(({ u, items }) => {
-                  const dm = DISCIPLINE_META[items[0].o.discipline] || DISCIPLINE_META.plant;
-                  const laneH = 28, laneGap = 4;
-                  const laneCount = Math.max(...items.map((it) => it.lane)) + 1;
-                  const rowH = laneCount * laneH + (laneCount - 1) * laneGap;
-                  return (
-                    <div key={u.id} className="flex items-start gap-2 text-xs">
-                      <span className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold" style={{ height: laneH, color: "var(--ink-soft)" }}>
-                        <dm.icon size={11} style={{ color: dm.color }} />{u.id}
-                      </span>
-                      <div className="relative flex-1 rounded-lg" style={{ height: rowH, background: "var(--surface-soft)" }}>
-                        {items.map(({ o, s, reqIndex, start, end, lane }) => {
-                          const left = pct(start);
-                          const width = Math.max(1.2, pct(end) - left);
-                          const top = lane * (laneH + laneGap);
-                          const req = requests[reqIndex];
-                          const rowKey = u.id + reqIndex;
-                          const isHovered = hoveredRow === rowKey;
-                          return (
-                            <div key={rowKey}>
-                              <button
-                                type="button"
-                                onMouseEnter={() => setHoveredRow(rowKey)}
-                                onMouseLeave={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
-                                onFocus={() => setHoveredRow(rowKey)}
-                                onBlur={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
-                                onClick={() => onNavigate && onNavigate(requisitionTab(req.status), reqIndex)}
-                                className="absolute rounded-lg flex items-center px-2.5"
-                                style={{
-                                  left: `${left}%`, width: `${width}%`, top, height: laneH,
-                                  background: s.soft, border: `1px solid ${s.color}`, cursor: "pointer",
-                                }}
-                              >
-                                <span className="text-[11.5px] font-bold truncate" style={{ color: s.color }}>{o.researcher}</span>
-                              </button>
-                              {/* hover detail card — visibility driven by React state (not a CSS-only hover selector) */}
-                              {isHovered && (
-                                <div
-                                  className="absolute z-20 rounded-xl p-3.5 text-left"
-                                  style={{ left: `${left}%`, top: top + laneH + 6, minWidth: 240, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 10px 30px -12px rgba(22,33,29,0.25)" }}
-                                >
-                                  <div className="text-[13px] font-extrabold mb-0.5">{o.researcher}</div>
-                                  <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>{piDisplay(o.labGroup)}</div>
-                                  <div className="text-[12px] mb-1" style={{ color: "var(--ink-soft)" }}>{o.project}</div>
-                                  <div className="text-[12px] font-semibold mb-1.5 flex items-center gap-1" style={{ color: "var(--ink-soft)" }}>
-                                    <MapPin size={11} />{u.id} · {FLOOR_LABEL[u.floor]}, {u.room}
-                                  </div>
-                                  <div className="text-[12px] font-bold" style={{ color: s.color }}>
-                                    {fmtGB(o.startDate)} → {fmtGB(o.endDate)}{s.key === "overdue" ? ` · +${Math.abs(daysUntil(o.endDate))}d overdue` : ""}
-                                  </div>
-                                  <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click bar to view requisition →</div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+          {groups.map((g) => {
+            // Cabinets sharing a physical room cluster together under a
+            // room subheading, so it's obvious at a glance which room is
+            // free vs. booked out — only in the full (non-compact) view,
+            // where there's room for the extra hierarchy.
+            const byRoom = new Map();
+            g.unitRows.forEach((row) => {
+              if (!byRoom.has(row.u.room)) byRoom.set(row.u.room, []);
+              byRoom.get(row.u.room).push(row);
+            });
+            const roomGroups = Array.from(byRoom.entries())
+              .map(([room, rows]) => ({ room, rows }))
+              .sort((a, b) => a.room.localeCompare(b.room, undefined, { numeric: true }));
+            return (
+              <div key={g.floor}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span style={{ width: 3, height: 13, borderRadius: 2, background: "var(--accent-dark)" }} />
+                  <span className="text-[13px] font-extrabold gc-display">{FLOOR_LABEL[g.floor]}</span>
+                </div>
+                {compact ? (
+                  <div className="space-y-1.5">{g.unitRows.slice(0, 3).map(renderUnitRow)}</div>
+                ) : (
+                  <div className="space-y-3">
+                    {roomGroups.map((rg) => (
+                      <div key={rg.room}>
+                        <div className="text-[11px] font-bold uppercase tracking-wide mb-1.5 ml-1" style={{ color: "var(--ink-faint)" }}>{rg.room}</div>
+                        <div className="space-y-1.5">{rg.rows.map(renderUnitRow)}</div>
                       </div>
-                    </div>
-                  );
-                })}
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -2433,9 +2509,7 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
               </select>
             </Field>
             <Field label="Room">
-              <select value={form.room} onChange={set("room")} className="gc-input">
-                {roomOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
+              <SelectWithCustom value={form.room} onChange={(v) => setForm((f) => ({ ...f, room: v }))} options={roomOptions} label="room" />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -3408,6 +3482,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
 
   // stepName === "form"
   const isPlant = discipline === "plant";
+  const isReftech = spaceType === "reftech";
   const submitColor = isPlant ? "var(--free)" : "var(--gradient)";
 
   return (
@@ -3534,12 +3609,17 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
 
         <section className="space-y-4">
           <FormSectionTitle>{isPlant ? "Growth Conditions" : "Conditions"}</FormSectionTitle>
+          {isReftech && (
+            <p className="text-xs -mt-2" style={{ color: "var(--ink-faint)" }}>
+              Reftech rooms aren't individually climate-controlled — temperature, humidity, and light cycle below are optional.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-5">
-            <SliderField label="Temperature" value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" />
-            <SliderField label="Humidity" value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" />
+            <SliderField label={`Temperature${isReftech ? " (optional)" : ""}`} value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" />
+            <SliderField label={`Humidity${isReftech ? " (optional)" : ""}`} value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" />
           </div>
           <div className="grid grid-cols-2 gap-3 items-end">
-            <Field label="Light Cycle">
+            <Field label={`Light Cycle${isReftech ? " (optional)" : ""}`}>
               <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={LIGHT_CYCLES} label="light cycle" />
             </Field>
             {isPlant ? (
