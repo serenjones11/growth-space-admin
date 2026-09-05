@@ -1545,12 +1545,16 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                   onClick={() => toggleUrgency(o.key)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border"
                   style={{
-                    background: active ? o.color : "var(--surface)",
-                    color: active ? "#fff" : "var(--ink-soft)",
+                    // Active state matches the bars themselves (soft fill +
+                    // coloured border/text), not an inverted solid fill —
+                    // so the pill you toggled on looks like what it's
+                    // filtering for on the timeline below.
+                    background: active ? o.soft : "var(--surface)",
+                    color: active ? o.color : "var(--ink-soft)",
                     borderColor: active ? o.color : "var(--border)",
                   }}
                 >
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: active ? "#fff" : o.color, flexShrink: 0 }} />
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: o.color, flexShrink: 0 }} />
                   {o.label}
                 </button>
               );
