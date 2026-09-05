@@ -445,7 +445,7 @@ function RoomChip({ unit, size = "md" }) {
       }}
     >
       <MapPin size={size === "md" ? 14 : 12} style={{ color: "var(--accent)" }} />
-      {FLOOR_LABEL[unit.floor]} · {unit.room}
+      {unit.room}
     </span>
   );
 }
@@ -1571,7 +1571,11 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
               className="relative flex-1 rounded-lg"
               style={{
                 height: Math.max(0, ...pendingLanes.map((p) => p.lane)) * (TIMELINE_LANE_H + TIMELINE_LANE_GAP) + TIMELINE_LANE_H,
-                background: "var(--warning-soft)", opacity: 0.35,
+                // Plain (not opacity-faded) background — `opacity` on this
+                // wrapper would create its own stacking context and trap
+                // the hover card's z-index inside it, rendering the card
+                // behind the unit rows below instead of above them.
+                background: "var(--warning-soft)",
               }}
             >
               {pendingLanes.map((p) => {
