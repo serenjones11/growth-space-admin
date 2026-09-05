@@ -4108,7 +4108,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
             <textarea value={form.projectDesc} onChange={set("projectDesc")} className="gc-input" rows={3} />
           </Field>
 
-          <div className="rounded-xl p-4" style={{ background: "var(--surface-soft)", borderLeft: "3px solid var(--accent)" }}>
+          <div className="rounded-xl p-4" style={{ background: "var(--surface-soft)" }}>
             <div className="flex items-center gap-2 mb-2">
               <ShieldAlert size={15} style={{ color: "var(--accent-dark)" }} />
               <span className="text-sm font-bold">Safety Compliance</span>
@@ -4138,7 +4138,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
               <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={LIGHT_CYCLES} label="light cycle" />
             </Field>
             {isPlant ? (
-              <div className="rounded-xl p-3" style={{ background: "var(--surface-soft)", borderLeft: "3px solid var(--warning)" }}>
+              <div className="rounded-xl p-3" style={{ background: "var(--surface-soft)" }}>
                 <div className="text-xs font-bold mb-1.5" style={{ color: "var(--warning)" }}>Pest Outbreak Protocol</div>
                 <label className="flex items-start gap-2 text-xs">
                   <input type="checkbox" className="mt-0.5" checked={form.pestConsent} onChange={setBool("pestConsent")} style={{ accentColor: "var(--warning)" }} />
