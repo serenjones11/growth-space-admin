@@ -3093,11 +3093,17 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   );
 }
 
-/* Slide-over panel shown when clicking a bar on the dashboard timeline — lets the admin see the
-   full requisition without leaving the dashboard, with an option to jump to the full Requisitions page. */
-function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComplete, onRevert, onClose, onOpenFull }) {
+/* Popup shown when clicking a bar on the requisition timeline or a booking
+   on a unit's detail modal — lets the admin see, decide, reassign, or
+   delete the requisition without leaving whichever view opened it (it
+   overlays on top; that view stays visible behind it), with an option to
+   jump to the full Requisitions page. */
+function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComplete, onRevert, onReassign, onDelete, onClose, onOpenFull }) {
   const [chosenUnit, setChosenUnit] = useState("");
   const [editing, setEditing] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
+  const [reassignUnit, setReassignUnit] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!req) return null;
   const STATUS_STYLE = {
     pending: { label: "Pending review", color: "var(--warning)", soft: "var(--warning-soft)" },
@@ -3134,7 +3140,10 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {!editing && (
-              <button onClick={() => setEditing(true)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Edit"><Pencil size={15} /></button>
+              <>
+                <button onClick={() => setEditing(true)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Edit"><Pencil size={15} /></button>
+                <button onClick={() => setConfirmingDelete(true)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }} title="Delete"><Trash2 size={15} /></button>
+              </>
             )}
             <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Close"><X size={16} /></button>
           </div>
@@ -3166,11 +3175,39 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
               )}
 
               {req.status === "approved" && (
-                <div className="rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap" style={{ background: "var(--surface-soft)" }}>
-                  <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Still ongoing, assigned to {req.assignedUnitId || "a unit"}.</div>
-                  <button onClick={() => { onComplete(index); onClose(); }} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg text-white flex-shrink-0" style={{ background: "var(--accent-dark)" }}>
-                    <CheckCircle2 size={13} /> Mark as completed
-                  </button>
+                <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Still ongoing, assigned to {req.assignedUnitId || "a unit"}.</div>
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button onClick={() => setReassigning((v) => !v)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
+                        <MapPin size={13} /> Change unit
+                      </button>
+                      <button onClick={() => { onComplete(index); onClose(); }} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+                        <CheckCircle2 size={13} /> Mark as completed
+                      </button>
+                    </div>
+                  </div>
+                  {reassigning && (
+                    <div className="space-y-2 pt-1" style={{ borderTop: "1px solid var(--border)" }}>
+                      <select value={reassignUnit} onChange={(e) => setReassignUnit(e.target.value)} className="gc-input mt-2">
+                        <option value="">Select a different unit…</option>
+                        {windowCandidates.filter((u) => u.id !== req.assignedUnitId).map((u) => (
+                          <option key={u.id} value={u.id}>{u.id} — {FLOOR_LABEL[u.floor]}, {u.room}</option>
+                        ))}
+                      </select>
+                      {windowCandidates.filter((u) => u.id !== req.assignedUnitId).length === 0 && (
+                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units match this request's type & discipline for these dates.</p>
+                      )}
+                      <button
+                        disabled={!reassignUnit}
+                        onClick={() => { onReassign(index, reassignUnit); setReassigning(false); setReassignUnit(""); }}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
+                        style={{ background: "var(--free)" }}
+                      >
+                        <MapPin size={14} /> Move to selected unit
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3190,6 +3227,14 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
           )}
         </div>
       </div>
+      {confirmingDelete && (
+        <ConfirmDialog
+          title="Delete this requisition?"
+          message={`This permanently deletes ${req.researcher}'s "${req.projectTitle}" requisition${req.status === "approved" ? " and its booking" : ""}. This cannot be undone.`}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => { setConfirmingDelete(false); onDelete(index); onClose(); }}
+        />
+      )}
     </div>
   );
 }
@@ -4155,8 +4200,10 @@ export default function GrowthCabinetApp() {
     setInventoryKey((k) => k + 1);
     setPage("inventory");
   };
-  // Navigate to the requisitions page. If called from within a unit's drawer (onOpenRequisition),
-  // we remember which unit we came from so the requisitions page can offer a way back.
+  // Navigate to the requisitions page (used by "Open in Requisitions page"
+  // from the preview panel, and the unit drawer's "View all completed" link).
+  // If called from within a unit's drawer, remembers which unit we came from
+  // so the requisitions page can offer a way back.
   const goRequisitions = (tab = "pending", expandIndex = null, fromUnitId = null) => {
     setRequisitionsTab(tab);
     setRequisitionsExpandIndex(expandIndex);
@@ -4165,9 +4212,6 @@ export default function GrowthCabinetApp() {
     setSelected(null);
     setPage("requisitions");
   };
-  // Used by the unit drawer's booking cards — closes the drawer, jumps to the requisition, and
-  // remembers the unit so "Back to inventory" can reopen it.
-  const openRequisitionFromUnit = (tab, index) => goRequisitions(tab, index, selected ? selected.id : null);
 
   const backToInventoryUnit = () => {
     const unit = units.find((u) => u.id === returnUnitId);
@@ -4279,7 +4323,7 @@ export default function GrowthCabinetApp() {
           onAcknowledgeClash={handleAcknowledgeClash}
           onAssignRequisition={(reqIndex, unitId) => handleDecideRequisition(reqIndex, "approved", unitId)}
           requests={requests}
-          onOpenRequisition={openRequisitionFromUnit}
+          onOpenRequisition={(tab, index) => setPreviewReqIndex(index)}
           goRequisitions={goRequisitions}
           categories={categories}
           categoryColors={categoryColors}
@@ -4299,6 +4343,8 @@ export default function GrowthCabinetApp() {
           onComplete={handleCompleteRequisition}
           onRevert={handleRevertRequisition}
           onEdit={handleEditRequisition}
+          onReassign={handleReassignRequisition}
+          onDelete={handleDeleteRequisition}
           onClose={() => setPreviewReqIndex(null)}
           onOpenFull={() => {
             const req = requests[previewReqIndex];
