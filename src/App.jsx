@@ -161,21 +161,9 @@ const INSECT_SPECIES = ["Drosophila melanogaster", "Tribolium castaneum", "Bomby
 const FLOORS = ["LG", "L1", "L2A", "L2B", "L3"];
 const FLOOR_LABEL = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
 
-const ROOMS_BY_FLOOR = {
-  LG: ["Room LG.03", "Room LG.07"],
-  L1: ["Room 1.04", "Room 1.09", "Room 1.15"],
-  L2A: ["Room 2A.02", "Room 2A.11"],
-  L2B: ["Room 2B.05", "Room 2B.14"],
-  L3: ["Room 3.06", "Room 3.12", "Room 3.20"],
-};
-const REFTECH_ROOMS_BY_FLOOR = {
-  LG: ["Reftech Room LG-A"],
-  L1: ["Reftech Room 1-A"],
-  L2A: ["Reftech Room 2A-A", "Reftech Room 2A-B"],
-  L2B: ["Reftech Room 2B-A"],
-  L3: ["Reftech Room 3-A", "Reftech Room 3-B"],
-};
-
+/* Strips everything but letters/digits and lowercases — lets a search
+   match regardless of hyphens/spaces/case ("GC01" finds "GC-01"). */
+function normalizeSearch(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function addDays(base, days) { const d = new Date(base); d.setDate(d.getDate() + days); return d; }
 function fmt(date) { return date.toISOString().slice(0, 10); }
 /* British date display — "YYYY-MM-DD" (or a full timestamp, date-only
@@ -649,10 +637,20 @@ function LineMarker({ cx, cy, color, r = 4 }) {
    instead of the browser's native <input type="month">. */
 function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "left" }) {
   const [open, setOpen] = useState(false);
+  const yearRefs = useRef({});
   const valueIdx = keys.indexOf(value);
   const byYear = {};
   keys.forEach((k, i) => { const y = k.slice(0, 4); (byYear[y] = byYear[y] || []).push({ key: k, i }); });
   const years = Object.keys(byYear).sort((a, b) => b - a); // most recent year first
+
+  // The list can span well over a century (2100 at the top) — jump straight
+  // to the selected value's year (falling back to the current year) on
+  // open instead of making an admin scroll down from the far end every time.
+  useEffect(() => {
+    if (!open) return;
+    const targetYear = value ? value.slice(0, 4) : String(TODAY.getFullYear());
+    yearRefs.current[targetYear]?.scrollIntoView({ block: "start" });
+  }, [open]);
 
   return (
     <div className="relative">
@@ -674,7 +672,7 @@ function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "
           >
             <div className="text-[10.5px] font-bold uppercase tracking-wide mb-2.5" style={{ color: "var(--ink-faint)" }}>{label}</div>
             {years.map((y) => (
-              <div key={y} className="mb-3 last:mb-0">
+              <div key={y} ref={(el) => { yearRefs.current[y] = el; }} className="mb-3 last:mb-0">
                 <div className="text-[11px] font-bold mb-1.5" style={{ color: "var(--ink-soft)" }}>{y}</div>
                 <div className="grid grid-cols-4 gap-1.5">
                   {byYear[y].map(({ key, i }) => (
@@ -699,8 +697,13 @@ function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "
 
 function LabUsageTrend({ units, labUsageHistory }) {
   const allKeys = labUsageHistory.keys;
-  const [fromKey, setFromKey] = useState(allKeys[allKeys.length - 13]); // default: last 12 months
-  const [toKey, setToKey] = useState(allKeys[allKeys.length - 1]);
+  // The window now runs years past "now" (so the picker can reach 2100 —
+  // see labUsageWindow()), so the current month is no longer the array's
+  // last entry — anchor both the default range and the "live" splice below
+  // on TODAY's own index instead of allKeys.length - 1.
+  const nowIdx = Math.max(0, allKeys.indexOf(monthKeyOf(TODAY)));
+  const [fromKey, setFromKey] = useState(() => allKeys[Math.max(0, nowIdx - 11)]); // default: last 12 months
+  const [toKey, setToKey] = useState(() => allKeys[nowIdx]);
   const [hoveredLab, setHoveredLab] = useState(null);
   const [isolatedLab, setIsolatedLab] = useState(null);
   const [tooltip, setTooltip] = useState(null);
@@ -726,7 +729,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
 
   const series = LAB_GROUPS.map((lab, idx) => {
     const full = (labUsageHistory.series[lab] || []).slice();
-    full[full.length - 1] = currentCounts[lab]; // latest real month = live count
+    if (full[nowIdx] !== undefined) full[nowIdx] = currentCounts[lab]; // current month = live count, not the historical query's snapshot
     return { lab, color: OKABE_ITO[idx % OKABE_ITO.length], values: full.slice(fromIdx, toIdx + 1) };
   });
 
@@ -911,7 +914,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
   const pending = requests.filter((r) => r.status === "pending");
 
   const activity = useMemo(() => buildActivityFeed(units, requests, activityLog), [units, requests, activityLog]);
-  const shownActivity = activityExpanded ? activity.slice(0, 20) : activity.slice(0, 4);
+  const shownActivity = activityExpanded ? activity.slice(0, 25) : activity.slice(0, 4);
 
   const [labsExpanded, setLabsExpanded] = useState(false);
   // Counts every currently-active booking, not just one per unit — see the
@@ -1281,22 +1284,23 @@ function buildMonthRange(yearsBack, yearsForward) {
   }
   return { keys, fullLabels };
 }
-const TIMELINE_MONTH_RANGE = buildMonthRange(5, 5);
+const TIMELINE_MONTH_RANGE = buildMonthRange(5, 2100 - TODAY.getFullYear());
 function monthKeyOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
 function monthKeyToDate(key) {
   const [y, m] = key.split("-").map(Number);
   return new Date(y, m - 1, 1);
 }
+function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, 1); }
 
 function TimelineView({ units, requests = [], onNavigate, compact = false }) {
   const [floorFilter, setFloorFilter] = useState("all");
   const [urgencyFilters, setUrgencyFilters] = useState(new Set()); // empty = show all
   const [disciplineFilter, setDisciplineFilter] = useState("all");
   const [hoveredRow, setHoveredRow] = useState(null);
-  // Default window matches the old fixed one (~2 weeks back, ~3.5 months
-  // forward) so nothing changes until an admin actually picks a range.
-  const [fromKey, setFromKey] = useState(() => monthKeyOf(addDays(TODAY, -14)));
-  const [toKey, setToKey] = useState(() => monthKeyOf(addDays(TODAY, 106)));
+  // Default window: 2 months behind today, 10 months ahead — same on the
+  // dashboard preview and the full-screen view.
+  const [fromKey, setFromKey] = useState(() => monthKeyOf(addMonths(TODAY, -2)));
+  const [toKey, setToKey] = useState(() => monthKeyOf(addMonths(TODAY, 10)));
   const toggleUrgency = (key) => setUrgencyFilters((prev) => {
     const next = new Set(prev);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -1682,11 +1686,15 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
     // could wrongly disappear from a lab-group/discipline/search match
     // that a booking other than the first one actually satisfies.
     const currentAll = currentBookingsList(u);
-    const matchesQuery = query === "" || u.id.toLowerCase().includes(query.toLowerCase()) || u.room.toLowerCase().includes(query.toLowerCase()) ||
+    // Punctuation/case-insensitive — "GC01" or "gc 01" should still find
+    // "GC-01" — strip everything but letters/digits from both sides
+    // before comparing, rather than requiring an exact-punctuation match.
+    const q = normalizeSearch(query);
+    const matchesQuery = q === "" || normalizeSearch(u.id).includes(q) || normalizeSearch(u.room).includes(q) ||
       currentAll.some((occ) =>
-        occ.labGroup.toLowerCase().includes(query.toLowerCase()) ||
-        occ.researcher.toLowerCase().includes(query.toLowerCase()) ||
-        (PI_BY_LAB[occ.labGroup] || "").toLowerCase().includes(query.toLowerCase())
+        normalizeSearch(occ.labGroup).includes(q) ||
+        normalizeSearch(occ.researcher).includes(q) ||
+        normalizeSearch(PI_BY_LAB[occ.labGroup] || "").includes(q)
       );
     return matchesQuery
       && (statusFilter === "all" || s.key === statusFilter)
@@ -1714,7 +1722,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
             Export CSV
           </button>
           <button onClick={onAddNew} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl text-white" style={{ background: "var(--accent-dark)" }}>
-            <PlusCircle size={15} /> Add Cabinet
+            <PlusCircle size={15} /> Add Space
           </button>
         </div>
       </div>
@@ -2445,13 +2453,13 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
 /* ---------------------------------------------------------------------- */
 /* Add / edit unit modal                                                  */
 /* ---------------------------------------------------------------------- */
-function AddEditUnitModal({ unit, onClose, onSave }) {
+function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoom }) {
   const isEdit = !!unit;
   const [form, setForm] = useState(
     unit
       ? { ...unit, tempMin: unit.tempRange[0], tempMax: unit.tempRange[1], humMin: unit.humidityRange[0], humMax: unit.humidityRange[1] }
       : {
-          id: "", type: "cabinet", floor: "L1", room: ROOMS_BY_FLOOR.L1[0],
+          id: "", type: "cabinet", floor: "L1", room: (rooms.find((r) => r.floor === "L1" && r.type === "cabinet") || {}).name || "",
           manufacturer: MANUFACTURERS[0], model: "", serialNumber: "", assetNumber: "", tscanId: "",
           shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: BALLAST_TYPES[0],
           co2Control: false, dimmingControl: false,
@@ -2460,7 +2468,7 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
   );
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setBool = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
-  const roomOptions = form.type === "reftech" ? REFTECH_ROOMS_BY_FLOOR[form.floor] : ROOMS_BY_FLOOR[form.floor];
+  const firstRoomFor = (floor, type) => (rooms.find((r) => r.floor === floor && r.type === type) || {}).name || "";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(32,43,44,0.35)" }} onClick={onClose}>
@@ -2492,7 +2500,7 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
             <Field label="Type">
               <select
                 value={form.type}
-                onChange={(e) => setForm((f) => ({ ...f, type: e.target.value, room: (e.target.value === "reftech" ? REFTECH_ROOMS_BY_FLOOR : ROOMS_BY_FLOOR)[f.floor][0] }))}
+                onChange={(e) => setForm((f) => ({ ...f, type: e.target.value, room: firstRoomFor(f.floor, e.target.value) }))}
                 className="gc-input"
               >
                 <option value="cabinet">Growth cabinet</option>
@@ -2502,14 +2510,19 @@ function AddEditUnitModal({ unit, onClose, onSave }) {
             <Field label="Floor">
               <select
                 value={form.floor}
-                onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value, room: (f.type === "reftech" ? REFTECH_ROOMS_BY_FLOOR : ROOMS_BY_FLOOR)[e.target.value][0] }))}
+                onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value, room: firstRoomFor(e.target.value, f.type) }))}
                 className="gc-input"
               >
                 {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
               </select>
             </Field>
             <Field label="Room">
-              <SelectWithCustom value={form.room} onChange={(v) => setForm((f) => ({ ...f, room: v }))} options={roomOptions} label="room" />
+              <RoomField
+                floor={form.floor} type={form.type} room={form.room} rooms={rooms}
+                onChange={(v) => setForm((f) => ({ ...f, room: v }))}
+                onAdd={(name) => onAddRoom(form.floor, form.type, name)}
+                onDelete={onDeleteRoom}
+              />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -3262,6 +3275,70 @@ function SelectWithCustom({ value, onChange, options, label }) {
   );
 }
 
+/* Room picker for the add/edit unit form — like SelectWithCustom, but a
+   new room persists to the rooms table (so it stays offered next time,
+   not just for this session) and an existing one can be deleted, behind a
+   confirm dialog since it's a destructive, if reversible-by-re-adding,
+   admin action. */
+function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customValue, setCustomValue] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const roomOptions = rooms.filter((r) => r.floor === floor && r.type === type);
+  const names = roomOptions.map((r) => r.name);
+  const allNames = room && !names.includes(room) ? [...names, room] : names;
+  const selected = roomOptions.find((r) => r.name === room);
+  return (
+    <div>
+      <div className="flex gap-2">
+        <select value={room} onChange={(e) => onChange(e.target.value)} className="gc-input flex-1">
+          {allNames.map((n) => <option key={n}>{n}</option>)}
+        </select>
+        <button type="button" onClick={() => setCustomOpen((v) => !v)} className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface)" }} title="Add a new room">
+          <PlusCircle size={16} style={{ color: "var(--accent-ink)" }} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirmingDelete(true)}
+          disabled={!selected}
+          className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 disabled:opacity-30"
+          style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+          title={selected ? "Delete this room" : "Pick an existing room to delete it"}
+        >
+          <Trash2 size={15} style={{ color: "var(--overdue)" }} />
+        </button>
+      </div>
+      {customOpen && (
+        <div className="flex gap-2 mt-2">
+          <input className="gc-input flex-1" placeholder="New room name" value={customValue} onChange={(e) => setCustomValue(e.target.value)} />
+          <button
+            type="button"
+            onClick={() => {
+              if (!customValue.trim()) return;
+              onAdd(customValue.trim());
+              onChange(customValue.trim());
+              setCustomValue("");
+              setCustomOpen(false);
+            }}
+            className="px-3 rounded-xl text-sm font-semibold text-white flex-shrink-0"
+            style={{ background: "var(--gradient)" }}
+          >
+            Add
+          </button>
+        </div>
+      )}
+      {confirmingDelete && selected && (
+        <ConfirmDialog
+          title="Delete this room?"
+          message={`This removes "${selected.name}" from the room list. Units already using it keep their current room field — this only stops it being offered for new ones.`}
+          onCancel={() => setConfirmingDelete(false)}
+          onConfirm={() => { setConfirmingDelete(false); onDelete(selected.id); }}
+        />
+      )}
+    </div>
+  );
+}
+
 function SpeciesPicker({ species, onChange, options }) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
@@ -3770,6 +3847,7 @@ export default function GrowthCabinetApp() {
   const labUsageHistory = appData ? appData.labUsageHistory : { labels: [], fullLabels: [], keys: [], series: {} };
   const labGroups = appData ? appData.labGroups : [];
   const activityLog = appData ? appData.activityLog : [];
+  const rooms = appData ? appData.rooms : [];
 
   // Wraps a mutation so a failed Supabase call (RLS denial, constraint
   // violation, network error) surfaces to the admin instead of failing
@@ -3793,6 +3871,15 @@ export default function GrowthCabinetApp() {
   const handleDeleteUnit = withErrorAlert(async (unitId) => {
     await api.deleteUnit(unitId);
     setSelected(null);
+    await reload();
+  });
+
+  const handleAddRoom = withErrorAlert(async (floor, type, name) => {
+    await api.addRoom(floor, type, name);
+    await reload();
+  });
+  const handleDeleteRoom = withErrorAlert(async (id) => {
+    await api.removeRoom(id);
     await reload();
   });
 
@@ -4043,7 +4130,9 @@ export default function GrowthCabinetApp() {
           onRemoveCategory={handleRemoveCategory}
         />
       )}
-      {editingUnit !== undefined && <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} />}
+      {editingUnit !== undefined && (
+        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onDeleteRoom={handleDeleteRoom} />
+      )}
       {previewReqIndex !== null && (
         <RequisitionPreviewPanel
           req={requests[previewReqIndex]}

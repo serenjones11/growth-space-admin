@@ -132,7 +132,10 @@ function numOrNull(v) {
 /* ---------------------------------------------------------------------- */
 
 const LAB_USAGE_WINDOW_START = new Date(2022, 8, 1); // Sep 2022
-const LAB_USAGE_WINDOW_MONTHS = 48;
+const LAB_USAGE_WINDOW_END = new Date(2100, 11, 1); // Dec 2100 — matches the date pickers' range elsewhere in the app
+const LAB_USAGE_WINDOW_MONTHS =
+  (LAB_USAGE_WINDOW_END.getFullYear() - LAB_USAGE_WINDOW_START.getFullYear()) * 12
+  + (LAB_USAGE_WINDOW_END.getMonth() - LAB_USAGE_WINDOW_START.getMonth()) + 1;
 
 function labUsageWindow() {
   const labels = [], fullLabels = [], keys = [];
@@ -334,7 +337,7 @@ export async function fetchAdminData() {
   // labGroupCache that this call populates.
   const labGroups = await fetchLabGroups();
 
-  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes] = await Promise.all([
+  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes, roomsRes] = await Promise.all([
     supabase.from("units").select("*"),
     supabase.from("bookings").select("*, requisitions!inner(status, admin_notes)").eq("requisitions.status", "approved"),
     supabase.from("service_log").select("*, maintenance_categories(name)"),
@@ -343,8 +346,9 @@ export async function fetchAdminData() {
     supabase.from("documents").select("*, profiles(full_name)").order("date", { ascending: false }),
     fetchLabUsageHistory(),
     supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(200),
+    supabase.from("rooms").select("*").order("name"),
   ]);
-  for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes, activityLogRes]) {
+  for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes, activityLogRes, roomsRes]) {
     if (res.error) throw res.error;
   }
 
@@ -432,7 +436,9 @@ export async function fetchAdminData() {
     createdAt: row.created_at,
   }));
 
-  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog };
+  const rooms = roomsRes.data.map((r) => ({ id: r.id, floor: r.floor, type: r.type, name: r.name }));
+
+  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog, rooms };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -600,6 +606,16 @@ export async function addMaintenanceCategory(name, existingCount) {
 
 export async function removeMaintenanceCategory(name) {
   const { error } = await supabase.from("maintenance_categories").delete().eq("name", name);
+  if (error) throw error;
+}
+
+export async function addRoom(floor, type, name) {
+  const { error } = await supabase.from("rooms").insert({ floor, type, name });
+  if (error) throw error;
+}
+
+export async function removeRoom(id) {
+  const { error } = await supabase.from("rooms").delete().eq("id", id);
   if (error) throw error;
 }
 
