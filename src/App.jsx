@@ -3,7 +3,6 @@ import {
   LayoutDashboard,
   Boxes,
   ClipboardList,
-  Send,
   LogOut,
   Search,
   PlusCircle,
@@ -2426,10 +2425,10 @@ function UnitDetailContent({
           {!assigning ? (
             <button
               onClick={() => setAssigning(true)}
-              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold text-white"
-              style={{ background: "var(--gradient)" }}
+              className="w-full flex items-center justify-center py-2.5 rounded-xl text-sm font-semibold text-white"
+              style={{ background: "var(--accent-dark)" }}
             >
-              <Send size={14} /> Assign requisition
+              Assign requisition
             </button>
           ) : (
             <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
