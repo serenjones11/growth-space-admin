@@ -999,7 +999,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
             <Maximize2 size={12} /> Full screen
           </button>
         </div>
-        <TimelineView units={units} requests={requests} onNavigate={(tab, index) => onPreviewRequisition(index)} compact />
+        <TimelineView units={units} requests={requests} onNavigate={(tab, index) => onPreviewRequisition(index)} onSelectUnit={onSelectUnit} compact />
       </div>
 
       {timelineFull && (
@@ -1011,7 +1011,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
             </button>
           </div>
           <div className="gc-card p-5">
-            <TimelineView units={units} requests={requests} onNavigate={(tab, index) => onPreviewRequisition(index)} />
+            <TimelineView units={units} requests={requests} onNavigate={(tab, index) => onPreviewRequisition(index)} onSelectUnit={onSelectUnit} />
           </div>
         </div>
       )}
@@ -1292,7 +1292,9 @@ function monthKeyToDate(key) {
 }
 function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, 1); }
 
-function TimelineView({ units, requests = [], onNavigate, compact = false }) {
+const TIMELINE_LANE_H = 28, TIMELINE_LANE_GAP = 4;
+
+function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact = false }) {
   const [floorFilter, setFloorFilter] = useState("all");
   const [urgencyFilters, setUrgencyFilters] = useState(new Set()); // empty = show all
   const [disciplineFilter, setDisciplineFilter] = useState("all");
@@ -1351,40 +1353,74 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
     return [{ u, o, s, reqIndex, start: start < rangeStart ? rangeStart : start, end }];
   });
 
+  // Pending requisitions aren't assigned to a unit yet — that's the whole
+  // point of this lane: lining a pending request's date window up against
+  // the unit rows below shows at a glance which ones are free to assign it
+  // to. Independent of floor/discipline/urgency filters (those describe
+  // existing bookings, not a not-yet-assigned request) — only clipped to
+  // the visible date window like everything else here.
+  const pending = requests.flatMap((r, reqIndex) => {
+    if (r.status !== "pending") return [];
+    const start = new Date(r.startDate);
+    const end = new Date(r.endDate);
+    if (end < rangeStart || start > rangeEnd) return [];
+    return [{ reqIndex, researcher: r.researcher, labGroup: r.labGroup, project: r.projectTitle, unitType: r.unitType, startDate: r.startDate, endDate: r.endDate, start: start < rangeStart ? rangeStart : start, end }];
+  });
+  const pendingLanes = assignLanes(pending.slice().sort((a, b) => a.start - b.start));
+
+  const occupiedByUnit = new Map();
+  occupied.forEach((it) => {
+    if (!occupiedByUnit.has(it.u.id)) occupiedByUnit.set(it.u.id, []);
+    occupiedByUnit.get(it.u.id).push(it);
+  });
+
   // One row per unit (not per requisition) — requisitions sharing a unit
   // share its row, laid out in lanes so genuinely overlapping ones stack
   // instead of covering each other, while non-overlapping ones fall back
-  // to lane 0 and free stretches of the row read as visibly empty.
-  const groups = FLOORS.map((f) => {
-    const byUnit = new Map();
-    occupied.filter((o) => o.u.floor === f).forEach((it) => {
-      if (!byUnit.has(it.u.id)) byUnit.set(it.u.id, { u: it.u, items: [] });
-      byUnit.get(it.u.id).items.push(it);
-    });
-    const unitRows = Array.from(byUnit.values())
-      .sort((a, b) => a.u.id.localeCompare(b.u.id, undefined, { numeric: true }))
-      .map((row) => ({ u: row.u, items: assignLanes(row.items.sort((a, b) => a.start - b.start)) }));
-    return { floor: f, unitRows };
-  }).filter((g) => g.unitRows.length).slice(0, compact ? 2 : undefined);
+  // to lane 0 and free stretches of the row read as visibly empty. The
+  // full view lists every unit on the floor — including ones with nothing
+  // booked — so a free room is as visible as a busy one; the compact
+  // dashboard preview stays a "highlights" list, same as before.
+  const groups = FLOORS
+    .filter((f) => floorFilter === "all" || floorFilter === f)
+    .map((f) => {
+      const floorUnits = compact
+        ? units.filter((u) => u.floor === f && occupiedByUnit.has(u.id))
+        : units.filter((u) => u.floor === f);
+      const unitRows = floorUnits
+        .slice()
+        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+        .map((u) => ({ u, items: assignLanes((occupiedByUnit.get(u.id) || []).slice().sort((a, b) => a.start - b.start)) }));
+      return { floor: f, unitRows };
+    })
+    .filter((g) => g.unitRows.length)
+    .slice(0, compact ? 2 : undefined);
 
   // Renders one unit's row — its requisitions all land on this single row,
   // in lanes only where their dates genuinely overlap, so a gap in the row
-  // reads as free time and a lane stack reads as a clash.
+  // reads as free time and a lane stack reads as a clash. The unit label
+  // opens that unit's detail modal (over the timeline, not navigating away).
   const renderUnitRow = ({ u, items }) => {
-    const dm = DISCIPLINE_META[items[0].o.discipline] || DISCIPLINE_META.plant;
-    const laneH = 28, laneGap = 4;
-    const laneCount = Math.max(...items.map((it) => it.lane)) + 1;
-    const rowH = laneCount * laneH + (laneCount - 1) * laneGap;
+    const dm = items[0]
+      ? DISCIPLINE_META[items[0].o.discipline] || DISCIPLINE_META.plant
+      : { icon: u.type === "reftech" ? DoorOpen : Leaf, color: "var(--ink-faint)" };
+    const laneCount = Math.max(0, ...items.map((it) => it.lane)) + 1;
+    const rowH = laneCount * TIMELINE_LANE_H + (laneCount - 1) * TIMELINE_LANE_GAP;
     return (
       <div key={u.id} className="flex items-start gap-2 text-xs">
-        <span className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold" style={{ height: laneH, color: "var(--ink-soft)" }}>
+        <button
+          type="button"
+          onClick={() => onSelectUnit && onSelectUnit(u)}
+          className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold text-left gc-clickable"
+          style={{ height: TIMELINE_LANE_H, color: "var(--ink-soft)" }}
+        >
           <dm.icon size={11} style={{ color: dm.color }} />{u.id}
-        </span>
+        </button>
         <div className="relative flex-1 rounded-lg" style={{ height: rowH, background: "var(--surface-soft)" }}>
           {items.map(({ o, s, reqIndex, start, end, lane }) => {
             const left = pct(start);
             const width = Math.max(1.2, pct(end) - left);
-            const top = lane * (laneH + laneGap);
+            const top = lane * (TIMELINE_LANE_H + TIMELINE_LANE_GAP);
             const req = requests[reqIndex];
             const rowKey = u.id + reqIndex;
             const isHovered = hoveredRow === rowKey;
@@ -1399,7 +1435,7 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
                   onClick={() => onNavigate && onNavigate(requisitionTab(req.status), reqIndex)}
                   className="absolute rounded-lg flex items-center px-2.5"
                   style={{
-                    left: `${left}%`, width: `${width}%`, top, height: laneH,
+                    left: `${left}%`, width: `${width}%`, top, height: TIMELINE_LANE_H,
                     background: s.soft, border: `1px solid ${s.color}`, cursor: "pointer",
                   }}
                 >
@@ -1409,7 +1445,7 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
                 {isHovered && (
                   <div
                     className="absolute z-20 rounded-xl p-3.5 text-left"
-                    style={{ left: `${left}%`, top: top + laneH + 6, minWidth: 240, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 10px 30px -12px rgba(22,33,29,0.25)" }}
+                    style={{ left: `${left}%`, top: top + TIMELINE_LANE_H + 6, minWidth: 240, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 10px 30px -12px rgba(22,33,29,0.25)" }}
                   >
                     <div className="text-[13px] font-extrabold mb-0.5">{o.researcher}</div>
                     <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>{piDisplay(o.labGroup)}</div>
@@ -1477,7 +1513,7 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
         )}
       </div>
 
-      {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No requisitions match these filters.</p>}
+      {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No cabinets or Reftech rooms match these filters.</p>}
 
       <div className="relative h-5 mb-2 ml-24">
         {axisMarks.map((m, i) => (
@@ -1487,6 +1523,67 @@ function TimelineView({ units, requests = [], onNavigate, compact = false }) {
 
       <div className="relative">
         <div className="absolute top-0 bottom-0 border-l border-dashed ml-24 pointer-events-none z-10" style={{ left: `${pct(TODAY)}%`, borderColor: "var(--ink-faint)" }} />
+
+        {/* Pending requests, lined up against their requested dates —
+            lets an admin see at a glance which units below are free during
+            that window, before they've been assigned to one. */}
+        {pendingLanes.length > 0 && (
+          <div className="flex items-start gap-2 text-xs mb-4 pb-4" style={{ borderBottom: "1px dashed var(--border)" }}>
+            <span className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold" style={{ height: TIMELINE_LANE_H, color: "var(--warning)" }}>
+              <Clock size={11} /> Pending
+            </span>
+            <div
+              className="relative flex-1 rounded-lg"
+              style={{
+                height: Math.max(0, ...pendingLanes.map((p) => p.lane)) * (TIMELINE_LANE_H + TIMELINE_LANE_GAP) + TIMELINE_LANE_H,
+                background: "var(--warning-soft)", opacity: 0.35,
+              }}
+            >
+              {pendingLanes.map((p) => {
+                const left = pct(p.start);
+                const width = Math.max(1.2, pct(p.end) - left);
+                const top = p.lane * (TIMELINE_LANE_H + TIMELINE_LANE_GAP);
+                const rowKey = `pending-${p.reqIndex}`;
+                const isHovered = hoveredRow === rowKey;
+                return (
+                  <div key={rowKey}>
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredRow(rowKey)}
+                      onMouseLeave={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
+                      onFocus={() => setHoveredRow(rowKey)}
+                      onBlur={() => setHoveredRow((cur) => (cur === rowKey ? null : cur))}
+                      onClick={() => onNavigate && onNavigate("pending", p.reqIndex)}
+                      className="absolute rounded-lg flex items-center px-2.5"
+                      style={{
+                        left: `${left}%`, width: `${width}%`, top, height: TIMELINE_LANE_H,
+                        background: "var(--surface)", border: "1.5px dashed var(--warning)", cursor: "pointer",
+                      }}
+                    >
+                      <span className="text-[11.5px] font-bold truncate" style={{ color: "var(--warning)" }}>{p.researcher}</span>
+                    </button>
+                    {isHovered && (
+                      <div
+                        className="absolute z-20 rounded-xl p-3.5 text-left"
+                        style={{ left: `${left}%`, top: top + TIMELINE_LANE_H + 6, minWidth: 240, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 10px 30px -12px rgba(22,33,29,0.25)" }}
+                      >
+                        <div className="text-[13px] font-extrabold mb-0.5">{p.researcher}</div>
+                        <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>{piDisplay(p.labGroup)}</div>
+                        <div className="text-[12px] mb-1" style={{ color: "var(--ink-soft)" }}>{p.project}</div>
+                        <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--warning)" }}>
+                          {p.unitType === "reftech" ? "Reftech Room" : "Growth Cabinet"} requested
+                        </div>
+                        <div className="text-[12px] font-bold" style={{ color: "var(--warning)" }}>{fmtGB(p.startDate)} → {fmtGB(p.endDate)}</div>
+                        <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click to review this requisition →</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-5">
           {groups.map((g) => {
             // Cabinets sharing a physical room cluster together under a
@@ -2435,7 +2532,11 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
   return (
     <div
       className="flex items-center justify-center p-6"
-      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 40, background: "rgba(22,33,29,0.4)" }}
+      // zIndex 55 — above the dashboard's fullscreen timeline overlay
+      // (z-50), so opening a unit from inside it pops the modal in front,
+      // timeline still visible behind; below 60 so a ConfirmDialog spawned
+      // from here (e.g. delete) still layers on top of this modal.
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 55, background: "rgba(22,33,29,0.4)" }}
       onClick={onClose}
     >
       <div
