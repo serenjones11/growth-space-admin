@@ -322,6 +322,37 @@ function bookingStatus(booking) {
 /* ---------------------------------------------------------------------- */
 /* Shared bits                                                            */
 /* ---------------------------------------------------------------------- */
+/* Icon pills replacing the old "All Areas / Plant Sciences / Insect
+   Sciences" text dropdown wherever discipline is a filter (not a value
+   being set on a requisition/unit) — a plant leaf, a bug, or both together
+   for "all," instead of reading a sentence to find the right option. */
+function DisciplineFilterPills({ value, onChange }) {
+  const pills = [
+    { key: "all", title: "All areas", color: "var(--ink-soft)", render: <span className="flex items-center" style={{ gap: 1 }}><Leaf size={12} /><Bug size={12} /></span> },
+    { key: "plant", title: DISCIPLINE_META.plant.label, color: DISCIPLINE_META.plant.color, render: <Leaf size={14} /> },
+    { key: "insect", title: DISCIPLINE_META.insect.label, color: DISCIPLINE_META.insect.color, render: <Bug size={14} /> },
+  ];
+  return (
+    <div className="flex items-center gap-1.5">
+      {pills.map((p) => {
+        const active = value === p.key;
+        return (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => onChange(p.key)}
+            title={p.title}
+            className="flex items-center justify-center rounded-full border flex-shrink-0"
+            style={{ width: 34, height: 34, background: active ? p.color : "var(--surface)", color: active ? "#fff" : p.color, borderColor: p.color }}
+          >
+            {p.render}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function StatusTag({ unit, big = false }) {
   const s = displayStatus(unit);
   return (
@@ -1489,11 +1520,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
           <option value="all">All Floors</option>
           {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
         </select>
-        <select value={disciplineFilter} onChange={(e) => setDisciplineFilter(e.target.value)} className="gc-input w-auto font-semibold" style={{ maxWidth: 150 }}>
-          <option value="all">All Areas</option>
-          <option value="plant">Plant Sciences</option>
-          <option value="insect">Insect Sciences</option>
-        </select>
+        <DisciplineFilterPills value={disciplineFilter} onChange={setDisciplineFilter} />
         <div className="flex flex-wrap items-center gap-1.5">
           {TIMELINE_STATUS_OPTIONS.map((o) => {
             const active = urgencyFilters.has(o.key);
@@ -1900,11 +1927,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
           <Search size={15} style={{ color: "var(--ink-faint)" }} />
           <input placeholder="Search by ID, room, researcher, or PI…" value={query} onChange={(e) => setQuery(e.target.value)} className="text-sm outline-none flex-1 bg-transparent" />
         </div>
-        <select value={disciplineFilter} onChange={(e) => setDisciplineFilter(e.target.value)} className="gc-input w-auto font-semibold" style={{ maxWidth: 150 }}>
-          <option value="all">All Areas</option>
-          <option value="plant">Plant Sciences</option>
-          <option value="insect">Insect Sciences</option>
-        </select>
+        <DisciplineFilterPills value={disciplineFilter} onChange={setDisciplineFilter} />
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="gc-input w-auto font-semibold" style={{ maxWidth: 150 }}>
           {FILTER_CHIPS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
         </select>
@@ -2612,11 +2635,22 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
   const firstRoomFor = (floor, type) => (rooms.find((r) => r.floor === floor && r.type === type) || {}).name || "";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(32,43,44,0.35)" }} onClick={onClose}>
+    // zIndex 58 — editing a unit is only ever triggered from inside
+    // UnitModal (z-55), so this always renders on top of it, not behind.
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 58, background: "rgba(32,43,44,0.35)" }} onClick={onClose}>
       <div className="gc-scroll rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
           <h2 className="gc-display text-lg font-extrabold">{isEdit ? `Edit ${unit.id}` : "Add new unit"}</h2>
-          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-black/5"><X size={18} /></button>
+          {/* Editing always opens from UnitModal (see z-index note above), so
+              closing this always lands back on it — say so explicitly rather
+              than relying on people knowing a click outside does the same. */}
+          {isEdit ? (
+            <button onClick={onClose} className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg hover:bg-black/5" style={{ color: "var(--ink-soft)" }}>
+              <ChevronLeft size={14} /> Back to {unit.id}
+            </button>
+          ) : (
+            <button onClick={onClose} className="p-1.5 rounded-md hover:bg-black/5"><X size={18} /></button>
+          )}
         </div>
         <form
           className="p-5 space-y-4"
@@ -3098,7 +3132,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
    delete the requisition without leaving whichever view opened it (it
    overlays on top; that view stays visible behind it), with an option to
    jump to the full Requisitions page. */
-function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComplete, onRevert, onReassign, onDelete, onClose, onOpenFull }) {
+function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComplete, onRevert, onReassign, onDelete, onClose, onOpenFull, backToUnitId }) {
   const [chosenUnit, setChosenUnit] = useState("");
   const [editing, setEditing] = useState(false);
   const [reassigning, setReassigning] = useState(false);
@@ -3145,7 +3179,16 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                 <button onClick={() => setConfirmingDelete(true)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }} title="Delete"><Trash2 size={15} /></button>
               </>
             )}
-            <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Close"><X size={16} /></button>
+            {/* This panel opened over a unit's detail modal (still open
+                behind it) — say so explicitly rather than relying on people
+                knowing a click outside does the same as this button. */}
+            {backToUnitId ? (
+              <button onClick={onClose} className="flex items-center gap-1 text-xs font-bold px-2.5 py-2 rounded-xl" style={{ background: "var(--surface-soft)", color: "var(--ink-soft)" }}>
+                <ChevronLeft size={14} /> Back to {backToUnitId}
+              </button>
+            ) : (
+              <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Close"><X size={16} /></button>
+            )}
           </div>
         </div>
 
@@ -4345,6 +4388,7 @@ export default function GrowthCabinetApp() {
           onEdit={handleEditRequisition}
           onReassign={handleReassignRequisition}
           onDelete={handleDeleteRequisition}
+          backToUnitId={selected ? selected.id : null}
           onClose={() => setPreviewReqIndex(null)}
           onOpenFull={() => {
             const req = requests[previewReqIndex];
