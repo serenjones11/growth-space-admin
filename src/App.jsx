@@ -1900,11 +1900,18 @@ function UnitCard({ unit, onClick }) {
           ongoing requisitions at once (unlike a cabinet's single occupant),
           so it gets a compact list instead of one occupant block: no
           per-row dates (the room-level status badge above already conveys
-          urgency), species instead, capped so the tile can't grow unbounded. */}
-      <div className="mt-auto rounded-xl px-3.5 py-3" style={{ background: boxStyle.background }}>
+          urgency), species instead, capped so the tile can't grow unbounded.
+          minHeight + centering keeps this box the same size across every
+          tile in the deck regardless of how much (or little) it has to
+          show — a free cabinet's one-liner and a busy reftech room's list
+          both read as the same footprint, not a ragged grid. */}
+      <div
+        className="mt-auto rounded-xl px-3.5 py-3"
+        style={{ background: boxStyle.background, minHeight: 88, display: "flex", flexDirection: "column", justifyContent: "center" }}
+      >
         {isReftech && currentForClash.length > 0 ? (
           <div className="space-y-2">
-            {currentForClash.slice(0, 4).map((b) => (
+            {currentForClash.slice(0, 2).map((b) => (
               <div key={b.id} className="flex items-center gap-2.5">
                 <span className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-extrabold flex-shrink-0" style={{ background: "rgba(255,255,255,0.65)", color: boxStyle.ink }}>
                   {b.researcher.split(" ").map((p) => p[0]).join("").slice(0, 2)}
@@ -1917,8 +1924,8 @@ function UnitCard({ unit, onClick }) {
                 </div>
               </div>
             ))}
-            {currentForClash.length > 4 && (
-              <div className="text-[10.5px] font-bold" style={{ color: boxStyle.ink, opacity: 0.75 }}>+{currentForClash.length - 4} more</div>
+            {currentForClash.length > 2 && (
+              <div className="text-[10.5px] font-bold" style={{ color: boxStyle.ink, opacity: 0.75 }}>+{currentForClash.length - 2} more</div>
             )}
             {upcoming.length > 0 && (
               <div className="text-[11px] font-bold pt-0.5" style={{ color: "var(--accent-dark)" }}>+{upcoming.length} more requisition{upcoming.length !== 1 ? "s" : ""} ahead →</div>
