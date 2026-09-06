@@ -235,6 +235,7 @@ function mapBookingRow(b) {
     labGroup: labGroupCache.nameById[b.lab_group_id] || "",
     project: b.project_title,
     discipline: b.discipline,
+    species: b.species || [],
     setTemp: b.set_temp,
     setHumidity: b.set_humidity,
     lightCycle: b.light_cycle,
@@ -285,6 +286,7 @@ function mapServiceLogRow(s) {
 function mapRequisitionRow(r) {
   return {
     id: r.id,
+    code: r.code || "",
     researcherId: r.researcher_id,
     researcher: r.researcher_name,
     email: r.email,
@@ -672,6 +674,7 @@ function bookingFieldsFromRequisition(req) {
     lab_group_id: req.labGroupId ?? null,
     project_title: req.projectTitle,
     discipline: req.discipline,
+    species: req.species || [],
     set_temp: numOrNull(req.setTemp),
     set_humidity: numOrNull(req.setHumidity),
     light_cycle: nullIfEmpty(req.lightCycle),

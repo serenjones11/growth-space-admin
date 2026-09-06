@@ -128,6 +128,16 @@ const TOKENS = `
     transition: border-color 0.15s, box-shadow 0.15s;
   }
   .gc-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  /* Every native <select> gets the same chevron the custom dropdown
+     buttons (species picker, date picker, etc.) use, instead of each
+     browser's own default arrow — one visual language for "this opens a
+     list of options" everywhere on the form. */
+  select.gc-input {
+    appearance: none; -webkit-appearance: none; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%235C6D65' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; background-size: 14px;
+    padding-right: 32px;
+  }
   /* Modern slider: thin two-tone track (filled portion painted by
      --gc-slider-fill, set inline per-instance) with a larger bordered
      thumb, in place of the browser's default thin grey scrubber. */
@@ -518,14 +528,20 @@ function DateField({ label, value, onChange }) {
 
 /* Checkbox styled to match the height/border of the other gc-input fields
    it sits beside in a form grid, instead of a bare checkbox that needs a
-   manual top-margin fudge to line up with its neighbours. */
+   manual top-margin fudge to line up with its neighbours.
+   A <div>, not a <label>, wrapping the checkbox — Field already wraps its
+   children in a <label>, and a <label> nested inside another <label> is
+   invalid HTML that makes browsers double-fire the click (toggling it
+   straight back), which is exactly why the old version needed two clicks
+   to register one change. The checkbox itself is inert (pointerEvents:
+   none, no onChange) so the div's own onClick is the only thing driving it. */
 function CheckField({ label, checked, onChange }) {
   return (
     <Field label={label}>
-      <label className="gc-input flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
-        <input type="checkbox" checked={checked} onChange={onChange} style={{ accentColor: "var(--accent)" }} />
+      <div onClick={() => onChange({ target: { checked: !checked } })} className="gc-input flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+        <input type="checkbox" checked={checked} readOnly style={{ accentColor: "var(--accent)", pointerEvents: "none" }} />
         <span className="text-sm font-medium">{checked ? "Yes" : "No"}</span>
-      </label>
+      </div>
     </Field>
   );
 }
@@ -1880,9 +1896,35 @@ function UnitCard({ unit, onClick }) {
         {unit.co2Control && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>CO₂</span>}
       </div>
 
-      {/* occupant / availability */}
+      {/* occupant / availability — a reftech room can genuinely hold several
+          ongoing requisitions at once (unlike a cabinet's single occupant),
+          so it gets a compact list instead of one occupant block: no
+          per-row dates (the room-level status badge above already conveys
+          urgency), species instead, capped so the tile can't grow unbounded. */}
       <div className="mt-auto rounded-xl px-3.5 py-3" style={{ background: boxStyle.background }}>
-        {occupant ? (
+        {isReftech && currentForClash.length > 0 ? (
+          <div className="space-y-2">
+            {currentForClash.slice(0, 4).map((b) => (
+              <div key={b.id} className="flex items-center gap-2.5">
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-extrabold flex-shrink-0" style={{ background: "rgba(255,255,255,0.65)", color: boxStyle.ink }}>
+                  {b.researcher.split(" ").map((p) => p[0]).join("").slice(0, 2)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12.5px] font-extrabold truncate" style={{ color: boxStyle.ink }}>{b.researcher}</div>
+                  <div className="text-[10.5px] font-semibold truncate" style={{ color: boxStyle.ink, opacity: 0.85 }}>
+                    {piDisplay(b.labGroup)}{b.species && b.species.length ? ` · ${b.species.join(", ")}` : ""}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {currentForClash.length > 4 && (
+              <div className="text-[10.5px] font-bold" style={{ color: boxStyle.ink, opacity: 0.75 }}>+{currentForClash.length - 4} more</div>
+            )}
+            {upcoming.length > 0 && (
+              <div className="text-[11px] font-bold pt-0.5" style={{ color: "var(--accent-dark)" }}>+{upcoming.length} more requisition{upcoming.length !== 1 ? "s" : ""} ahead →</div>
+            )}
+          </div>
+        ) : occupant ? (
           <>
             <div className="flex items-center gap-2.5">
               <span className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-extrabold flex-shrink-0" style={{ background: "rgba(255,255,255,0.65)", color: boxStyle.ink }}>
@@ -1961,12 +2003,12 @@ function exportUnitsCSV(units) {
 const REQUISITION_STATUS_LABEL = { pending: "Pending review", approved: "Ongoing", completed: "Completed", declined: "Declined" };
 function exportRequisitionsCSV(requests) {
   const headers = [
-    "Researcher", "Email", "Role", "PI", "Lab Group", "Unit Type", "Discipline", "Species", "Containment Level",
+    "Code", "Researcher", "Email", "Role", "PI", "Lab Group", "Unit Type", "Discipline", "Species", "Containment Level",
     "Project Title", "Preferred Floor", "Assigned Unit", "Status", "Start Date", "End Date",
     "Submitted", "Decided", "Completed", "Admin Notes",
   ];
   const rows = requests.map((r) => [
-    r.researcher, r.email, r.role, r.pi, r.labGroup,
+    r.code, r.researcher, r.email, r.role, r.pi, r.labGroup,
     r.unitType === "reftech" ? "Reftech Room" : "Growth Cabinet", DISCIPLINE_META[r.discipline]?.label || r.discipline,
     (r.species || []).join("; "), r.containmentLevel, r.projectTitle,
     r.preferredFloor === "any" ? "Any" : FLOOR_LABEL[r.preferredFloor] || r.preferredFloor, r.assignedUnitId || "",
@@ -3151,7 +3193,10 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
           {initials}
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-bold truncate">{req.researcher}</div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-bold truncate">{req.researcher}</div>
+            {req.code && <span className="gc-mono text-[10.5px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "var(--surface-soft)", color: "var(--ink-faint)" }}>{req.code}</span>}
+          </div>
           <div className="text-xs mt-0.5 truncate" style={{ color: "var(--ink-faint)" }}>{req.projectTitle} · {piDisplay(req.labGroup)}</div>
         </div>
         <div className="hidden sm:block text-xs font-semibold text-right flex-shrink-0" style={{ color: "var(--ink-faint)" }}>
@@ -3315,7 +3360,10 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
       >
         <div className="flex items-start justify-between gap-4 px-7 py-5" style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold uppercase tracking-wider mb-1" style={{ color: "var(--ink-faint)" }}>Requisition</div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>Requisition</div>
+              {req.code && <span className="gc-mono text-[10.5px] font-bold px-1.5 py-0.5 rounded" style={{ background: "var(--surface-soft)", color: "var(--ink-faint)" }}>{req.code}</span>}
+            </div>
             <h1 className="gc-display text-2xl font-extrabold leading-none truncate">{req.researcher}</h1>
             <p className="text-[13px] mt-1 truncate" style={{ color: "var(--ink-soft)" }}>{req.projectTitle}</p>
             <span className="inline-block mt-2 text-xs font-bold rounded-full px-2.5 py-1" style={{ background: statusSoft, color: statusColor }}>
@@ -3772,11 +3820,18 @@ function SpeciesPicker({ species, onChange, options }) {
                 className="gc-scroll absolute z-30 mt-2 rounded-2xl p-2"
                 style={{ width: "100%", maxHeight: 240, overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 18px 44px -18px rgba(22,33,29,0.35)" }}
               >
+                {/* A <div>, not a <label> — this sits inside Field's own
+                    <label> (via the wrapper below), and a <label> nested
+                    inside another <label> is invalid HTML that makes
+                    browsers double-fire the click, toggling the checkbox
+                    straight back off. The checkbox is purely visual
+                    (pointerEvents: none, no onChange of its own); this
+                    row's onClick is the only thing that actually toggles it. */}
                 {options.map((o) => (
-                  <label key={o} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm cursor-pointer" style={{ background: species.includes(o) ? "var(--accent-soft)" : "transparent" }}>
-                    <input type="checkbox" checked={species.includes(o)} onChange={() => toggleSpecies(o)} style={{ accentColor: "var(--accent)" }} />
+                  <div key={o} onClick={() => toggleSpecies(o)} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm cursor-pointer" style={{ background: species.includes(o) ? "var(--accent-soft)" : "transparent" }}>
+                    <input type="checkbox" checked={species.includes(o)} readOnly style={{ accentColor: "var(--accent)", pointerEvents: "none" }} />
                     {o}
-                  </label>
+                  </div>
                 ))}
               </div>
             </>

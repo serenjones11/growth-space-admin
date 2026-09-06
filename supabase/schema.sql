@@ -207,6 +207,9 @@ create index idx_units_out_of_service on units(is_out_of_service) where is_out_o
 -- ----------------------------------------------------------------------------
 create table requisitions (
   id                uuid primary key default gen_random_uuid(),
+  -- Human-readable reference ("R26-0001"), assigned by a trigger on insert
+  -- — see section 19. Never set directly by application code.
+  code              text unique,
 
   -- who's asking
   researcher_id     uuid references profiles(id),       -- who submitted it, IF logged in.
@@ -296,6 +299,11 @@ create table bookings (
   lab_group_id    uuid references lab_groups(id) on delete set null,
   project_title   text,
   discipline      discipline_type,
+  -- Denormalized from the requisition at approval time (same reasoning as
+  -- project_title/discipline above) — a Reftech room can hold several
+  -- ongoing requisitions at once, and its inventory tile lists each one's
+  -- species without a separate lookup.
+  species         text[] default array[]::text[],
 
   set_temp        numeric,
   set_humidity    numeric,
@@ -884,6 +892,46 @@ revoke execute on function trg_notify_requisition_assigned_fn() from public, ano
 create trigger trg_notify_requisition_assigned
   after update on requisitions
   for each row execute procedure trg_notify_requisition_assigned_fn();
+
+
+-- ----------------------------------------------------------------------------
+-- 19. REQUISITION CODES  (human-readable reference — "R26-0001")
+-- ----------------------------------------------------------------------------
+-- A stable short reference researchers/admins can say out loud or search
+-- for, instead of a UUID or "whichever one titled X". requisitions.code
+-- (declared in section 6) is set by this trigger, never by application code.
+create table requisition_code_counters (
+  year      int primary key,
+  next_seq  int not null default 1
+);
+
+-- BEFORE INSERT (not after) so new.code is set on the row as it's written,
+-- in the same statement — no follow-up update needed. The UPDATE below
+-- takes a row lock on that year's counter row, so concurrent submissions
+-- in the same year can never be handed the same sequence number.
+create or replace function assign_requisition_code()
+returns trigger as $$
+declare
+  v_year int := extract(year from now())::int;
+  v_seq  int;
+begin
+  insert into requisition_code_counters (year, next_seq) values (v_year, 1)
+    on conflict (year) do nothing;
+
+  update requisition_code_counters
+    set next_seq = next_seq + 1
+    where year = v_year
+    returning next_seq - 1 into v_seq;
+
+  new.code := 'R' || lpad((v_year % 100)::text, 2, '0') || '-' || lpad(v_seq::text, 4, '0');
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function assign_requisition_code() from public, anon, authenticated;
+
+create trigger trg_assign_requisition_code
+  before insert on requisitions
+  for each row execute procedure assign_requisition_code();
 
 -- ============================================================================
 -- End of schema. Next steps once this has run cleanly:
