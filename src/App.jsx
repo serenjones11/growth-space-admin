@@ -3500,7 +3500,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
       </div>
 
       {/* space-type filter — applies to both Active and Completed */}
-      <div className="inline-flex items-center p-1 rounded-xl mb-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+      <div className="inline-flex items-center p-1 rounded-2xl mb-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
         {[
           { key: "all", label: "All", count: allCount },
           { key: "cabinet", label: "Growth Cabinets", count: cabinetCount },
@@ -3509,11 +3509,11 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           <button
             key={t.key}
             onClick={() => setTypeFilter(t.key)}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
             style={{ background: typeFilter === t.key ? "var(--sidebar-bg)" : "transparent", color: typeFilter === t.key ? "#fff" : "var(--ink-soft)" }}
           >
             {t.label}
-            <span className="text-[10.5px] font-extrabold px-1.5 py-0.5 rounded-full" style={{ background: typeFilter === t.key ? "rgba(255,255,255,0.15)" : "var(--surface-soft)", color: typeFilter === t.key ? "#fff" : "var(--ink-faint)" }}>
+            <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-full" style={{ background: typeFilter === t.key ? "rgba(255,255,255,0.15)" : "var(--surface-soft)", color: typeFilter === t.key ? "#fff" : "var(--ink-faint)" }}>
               {t.count}
             </span>
           </button>
