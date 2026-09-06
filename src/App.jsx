@@ -3482,7 +3482,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
       <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="gc-display text-2xl font-extrabold">Requisitions</h1>
-          <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>{requests.length} requests submitted via the request-space form</p>
+          <p className="text-[13px] mt-0.5" style={{ color: "var(--ink-soft)" }}>{requests.length} requests submitted via the request-space form</p>
         </div>
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <button onClick={() => exportRequisitionsCSV(visibleForExport)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--ink)" }}>
