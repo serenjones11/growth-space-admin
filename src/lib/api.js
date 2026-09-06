@@ -621,6 +621,25 @@ export async function removeRoom(id) {
   if (error) throw error;
 }
 
+/* Public-safe: unlike rooms, species_options has a public-select RLS policy
+   (the picker it feeds appears on the anonymous request form, not just the
+   admin side), so this is a plain select rather than an RPC. */
+export async function listSpeciesOptions() {
+  const { data, error } = await supabase.from("species_options").select("*").order("name");
+  if (error) throw error;
+  return data.map((r) => ({ id: r.id, discipline: r.discipline, name: r.name }));
+}
+
+export async function addSpeciesOption(discipline, name) {
+  const { error } = await supabase.from("species_options").insert({ discipline, name });
+  if (error) throw error;
+}
+
+export async function removeSpeciesOption(id) {
+  const { error } = await supabase.from("species_options").delete().eq("id", id);
+  if (error) throw error;
+}
+
 function requisitionFieldsToRow(payload) {
   return {
     researcher_name: payload.researcher,

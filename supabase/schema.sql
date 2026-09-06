@@ -904,6 +904,11 @@ create table requisition_code_counters (
   year      int primary key,
   next_seq  int not null default 1
 );
+-- Only ever touched by assign_requisition_code() below, a SECURITY DEFINER
+-- trigger that runs as the table owner and so bypasses RLS regardless —
+-- enabling RLS with no policies just stops it being directly exposed to
+-- anon/authenticated over PostgREST.
+alter table requisition_code_counters enable row level security;
 
 -- BEFORE INSERT (not after) so new.code is set on the row as it's written,
 -- in the same statement — no follow-up update needed. The UPDATE below
@@ -932,6 +937,40 @@ revoke execute on function assign_requisition_code() from public, anon, authenti
 create trigger trg_assign_requisition_code
   before insert on requisitions
   for each row execute procedure assign_requisition_code();
+
+
+-- ----------------------------------------------------------------------------
+-- 20. SPECIES OPTIONS  (admin-manageable, shown in the request form's
+--     species picker)
+-- ----------------------------------------------------------------------------
+-- Previously hardcoded frontend consts (PLANT_SPECIES/INSECT_SPECIES).
+-- Unlike rooms (admin-only read, since RoomField only appears in the admin
+-- unit form), the species picker is used on the public anonymous request
+-- form too, so this needs public SELECT rather than is_admin()-gated read.
+create table species_options (
+  id           uuid primary key default gen_random_uuid(),
+  discipline   text not null check (discipline in ('plant', 'insect')),
+  name         text not null,
+  created_at   timestamptz not null default now(),
+  unique (discipline, name)
+);
+
+alter table species_options enable row level security;
+create policy "public read species_options" on species_options for select using (true);
+create policy "admin write species_options" on species_options for all using (is_admin()) with check (is_admin());
+
+insert into species_options (discipline, name) values
+  ('plant', 'Arabidopsis thaliana'),
+  ('plant', 'Triticum aestivum (Wheat)'),
+  ('plant', 'Hordeum vulgare (Barley)'),
+  ('plant', 'Physcomitrella patens (Moss)'),
+  ('plant', 'Nicotiana benthamiana'),
+  ('insect', 'Drosophila melanogaster'),
+  ('insect', 'Tribolium castaneum'),
+  ('insect', 'Bombyx mori'),
+  ('insect', 'Apis mellifera'),
+  ('insect', 'Tenebrio molitor')
+on conflict (discipline, name) do nothing;
 
 -- ============================================================================
 -- End of schema. Next steps once this has run cleanly:

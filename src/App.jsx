@@ -43,6 +43,7 @@ import {
   CalendarPlus,
   Refrigerator,
   Calendar,
+  Settings,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -195,8 +196,6 @@ const LIGHTING_TYPES = ["LED", "Fluorescent", "LED + Fluorescent"];
 const BALLAST_TYPES = ["Electronic", "Magnetic"];
 const ROLES = ["PhD Student", "Postdoc", "Technician", "Masters Student", "PI / Academic Staff"];
 const CONTAINMENT_LEVELS = ["Wild-Type", "GMO", "DEFRA"];
-const PLANT_SPECIES = ["Arabidopsis thaliana", "Triticum aestivum (Wheat)", "Hordeum vulgare (Barley)", "Physcomitrella patens (Moss)", "Nicotiana benthamiana"];
-const INSECT_SPECIES = ["Drosophila melanogaster", "Tribolium castaneum", "Bombyx mori", "Apis mellifera", "Tenebrio molitor"];
 
 /* Floors — LG, Level 1, Level 2a, Level 2b, Level 3 */
 const FLOORS = ["LG", "L1", "L2A", "L2B", "L3"];
@@ -3491,29 +3490,41 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
   const [tab, setTab] = useState(initialTab);
   const [historyFilter, setHistoryFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all"); // "all" | "cabinet" | "reftech"
+  const [query, setQuery] = useState("");
 
   const byType = ({ r }) => typeFilter === "all" || r.unitType === typeFilter;
+  const matchesSearch = (r) => {
+    const q = normalizeSearch(query);
+    return q === "" ||
+      normalizeSearch(r.code).includes(q) ||
+      normalizeSearch(r.researcher).includes(q) ||
+      normalizeSearch(r.pi).includes(q) ||
+      normalizeSearch(r.projectTitle).includes(q);
+  };
+  const bySearch = ({ r }) => matchesSearch(r);
   const withIdx = requests.map((r, i) => ({ r, i }));
 
   // Active = still needs attention or is still ongoing. A requisition only leaves Active once an
   // admin manually marks it completed — passing its end date does not move it on its own.
-  const awaitingReview = withIdx.filter(({ r }) => r.status === "pending").filter(byType)
+  const awaitingReview = withIdx.filter(({ r }) => r.status === "pending").filter(byType).filter(bySearch)
     .sort((a, b) => new Date(a.r.submittedDate || 0) - new Date(b.r.submittedDate || 0)); // longest-waiting first
-  const ongoing = withIdx.filter(({ r }) => r.status === "approved").filter(byType)
+  const ongoing = withIdx.filter(({ r }) => r.status === "approved").filter(byType).filter(bySearch)
     .sort((a, b) => new Date(b.r.decidedDate || 0) - new Date(a.r.decidedDate || 0)); // most recently approved first
   const activeCount = awaitingReview.length + ongoing.length;
 
-  const historic = withIdx.filter(({ r }) => r.status === "completed" || r.status === "declined").filter(byType);
+  const historic = withIdx.filter(({ r }) => r.status === "completed" || r.status === "declined").filter(byType).filter(bySearch);
   const filteredHistoric = historic
     .filter(({ r }) => historyFilter === "all" || r.status === historyFilter)
     .sort((a, b) => new Date(b.r.decidedDate || 0) - new Date(a.r.decidedDate || 0)); // most recently approved/declined first
 
   // Counts on the type-filter toggle reflect whichever tab is open — active
   // counts on the Active tab, completed/declined counts on the Completed
-  // tab — rather than a blended total that doesn't match what's shown.
-  const relevantForCounts = tab === "pending"
+  // tab — and respect the search box too, rather than a blended total that
+  // doesn't match what's shown.
+  const relevantForCounts = (tab === "pending"
     ? requests.filter((r) => r.status === "pending" || r.status === "approved")
-    : requests.filter((r) => r.status === "completed" || r.status === "declined");
+    : requests.filter((r) => r.status === "completed" || r.status === "declined")
+  ).filter(matchesSearch);
   const allCount = relevantForCounts.length;
   const cabinetCount = relevantForCounts.filter((r) => r.unitType === "cabinet").length;
   const reftechCount = relevantForCounts.filter((r) => r.unitType === "reftech").length;
@@ -3573,6 +3584,11 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
             </span>
           </button>
         ))}
+      </div>
+
+      <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl mb-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+        <Search size={15} style={{ color: "var(--ink-faint)" }} />
+        <input placeholder="Search by code, researcher, or PI…" value={query} onChange={(e) => setQuery(e.target.value)} className="text-sm outline-none flex-1 bg-transparent" />
       </div>
 
       {tab === "pending" && (
@@ -3800,10 +3816,13 @@ function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
    the old "pick one from a select, it gets added and the select resets,
    repeat" flow, which only supported multiple species one re-open at a
    time. */
-function SpeciesPicker({ species, onChange, options }) {
+function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOption, onDeleteOption }) {
   const [open, setOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
+  const [manageOpen, setManageOpen] = useState(false);
+  const [newOptionValue, setNewOptionValue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null); // option row being deleted
   const toggleSpecies = (val) => onChange(species.includes(val) ? species.filter((s) => s !== val) : [...species, val]);
   const removeSpecies = (val) => onChange(species.filter((s) => s !== val));
   const addCustom = (val) => { if (!val || species.includes(val)) return; onChange([...species, val]); };
@@ -3825,7 +3844,7 @@ function SpeciesPicker({ species, onChange, options }) {
               <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
               <div
                 className="gc-scroll absolute z-30 mt-2 rounded-2xl p-2"
-                style={{ width: "100%", maxHeight: 240, overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 18px 44px -18px rgba(22,33,29,0.35)" }}
+                style={{ width: "100%", maxHeight: 280, overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 18px 44px -18px rgba(22,33,29,0.35)" }}
               >
                 {/* A <div>, not a <label> — this sits inside Field's own
                     <label> (via the wrapper below), and a <label> nested
@@ -3835,11 +3854,46 @@ function SpeciesPicker({ species, onChange, options }) {
                     (pointerEvents: none, no onChange of its own); this
                     row's onClick is the only thing that actually toggles it. */}
                 {options.map((o) => (
-                  <div key={o} onClick={() => toggleSpecies(o)} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm cursor-pointer" style={{ background: species.includes(o) ? "var(--accent-soft)" : "transparent" }}>
-                    <input type="checkbox" checked={species.includes(o)} readOnly style={{ accentColor: "var(--accent)", pointerEvents: "none" }} />
-                    {o}
+                  <div key={o.id} onClick={() => toggleSpecies(o.name)} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm cursor-pointer" style={{ background: species.includes(o.name) ? "var(--accent-soft)" : "transparent" }}>
+                    <input type="checkbox" checked={species.includes(o.name)} readOnly style={{ accentColor: "var(--accent)", pointerEvents: "none" }} />
+                    {o.name}
                   </div>
                 ))}
+                {isAdmin && (
+                  <div className="border-t mt-1.5 pt-1.5" style={{ borderColor: "var(--border)" }}>
+                    <div
+                      onClick={(e) => { e.stopPropagation(); setManageOpen((v) => !v); }}
+                      className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold cursor-pointer"
+                      style={{ color: "var(--accent-ink)" }}
+                    >
+                      <Settings size={12} /> Manage species list
+                    </div>
+                    {manageOpen && (
+                      <div className="px-1 pb-1 space-y-1" onClick={(e) => e.stopPropagation()}>
+                        {options.map((o) => (
+                          <div key={o.id} className="flex items-center justify-between gap-2 pl-2.5 pr-1.5 py-1 rounded-lg text-xs" style={{ background: "var(--surface-soft)" }}>
+                            <span className="truncate">{o.name}</span>
+                            <button type="button" onClick={() => setConfirmDelete(o)} className="p-1 rounded flex-shrink-0"><Trash2 size={12} style={{ color: "var(--overdue)" }} /></button>
+                          </div>
+                        ))}
+                        <div className="flex gap-1.5 pt-1">
+                          <input
+                            className="gc-input flex-1 text-xs" style={{ padding: "6px 10px" }}
+                            placeholder="New species name" value={newOptionValue}
+                            onChange={(e) => setNewOptionValue(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => { const v = newOptionValue.trim(); if (v) { onAddOption(v); setNewOptionValue(""); } }}
+                            className="px-2.5 rounded-lg text-xs font-bold text-white flex-shrink-0" style={{ background: "var(--gradient)" }}
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -3864,6 +3918,14 @@ function SpeciesPicker({ species, onChange, options }) {
           ))}
         </div>
       )}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Remove this species?"
+          message={`This removes "${confirmDelete.name}" from the picker list for future requests. Existing requisitions that already used it are unaffected.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => { onDeleteOption(confirmDelete.id); setConfirmDelete(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -3880,7 +3942,7 @@ function FormSectionTitle({ children }) {
 // real lab_groups id, so it can't collide with one.
 const PI_NOT_LISTED = "__pi_not_listed__";
 
-function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
+function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAdmin = false }) {
   const [mode, setMode] = useState(null); // 'new' | 'amend'
   const [spaceType, setSpaceType] = useState(null); // 'cabinet' | 'reftech'
   const [discipline, setDiscipline] = useState(null); // 'plant' | 'insect'
@@ -3903,6 +3965,20 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
       .finally(() => { if (!cancelled) setPiGroupsLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Species options — DB-backed (species_options table, publicly readable)
+  // rather than the old hardcoded PLANT_SPECIES/INSECT_SPECIES consts, so
+  // admins can manage the list from right inside this picker (see
+  // SpeciesPicker's "Manage species list" panel, isAdmin-gated).
+  const [speciesOptions, setSpeciesOptions] = useState([]);
+  const reloadSpeciesOptions = () => api.listSpeciesOptions().then(setSpeciesOptions).catch((err) => console.error(err));
+  useEffect(() => { reloadSpeciesOptions(); }, []);
+  const handleAddSpeciesOption = (name) => {
+    api.addSpeciesOption(discipline, name).then(reloadSpeciesOptions).catch((err) => window.alert(err.message || "Couldn't add that species."));
+  };
+  const handleDeleteSpeciesOption = (id) => {
+    api.removeSpeciesOption(id).then(reloadSpeciesOptions).catch((err) => window.alert(err.message || "Couldn't remove that species."));
+  };
 
   const steps = mode === "amend" ? WIZARD_STEPS_AMEND : WIZARD_STEPS_NEW;
   const stepName = steps[stepIndex];
@@ -4151,7 +4227,11 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true }) {
           <FormSectionTitle>Experiment Details</FormSectionTitle>
           <Field label="Project title *"><input required value={form.projectTitle} onChange={set("projectTitle")} className="gc-input" placeholder="Arabidopsis salt-stress trial" /></Field>
           <Field label="Species *">
-            <SpeciesPicker species={form.species} onChange={(sp) => setForm((f) => ({ ...f, species: sp }))} options={isPlant ? PLANT_SPECIES : INSECT_SPECIES} />
+            <SpeciesPicker
+              species={form.species} onChange={(sp) => setForm((f) => ({ ...f, species: sp }))}
+              options={speciesOptions.filter((o) => o.discipline === (isPlant ? "plant" : "insect"))}
+              isAdmin={isAdmin} onAddOption={handleAddSpeciesOption} onDeleteOption={handleDeleteSpeciesOption}
+            />
           </Field>
 
           {isPlant && (
@@ -4605,7 +4685,7 @@ export default function GrowthCabinetApp() {
           />
         )}
         {page === "request" && (
-          <RequestSpacePage requests={requests} onSubmit={handleSubmitRequisition} onAmend={handleAmendRequisition} />
+          <RequestSpacePage requests={requests} onSubmit={handleSubmitRequisition} onAmend={handleAmendRequisition} isAdmin={isAdmin} />
         )}
       </main>
 
