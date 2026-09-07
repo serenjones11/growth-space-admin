@@ -3832,7 +3832,7 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
         <div className="relative flex-1">
           <button
             type="button"
-            onClick={() => setOpen((v) => !v)}
+            onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
             className="gc-input w-full flex items-center justify-between text-left"
             style={{ color: species.length ? "var(--ink)" : "var(--ink-faint)" }}
           >
@@ -3841,9 +3841,17 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
           </button>
           {open && (
             <>
-              <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+              {/* This backdrop (and the panel below) sit inside Field's own
+                  <label> — a plain click bubbling up to that <label> makes
+                  the browser "helpfully" re-forward a synthetic click to
+                  the toggle button (the label's implicit associated
+                  control), flipping `open` straight back. stopPropagation
+                  here and on the panel keeps every click-to-close /
+                  click-inside interaction from ever reaching the label. */}
+              <div className="fixed inset-0 z-20" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
               <div
                 className="gc-scroll absolute z-30 mt-2 rounded-2xl p-2"
+                onClick={(e) => e.stopPropagation()}
                 style={{ width: "100%", maxHeight: 280, overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 18px 44px -18px rgba(22,33,29,0.35)" }}
               >
                 {/* A <div>, not a <label> — this sits inside Field's own
