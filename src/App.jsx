@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   LayoutDashboard,
   Boxes,
@@ -3823,44 +3824,59 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
   const [manageOpen, setManageOpen] = useState(false);
   const [newOptionValue, setNewOptionValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null); // option row being deleted
+  const triggerRef = useRef(null);
+  const [panelRect, setPanelRect] = useState(null);
   const toggleSpecies = (val) => onChange(species.includes(val) ? species.filter((s) => s !== val) : [...species, val]);
   const removeSpecies = (val) => onChange(species.filter((s) => s !== val));
   const addCustom = (val) => { if (!val || species.includes(val)) return; onChange([...species, val]); };
+
+  // The popup is portalled straight to <body> (see below) rather than
+  // rendered in place — it used to sit inside Field's own <label>, and a
+  // plain click landing on anything in there that ISN'T itself a labelable
+  // element (a checkbox row `<div>`, the manage-list toggle, the backdrop)
+  // made the browser re-forward a synthetic click to the label's implicit
+  // associated control (this picker's own toggle button), instantly
+  // flipping `open` back — closing the dropdown after every single
+  // selection. Portalling it out from under the <label> removes that
+  // relationship entirely instead of chasing it with stopPropagation.
+  // Repositions on scroll/resize so it tracks the toggle button.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const updateRect = () => {
+      if (!triggerRef.current) return;
+      const r = triggerRef.current.getBoundingClientRect();
+      setPanelRect({ top: r.bottom + 8, left: r.left, width: r.width });
+    };
+    updateRect();
+    window.addEventListener("scroll", updateRect, true);
+    window.addEventListener("resize", updateRect);
+    return () => {
+      window.removeEventListener("scroll", updateRect, true);
+      window.removeEventListener("resize", updateRect);
+    };
+  }, [open]);
+
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
         <div className="relative flex-1">
           <button
+            ref={triggerRef}
             type="button"
-            onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+            onClick={() => setOpen((v) => !v)}
             className="gc-input w-full flex items-center justify-between text-left"
             style={{ color: species.length ? "var(--ink)" : "var(--ink-faint)" }}
           >
             {species.length ? `${species.length} species selected` : "Select species…"}
             <ChevronDown size={14} style={{ color: "var(--ink-faint)", flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
           </button>
-          {open && (
+          {open && panelRect && createPortal(
             <>
-              {/* This backdrop (and the panel below) sit inside Field's own
-                  <label> — a plain click bubbling up to that <label> makes
-                  the browser "helpfully" re-forward a synthetic click to
-                  the toggle button (the label's implicit associated
-                  control), flipping `open` straight back. stopPropagation
-                  here and on the panel keeps every click-to-close /
-                  click-inside interaction from ever reaching the label. */}
-              <div className="fixed inset-0 z-20" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+              <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
               <div
-                className="gc-scroll absolute z-30 mt-2 rounded-2xl p-2"
-                onClick={(e) => e.stopPropagation()}
-                style={{ width: "100%", maxHeight: 280, overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 18px 44px -18px rgba(22,33,29,0.35)" }}
+                className="gc-scroll fixed z-50 rounded-2xl p-2"
+                style={{ top: panelRect.top, left: panelRect.left, width: panelRect.width, maxHeight: 280, overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 18px 44px -18px rgba(22,33,29,0.35)" }}
               >
-                {/* A <div>, not a <label> — this sits inside Field's own
-                    <label> (via the wrapper below), and a <label> nested
-                    inside another <label> is invalid HTML that makes
-                    browsers double-fire the click, toggling the checkbox
-                    straight back off. The checkbox is purely visual
-                    (pointerEvents: none, no onChange of its own); this
-                    row's onClick is the only thing that actually toggles it. */}
                 {options.map((o) => (
                   <div key={o.id} onClick={() => toggleSpecies(o.name)} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm cursor-pointer" style={{ background: species.includes(o.name) ? "var(--accent-soft)" : "transparent" }}>
                     <input type="checkbox" checked={species.includes(o.name)} readOnly style={{ accentColor: "var(--accent)", pointerEvents: "none" }} />
@@ -3870,14 +3886,14 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
                 {isAdmin && (
                   <div className="border-t mt-1.5 pt-1.5" style={{ borderColor: "var(--border)" }}>
                     <div
-                      onClick={(e) => { e.stopPropagation(); setManageOpen((v) => !v); }}
+                      onClick={() => setManageOpen((v) => !v)}
                       className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold cursor-pointer"
                       style={{ color: "var(--accent-ink)" }}
                     >
                       <Settings size={12} /> Manage species list
                     </div>
                     {manageOpen && (
-                      <div className="px-1 pb-1 space-y-1" onClick={(e) => e.stopPropagation()}>
+                      <div className="px-1 pb-1 space-y-1">
                         {options.map((o) => (
                           <div key={o.id} className="flex items-center justify-between gap-2 pl-2.5 pr-1.5 py-1 rounded-lg text-xs" style={{ background: "var(--surface-soft)" }}>
                             <span className="truncate">{o.name}</span>
@@ -3903,7 +3919,8 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
                   </div>
                 )}
               </div>
-            </>
+            </>,
+            document.body
           )}
         </div>
         <button type="button" onClick={() => setCustomOpen((v) => !v)} className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface)" }} title="Add a custom species">
