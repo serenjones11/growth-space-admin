@@ -878,11 +878,20 @@ create trigger trg_notify_new_requisition
   after insert on requisitions
   for each row execute procedure trg_notify_new_requisition_fn();
 
+-- Fires on the initial approval/assignment, and again if an admin later
+-- edits the dates or reassigns the unit on an already-approved
+-- requisition — anything that would make the requester's email go stale.
+-- Deliberately scoped to just the fields that email actually shows (not
+-- every editable field, e.g. internal notes).
 create or replace function trg_notify_requisition_assigned_fn()
 returns trigger as $$
 begin
-  if new.status = 'approved' and new.assigned_unit_id is not null
-     and (old.status is distinct from new.status or old.assigned_unit_id is distinct from new.assigned_unit_id) then
+  if new.status = 'approved' and new.assigned_unit_id is not null and (
+    old.status is distinct from new.status
+    or old.assigned_unit_id is distinct from new.assigned_unit_id
+    or old.start_date is distinct from new.start_date
+    or old.end_date is distinct from new.end_date
+  ) then
     perform notify_requisition_webhook(jsonb_build_object('type', 'requisition_assigned', 'requisitionId', new.id));
   end if;
   return new;
