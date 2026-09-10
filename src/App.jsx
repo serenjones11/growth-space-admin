@@ -45,6 +45,7 @@ import {
   Refrigerator,
   Calendar,
   Settings,
+  Menu,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -598,9 +599,22 @@ const NAV = [
   { key: "requisitions", label: "Requisitions", icon: ClipboardList },
 ];
 
-function Sidebar({ page, setPage, pendingCount }) {
+// Fixed/off-canvas below `lg` (toggled by GrowthCabinetApp's mobile top bar +
+// backdrop), back to a normal in-flow sticky column at `lg` and up — the
+// desktop layout is unchanged, only the positioning strategy swaps at the
+// breakpoint.
+function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
+  const go = (key) => {
+    setPage(key);
+    onClose && onClose();
+  };
   return (
-    <aside className="w-64 flex-shrink-0 h-screen sticky top-0 flex flex-col py-7 px-4" style={{ background: "var(--sidebar-bg)" }}>
+    <aside
+      className={`w-72 lg:w-64 flex-shrink-0 h-screen fixed lg:sticky top-0 left-0 z-50 flex flex-col py-7 px-4 transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        mobileOpen ? "translate-x-0" : "-translate-x-full"
+      }`}
+      style={{ background: "var(--sidebar-bg)" }}
+    >
       <div className="flex items-center gap-3 px-2 pb-6 mb-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
         <div
           className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -608,19 +622,22 @@ function Sidebar({ page, setPage, pendingCount }) {
         >
           <Leaf size={19} color="#fff" />
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="gc-display font-extrabold text-[15.5px] text-white leading-tight">Facilities &amp; Estates</div>
           <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: "var(--sidebar-text-dim)" }}>GROWTH SPACE ADMIN</div>
         </div>
+        <button onClick={onClose} className="lg:hidden p-1 -mr-1 flex-shrink-0" style={{ color: "var(--sidebar-text)" }} aria-label="Close menu">
+          <X size={20} />
+        </button>
       </div>
 
-      <nav className="flex-1 space-y-1">
+      <nav className="flex-1 space-y-1 overflow-y-auto">
         {NAV.map(({ key, label, icon: Icon }) => {
           const active = page === key;
           return (
             <button
               key={key}
-              onClick={() => setPage(key)}
+              onClick={() => go(key)}
               className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm transition-colors relative"
               style={{
                 background: active ? "var(--sidebar-active)" : "transparent",
@@ -648,7 +665,7 @@ function Sidebar({ page, setPage, pendingCount }) {
             doesn't read as just another item in the nav list. */}
         <div className="pt-3 mt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
           <button
-            onClick={() => setPage("request")}
+            onClick={() => go("request")}
             className="w-full flex items-center justify-center gap-2.5 px-3.5 py-3 rounded-xl text-sm font-bold text-white"
             style={{ background: page === "request" ? "var(--gradient)" : "var(--accent-dark)" }}
           >
@@ -1133,7 +1150,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
       />
 
       {/* KPI readout row — same dark-chip language as the inventory cards, for a consistent system */}
-      <div className="grid grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
         <button
           onClick={() => goInventory({})}
           className="text-left px-5 py-4 gc-clickable"
@@ -1181,7 +1198,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
       </div>
 
       {timelineFull && (
-        <div className="fixed inset-0 z-50 p-6 gc-scroll overflow-y-auto" style={{ background: "var(--bg)" }}>
+        <div className="fixed inset-0 z-50 p-4 sm:p-6 gc-scroll overflow-y-auto" style={{ background: "var(--bg)" }}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="gc-display text-xl font-bold">Requisition timeline</h2>
             <button onClick={() => setTimelineFull(false)} className="flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-full" style={{ background: "var(--surface-soft)" }}>
@@ -1329,9 +1346,9 @@ function PIManagementModal({ labGroups, onAdd, onUpdate, onDelete, onClose }) {
   const deletingGroup = confirmingDeleteId ? labGroups.find((g) => g.id === confirmingDeleteId) : null;
 
   return (
-    <div className="flex items-center justify-center p-6" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, background: "rgba(22,33,29,0.4)" }} onClick={onClose}>
-      <div className="gc-scroll rounded-3xl shadow-2xl" style={{ background: "var(--surface)", width: "100%", maxWidth: 560, maxHeight: "82vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between gap-4 px-6 py-5" style={{ position: "sticky", top: 0, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+    <div className="flex items-center justify-center p-3 sm:p-6" style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, background: "rgba(22,33,29,0.4)" }} onClick={onClose}>
+      <div className="gc-scroll rounded-3xl shadow-2xl" style={{ background: "var(--surface)", width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-4 px-4 sm:px-6 py-4 sm:py-5" style={{ position: "sticky", top: 0, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
           <h2 className="gc-display text-lg font-extrabold">Manage PIs</h2>
           <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Close"><X size={16} /></button>
         </div>
@@ -1589,10 +1606,10 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
         <button
           type="button"
           onClick={() => onSelectUnit && onSelectUnit(u)}
-          className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold text-left gc-clickable"
+          className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold text-left gc-clickable overflow-hidden"
           style={{ height: TIMELINE_LANE_H, color: "var(--ink-soft)" }}
         >
-          <dm.icon size={11} style={{ color: dm.color }} />{u.id}
+          <dm.icon size={11} className="flex-shrink-0" style={{ color: dm.color }} /><span className="truncate">{u.id}</span>
         </button>
         <div className="relative flex-1 rounded-lg" style={{ height: rowH, background: "var(--surface-soft)" }}>
           {items.map(({ o, s, reqIndex, start, end, lane }) => {
@@ -1707,22 +1724,22 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
 
       {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No cabinets or Reftech rooms match these filters.</p>}
 
-      <div className="relative h-5 mb-2 ml-24">
+      <div className="relative h-5 mb-2 ml-16 sm:ml-24">
         {axisMarks.map((m, i) => (
           <span key={i} className="absolute text-[11px] font-semibold -translate-x-1/2" style={{ left: `${m.pct}%`, color: "var(--ink-faint)" }}>{m.label}</span>
         ))}
       </div>
 
       <div className="relative">
-        <div className="absolute top-0 bottom-0 border-l border-dashed ml-24 pointer-events-none z-10" style={{ left: `${pct(TODAY)}%`, borderColor: "var(--ink-faint)" }} />
+        <div className="absolute top-0 bottom-0 border-l border-dashed ml-16 sm:ml-24 pointer-events-none z-10" style={{ left: `${pct(TODAY)}%`, borderColor: "var(--ink-faint)" }} />
 
         {/* Pending requests, lined up against their requested dates —
             lets an admin see at a glance which units below are free during
             that window, before they've been assigned to one. */}
         {pendingLanes.length > 0 && (
           <div className="flex items-start gap-2 text-xs mb-4 pb-4" style={{ borderBottom: "1px dashed var(--border)" }}>
-            <span className="w-24 flex-shrink-0 flex items-center gap-1.5 text-[12.5px] font-bold" style={{ height: TIMELINE_LANE_H, color: "var(--warning)" }}>
-              <Clock size={11} /> Pending
+            <span className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold" style={{ height: TIMELINE_LANE_H, color: "var(--warning)" }}>
+              <Clock size={11} className="flex-shrink-0" /> <span className="truncate">Pending</span>
             </span>
             <div
               className="relative flex-1 rounded-lg"
@@ -1851,7 +1868,7 @@ function UnitCard({ unit, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`group text-left rounded-2xl overflow-hidden border transition-all hover:-translate-y-0.5 hover:shadow-lg flex flex-col p-4 ${isReftech ? "col-span-2" : ""}`}
+      className={`group text-left rounded-2xl overflow-hidden border transition-all hover:-translate-y-0.5 hover:shadow-lg flex flex-col p-4 ${isReftech ? "sm:col-span-2" : ""}`}
       style={{ borderColor: "var(--border)", background: "var(--surface)" }}
     >
       <div className="flex items-start justify-between mb-2 gap-2">
@@ -2157,7 +2174,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
               <h3 className="gc-display text-[15px] font-extrabold">{g.label}</h3>
               <span className="text-[12.5px] font-semibold" style={{ color: "var(--ink-faint)" }}>{g.items.length} unit{g.items.length !== 1 ? "s" : ""}</span>
             </div>
-            <div className="grid grid-cols-3 xl:grid-cols-4 gap-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
               {g.items.map((u) => <UnitCard key={u.id} unit={u} onClick={() => onSelect(u)} />)}
             </div>
           </section>
@@ -2200,7 +2217,7 @@ function FieldPair({ label, value }) {
 /* Wraps a set of FieldPairs in the two-column layout, with the box heading's bottom border
    serving as the divider above the first row of each column. */
 function FieldGrid({ children }) {
-  return <div className="grid grid-cols-2 gap-x-6">{children}</div>;
+  return <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">{children}</div>;
 }
 /* Light grey rounded box wrapper for the spec sections */
 function InfoBox({ children, className = "" }) {
@@ -2305,7 +2322,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
 
       {(adding || editingId) && (
         <div className="rounded-xl border p-3.5 mb-3 space-y-2.5" style={{ borderColor: "var(--border)", background: "var(--surface-soft)" }}>
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <Field label="Category">
               <div className="flex items-center gap-2">
                 <select value={category} onChange={(e) => setCategory(e.target.value)} className="gc-input">
@@ -2349,7 +2366,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <DateField label={status === "scheduled" ? "Date due" : "Date completed"} value={date} onChange={(e) => setDate(e.target.value)} />
             <Field label={status === "scheduled" ? "Contractor (optional)" : "Contractor"}><input value={engineer} onChange={(e) => setEngineer(e.target.value)} className="gc-input" placeholder="e.g. R. Adeyemi" /></Field>
           </div>
@@ -2756,7 +2773,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
 
   return (
     <div
-      className="flex items-center justify-center p-6"
+      className="flex items-center justify-center p-0 sm:p-6"
       // zIndex 55 — above the dashboard's fullscreen timeline overlay
       // (z-50), so opening a unit from inside it pops the modal in front,
       // timeline still visible behind; below 60 so a ConfirmDialog spawned
@@ -2765,19 +2782,18 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
       onClick={onClose}
     >
       <div
-        className="gc-scroll rounded-3xl shadow-2xl"
+        className="gc-scroll rounded-none sm:rounded-3xl shadow-2xl h-full sm:h-auto sm:max-h-[82vh] overflow-y-auto"
         style={{
           background: "var(--surface)",
           width: "100%", maxWidth: 820,
-          maxHeight: "82vh", overflowY: "auto",
           boxSizing: "border-box",
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 px-7 py-5" style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
-          <div>
+        <div className="flex items-start justify-between gap-4 px-4 sm:px-7 py-4 sm:py-5" style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+          <div className="min-w-0">
             <h1 className="gc-display text-2xl font-extrabold leading-none">{unit.id}</h1>
-            <p className="text-[13.5px] mt-1.5" style={{ color: "var(--ink-soft)" }}>{unit.manufacturer} {unit.model}</p>
+            <p className="text-[13.5px] mt-1.5 truncate" style={{ color: "var(--ink-soft)" }}>{unit.manufacturer} {unit.model}</p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <button onClick={() => onEdit(unit)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Edit"><Pencil size={15} /></button>
@@ -2786,7 +2802,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
           </div>
         </div>
 
-        <div className="px-7 py-6">
+        <div className="px-4 sm:px-7 py-5 sm:py-6">
           <UnitDetailContent
             unit={unit} onEdit={onEdit} onUpdateServiceLog={onUpdateServiceLog}
             onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto} onUpdateNotes={onUpdateNotes} onAcknowledgeClash={onAcknowledgeClash} onAssignRequisition={onAssignRequisition}
@@ -2865,7 +2881,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
               <input value={form.id} onChange={set("id")} className="gc-input" placeholder="e.g. GC-081" />
             </Field>
           )}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Type">
               <select
                 value={form.type}
@@ -2894,7 +2910,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
               />
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Manufacturer">
               <select value={form.manufacturer} onChange={set("manufacturer")} className="gc-input">
                 {MANUFACTURERS.map((m) => <option key={m}>{m}</option>)}
@@ -2902,7 +2918,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
             </Field>
             <Field label="Model"><input value={form.model} onChange={set("model")} className="gc-input" placeholder="e.g. E-15" /></Field>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="Serial number"><input value={form.serialNumber} onChange={set("serialNumber")} className="gc-input" placeholder="SN-…" /></Field>
             <Field label="Asset number"><input value={form.assetNumber} onChange={set("assetNumber")} className="gc-input" placeholder="AST-…" /></Field>
             <Field label="TSCAN ID"><input value={form.tscanId} onChange={set("tscanId")} className="gc-input" placeholder="TSC-…" /></Field>
@@ -2912,7 +2928,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
           )}
           <DateField label="Install date" value={form.installDate} onChange={set("installDate")} />
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Temp range (°C)">
               <div className="flex items-center gap-2">
                 <input type="number" min={0} max={60} value={form.tempMin} onChange={set("tempMin")} className="gc-input" />
@@ -2929,7 +2945,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Lighting type">
               <select value={form.lightingType} onChange={set("lightingType")} className="gc-input">
                 {LIGHTING_TYPES.map((l) => <option key={l}>{l}</option>)}
@@ -3060,7 +3076,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
 
       <InfoBox>
         <BoxLabel>Requester</BoxLabel>
-        <div className="grid grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <Field label="Name"><input value={form.researcher} onChange={set("researcher")} className="gc-input" /></Field>
           <Field label="Role"><select value={form.role || ROLES[0]} onChange={set("role")} className="gc-input">{ROLES.map((r) => <option key={r}>{r}</option>)}</select></Field>
           <Field label="Email"><input value={form.email} onChange={set("email")} className="gc-input" /></Field>
@@ -3079,7 +3095,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
 
       <InfoBox>
         <BoxLabel>Space &amp; Environment</BoxLabel>
-        <div className="grid grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <Field label="Space type">
             <select value={form.unitType} onChange={set("unitType")} className="gc-input">
               <option value="cabinet">Growth cabinet</option>
@@ -3119,7 +3135,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
 
       <InfoBox>
         <BoxLabel>Schedule</BoxLabel>
-        <div className="grid grid-cols-2 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <DateField label="Start date" value={form.startDate} onChange={set("startDate")} />
           <DateField label="End date" value={form.endDate} onChange={set("endDate")} />
           <Field label="Preferred floor">
@@ -3356,16 +3372,16 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
 
   return (
     <div
-      className="flex items-center justify-center p-6"
+      className="flex items-center justify-center p-0 sm:p-6"
       style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 60, background: "rgba(22,33,29,0.4)" }}
       onClick={onClose}
     >
       <div
-        className="gc-scroll rounded-3xl shadow-2xl"
-        style={{ background: "var(--surface)", width: "100%", maxWidth: 820, maxHeight: "82vh", overflowY: "auto", boxSizing: "border-box" }}
+        className="gc-scroll rounded-none sm:rounded-3xl shadow-2xl h-full sm:h-auto sm:max-h-[82vh] overflow-y-auto"
+        style={{ background: "var(--surface)", width: "100%", maxWidth: 820, boxSizing: "border-box" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 px-7 py-5" style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+        <div className="flex items-start justify-between gap-4 px-4 sm:px-7 py-4 sm:py-5" style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>Requisition</div>
@@ -3397,7 +3413,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
           </div>
         </div>
 
-        <div className="px-7 py-6 space-y-4">
+        <div className="px-4 sm:px-7 py-5 sm:py-6 space-y-4">
           {editing ? (
             <RequisitionEditForm req={req} units={units} onSave={saveEdit} onCancel={() => setEditing(false)} />
           ) : (
@@ -4214,13 +4230,13 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
       >
         <section className="space-y-4">
           <FormSectionTitle>Researcher Details</FormSectionTitle>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Full Name *"><input required value={form.researcher} onChange={set("researcher")} className="gc-input" placeholder="Alejandro Reyes" /></Field>
             <Field label="Role">
               <select value={form.role} onChange={set("role")} className="gc-input">{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Email *"><input required type="email" value={form.email} onChange={set("email")} className="gc-input" placeholder="a.reyes@university.ac.uk" /></Field>
             <Field label="Emergency Number *"><input required value={form.emergencyNumber} onChange={set("emergencyNumber")} className="gc-input" placeholder="Mobile number" /></Field>
           </div>
@@ -4239,7 +4255,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
                 </select>
               </Field>
               {form.labGroupId === PI_NOT_LISTED && (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label="PI's Full Name *"><input required value={form.notListedPiName} onChange={set("notListedPiName")} className="gc-input" placeholder="e.g. Jordan Ellis" /></Field>
                   <Field label="PI's Email"><input type="email" value={form.notListedPiEmail} onChange={set("notListedPiEmail")} className="gc-input" placeholder="Optional — helps us match them later" /></Field>
                 </div>
@@ -4296,11 +4312,11 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
               Reftech rooms aren't individually climate-controlled — temperature, humidity, and light cycle below are optional.
             </p>
           )}
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <SliderField label={`Temperature${isReftech ? " (optional)" : ""}`} value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" icon={Thermometer} />
             <SliderField label={`Humidity${isReftech ? " (optional)" : ""}`} value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" icon={Droplets} />
           </div>
-          <div className="grid grid-cols-2 gap-3 items-end">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:items-end">
             <Field label={`Light Cycle${isReftech ? " (optional)" : ""}`}>
               <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={LIGHT_CYCLES} label="light cycle" />
             </Field>
@@ -4324,11 +4340,11 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
 
         <section className="space-y-4">
           <FormSectionTitle>Scheduling</FormSectionTitle>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <DateField label="Start Date *" value={form.startDate} onChange={set("startDate")} />
             <DateField label="End Date *" value={form.endDate} onChange={set("endDate")} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Preferred Floor">
               <select value={form.preferredFloor} onChange={set("preferredFloor")} className="gc-input">
                 <option value="any">Any</option>
@@ -4443,6 +4459,16 @@ export default function GrowthCabinetApp() {
   const [requisitionsKey, setRequisitionsKey] = useState(0);
   const [returnUnitId, setReturnUnitId] = useState(null); // set when navigating to a requisition from a unit's drawer
   const [previewReqIndex, setPreviewReqIndex] = useState(null); // requisition shown in the timeline's preview side panel
+  const [mobileNavOpen, setMobileNavOpen] = useState(false); // below `lg`, the sidebar is an off-canvas drawer toggled from the mobile top bar
+
+  // Lock background scroll while the mobile drawer is open, same as any
+  // modal — otherwise the page behind it scrolls along with touch drags.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [mobileNavOpen]);
 
   const units = appData ? appData.units : [];
   const requests = appData ? appData.requests : [];
@@ -4640,7 +4666,7 @@ export default function GrowthCabinetApp() {
         <style>{TOKENS}</style>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-        <div className="max-w-2xl mx-auto p-8">
+        <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--gradient)" }}>
@@ -4677,42 +4703,65 @@ export default function GrowthCabinetApp() {
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 
-      <Sidebar page={page} setPage={setPage} pendingCount={pendingCount} />
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />
+      )}
+      <Sidebar page={page} setPage={setPage} pendingCount={pendingCount} mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
 
-      <main className="flex-1 p-8 max-w-[1400px]">
-        {page === "dashboard" && (
-          <DashboardPage
-            units={units} requests={requests} activityLog={activityLog} goInventory={goInventory} goRequisitions={goRequisitions}
-            onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} labUsageHistory={labUsageHistory}
-            labGroups={labGroups} onApproveLabGroup={handleApproveLabGroup} onMergeLabGroup={handleMergeLabGroup}
-            onAddLabGroup={handleAddLabGroup} onUpdateLabGroup={handleUpdateLabGroup} onDeleteLabGroup={handleDeleteLabGroup}
-          />
-        )}
-        {page === "inventory" && (
-          <InventoryPage key={inventoryKey} units={units} onSelect={setSelected} onAddNew={() => setEditingUnit(null)} initialFilter={inventoryFilter} />
-        )}
-        {page === "requisitions" && (
-          <RequisitionsPage
-            key={requisitionsKey}
-            requests={requests}
-            units={units}
-            onDecide={handleDecideRequisition}
-            onComplete={handleCompleteRequisition}
-            onRevert={handleRevertRequisition}
-            onUpdateAdminNotes={handleUpdateAdminNotes}
-            onReassign={handleReassignRequisition}
-            onDelete={handleDeleteRequisition}
-            onEdit={handleEditRequisition}
-            initialTab={requisitionsTab}
-            initialExpandIndex={requisitionsExpandIndex}
-            returnUnitId={returnUnitId}
-            onBackToUnit={backToInventoryUnit}
-          />
-        )}
-        {page === "request" && (
-          <RequestSpacePage requests={requests} onSubmit={handleSubmitRequisition} onAmend={handleAmendRequisition} isAdmin={isAdmin} />
-        )}
-      </main>
+      <div className="flex-1 min-w-0 flex flex-col">
+        <header
+          className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 flex-shrink-0"
+          style={{ background: "var(--sidebar-bg)" }}
+        >
+          <button onClick={() => setMobileNavOpen(true)} className="p-1 -ml-1 flex-shrink-0" style={{ color: "white" }} aria-label="Open menu">
+            <Menu size={22} />
+          </button>
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--gradient)" }}>
+            <Leaf size={14} color="#fff" />
+          </div>
+          <span className="gc-display font-extrabold text-[13px] text-white truncate">Growth Space Admin</span>
+          {pendingCount > 0 && (
+            <span className="ml-auto text-[10px] rounded-full px-1.5 py-0.5 font-bold flex-shrink-0" style={{ background: "#B23A34", color: "white" }}>
+              {pendingCount}
+            </span>
+          )}
+        </header>
+
+        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1400px]">
+          {page === "dashboard" && (
+            <DashboardPage
+              units={units} requests={requests} activityLog={activityLog} goInventory={goInventory} goRequisitions={goRequisitions}
+              onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} labUsageHistory={labUsageHistory}
+              labGroups={labGroups} onApproveLabGroup={handleApproveLabGroup} onMergeLabGroup={handleMergeLabGroup}
+              onAddLabGroup={handleAddLabGroup} onUpdateLabGroup={handleUpdateLabGroup} onDeleteLabGroup={handleDeleteLabGroup}
+            />
+          )}
+          {page === "inventory" && (
+            <InventoryPage key={inventoryKey} units={units} onSelect={setSelected} onAddNew={() => setEditingUnit(null)} initialFilter={inventoryFilter} />
+          )}
+          {page === "requisitions" && (
+            <RequisitionsPage
+              key={requisitionsKey}
+              requests={requests}
+              units={units}
+              onDecide={handleDecideRequisition}
+              onComplete={handleCompleteRequisition}
+              onRevert={handleRevertRequisition}
+              onUpdateAdminNotes={handleUpdateAdminNotes}
+              onReassign={handleReassignRequisition}
+              onDelete={handleDeleteRequisition}
+              onEdit={handleEditRequisition}
+              initialTab={requisitionsTab}
+              initialExpandIndex={requisitionsExpandIndex}
+              returnUnitId={returnUnitId}
+              onBackToUnit={backToInventoryUnit}
+            />
+          )}
+          {page === "request" && (
+            <RequestSpacePage requests={requests} onSubmit={handleSubmitRequisition} onAmend={handleAmendRequisition} isAdmin={isAdmin} />
+          )}
+        </main>
+      </div>
 
       {selected && (
         <UnitModal
