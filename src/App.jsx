@@ -78,12 +78,15 @@ const TOKENS = `
     /* Same hue as Heather Whitney's line on the space-usage graph
        (OKABE_ITO[2], #009E73 — she's index 2 once lab groups are sorted
        by PI name). --accent uses that exact hex; --accent-dark is a
-       darker step of the same hue rather than the identical value, since
-       it's what solid buttons put white text on and #009E73 itself only
-       clears ~3.4:1 there (WCAG needs 4.5:1 for text that size) — this
-       stays visibly "that same green" while keeping button text legible. */
+       darker step of the same hue, used for text links, icons, and other
+       small accents that need to read against light backgrounds. */
     --accent: #009E73;
     --accent-dark: #007A5A;
+    /* Solid button green — its own token (rather than reusing --accent-dark)
+       so it can stay close to the brand green #61BC84 without also
+       recoloring the text links/icons that share --accent-dark. Darkened
+       just enough off #61BC84 for white button text to stay legible. */
+    --btn-accent: #52A070;
     --accent-soft: #E1F7F0;
     --accent-ink: #053D2C;
     --gradient: linear-gradient(135deg, #5EEDC7 0%, #009E73 100%);
@@ -563,8 +566,8 @@ function NotesEditor({ label, value, onSave, placeholder }) {
           <button
             disabled={saving}
             onClick={async () => { setSaving(true); try { await onSave(text); } finally { setSaving(false); } }}
-            className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40"
-            style={{ background: "var(--accent-dark)" }}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-40"
+            style={{ background: "var(--btn-accent)", color: "white" }}
           >
             {saving ? "Saving…" : "Save"}
           </button>
@@ -667,7 +670,7 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
           <button
             onClick={() => go("request")}
             className="w-full flex items-center justify-center gap-2.5 px-3.5 py-3 rounded-xl text-sm font-bold text-white"
-            style={{ background: page === "request" ? "var(--gradient)" : "var(--accent-dark)" }}
+            style={{ background: page === "request" ? "var(--gradient)" : "var(--btn-accent)" }}
           >
             <CalendarPlus size={16} />
             Request Space
@@ -1063,8 +1066,8 @@ function PendingPIsPanel({ pendingLabGroups, verifiedLabGroups, onApprove, onMer
               </div>
               <button
                 onClick={() => onApprove(g.id)}
-                className="text-xs font-bold px-3 py-1.5 rounded-full text-white flex-shrink-0"
-                style={{ background: "var(--accent-dark)" }}
+                className="text-xs font-bold px-3 py-1.5 rounded-full flex-shrink-0"
+                style={{ background: "var(--btn-accent)", color: "white" }}
               >
                 Approve
               </button>
@@ -1241,8 +1244,8 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
               </div>
               <button
                 onClick={() => setManagingPIs(true)}
-                className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full text-white flex-shrink-0"
-                style={{ background: "var(--accent-dark)" }}
+                className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full flex-shrink-0"
+                style={{ background: "var(--btn-accent)", color: "white" }}
               >
                 <Pencil size={12} /> Edit PIs
               </button>
@@ -1355,7 +1358,7 @@ function PIManagementModal({ labGroups, onAdd, onUpdate, onDelete, onClose }) {
 
         <div className="px-6 py-5 space-y-3">
           {!adding ? (
-            <button onClick={startAdd} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+            <button onClick={startAdd} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
               <PlusCircle size={13} /> Add PI
             </button>
           ) : (
@@ -1371,7 +1374,7 @@ function PIManagementModal({ labGroups, onAdd, onUpdate, onDelete, onClose }) {
               <Field label="Lab name"><input className="gc-input" value={newLab} onChange={(e) => setNewLab(e.target.value)} placeholder="e.g. Okafor Lab" /></Field>
               <Field label="Email (optional)"><input className="gc-input" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="j.okafor@bristol.ac.uk" /></Field>
               <div className="flex gap-2 pt-1">
-                <button disabled={!newName.trim() || !newLab.trim() || busy} onClick={submitAdd} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--accent-dark)" }}>
+                <button disabled={!newName.trim() || !newLab.trim() || busy} onClick={submitAdd} className="text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-40" style={{ background: "var(--btn-accent)", color: "white" }}>
                   {busy ? "Adding…" : "Add"}
                 </button>
                 <button disabled={busy} onClick={() => setAdding(false)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
@@ -1388,7 +1391,7 @@ function PIManagementModal({ labGroups, onAdd, onUpdate, onDelete, onClose }) {
                     <Field label="Lab name"><input className="gc-input" value={editLab} onChange={(e) => setEditLab(e.target.value)} /></Field>
                     <Field label="Email"><input className="gc-input" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} /></Field>
                     <div className="flex gap-2">
-                      <button disabled={!editName.trim() || !editLab.trim() || busy} onClick={submitEdit} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--accent-dark)" }}>
+                      <button disabled={!editName.trim() || !editLab.trim() || busy} onClick={submitEdit} className="text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-40" style={{ background: "var(--btn-accent)", color: "white" }}>
                         {busy ? "Saving…" : "Save"}
                       </button>
                       <button disabled={busy} onClick={() => setEditingId(null)} className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
@@ -2096,7 +2099,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
           <button onClick={() => exportUnitsCSV(filtered)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--ink)" }}>
             Export CSV
           </button>
-          <button onClick={onAddNew} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl text-white" style={{ background: "var(--accent-dark)" }}>
+          <button onClick={onAddNew} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--btn-accent)", color: "white" }}>
             <Refrigerator size={15} /> Add CER
           </button>
         </div>
@@ -2357,8 +2360,8 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
                 <button
                   type="button"
                   onClick={() => { if (newCat.trim()) { onAddCategory(newCat.trim()); setNewCat(""); } }}
-                  className="text-xs font-bold px-3 rounded-lg text-white flex-shrink-0"
-                  style={{ background: "var(--accent-dark)" }}
+                  className="text-xs font-bold px-3 rounded-lg flex-shrink-0"
+                  style={{ background: "var(--btn-accent)", color: "white" }}
                 >
                   Add
                 </button>
@@ -2373,7 +2376,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
           <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="gc-input" placeholder="What was done, or what's planned…" /></Field>
           <Field label="Cost (optional)"><input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} className="gc-input" placeholder="£" /></Field>
           <div className="flex gap-2 pt-1">
-            <button onClick={editingId ? saveEdit : addEntry} className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+            <button onClick={editingId ? saveEdit : addEntry} className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
               <Save size={13} /> {editingId ? "Save changes" : "Save entry"}
             </button>
             <button onClick={resetForm} className="text-sm font-semibold px-3 py-2 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
@@ -2478,7 +2481,7 @@ function DocumentsSection({ unit, onAdd, onRemove }) {
           <Field label="Document name"><input value={name} onChange={(e) => setName(e.target.value)} className="gc-input" placeholder="e.g. Calibration Certificate 2027" /></Field>
           <Field label="Type"><select value={type} onChange={(e) => setType(e.target.value)} className="gc-input">{DOCUMENT_TYPES.map((t) => <option key={t}>{t}</option>)}</select></Field>
           <div className="flex gap-2 pt-1">
-            <button disabled={!file || !name.trim() || busy} onClick={addDoc} className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--accent-dark)" }}><Save size={13} /> {busy ? "Uploading…" : "Save"}</button>
+            <button disabled={!file || !name.trim() || busy} onClick={addDoc} className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg disabled:opacity-40" style={{ background: "var(--btn-accent)", color: "white" }}><Save size={13} /> {busy ? "Uploading…" : "Save"}</button>
             <button disabled={busy} onClick={() => { setAdding(false); setFile(null); }} className="text-sm font-semibold px-3 py-2 rounded-lg disabled:opacity-40" style={{ color: "var(--ink-soft)" }}>Cancel</button>
           </div>
         </div>
@@ -2644,7 +2647,7 @@ function UnitDetailContent({
         {upcoming.length > 0 && (
           <div>
             <div className="text-[11px] mt-2 mb-1.5 font-bold uppercase tracking-wide" style={{ color: "var(--ink-faint)" }}>Upcoming ({upcoming.length})</div>
-            <div className="space-y-2">{shownUpcoming.map((b) => <BookingCard key={b.id} booking={b} onOpenRequisition={linkFor(b)} />)}</div>
+            <div className="space-y-2">{shownUpcoming.map((b) => <BookingCard key={b.id} booking={b} status={bookingStatus(b)} onOpenRequisition={linkFor(b)} />)}</div>
             {upcoming.length > 2 && (
               <button onClick={() => setUpcomingExpanded((v) => !v)} className="mt-2 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
                 {upcomingExpanded ? "Show fewer" : `Show ${upcoming.length - 2} more`}
@@ -2659,8 +2662,8 @@ function UnitDetailContent({
           {!assigning ? (
             <button
               onClick={() => setAssigning(true)}
-              className="w-full flex items-center justify-center py-2.5 rounded-xl text-sm font-semibold text-white"
-              style={{ background: "var(--accent-dark)" }}
+              className="w-full flex items-center justify-center py-2.5 rounded-xl text-sm font-semibold"
+              style={{ background: "var(--btn-accent)", color: "white" }}
             >
               Assign requisition
             </button>
@@ -3166,7 +3169,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
       </InfoBox>
 
       <div className="flex gap-2 pt-1">
-        <button onClick={() => onSave(form)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl text-white" style={{ background: "var(--accent-dark)" }}>
+        <button onClick={() => onSave(form)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--btn-accent)", color: "white" }}>
           <Save size={14} /> Save changes
         </button>
         <button onClick={onCancel} className="text-sm font-semibold px-4 py-2.5 rounded-xl" style={{ color: "var(--ink-soft)" }}>Cancel</button>
@@ -3290,7 +3293,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                       <button onClick={() => setReassigning((v) => !v)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
                         <MapPin size={13} /> Change unit
                       </button>
-                      <button onClick={() => onComplete(index)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+                      <button onClick={() => onComplete(index)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
                         <CheckCircle2 size={13} /> Mark as completed
                       </button>
                     </div>
@@ -3446,7 +3449,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                       <button onClick={() => setReassigning((v) => !v)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
                         <MapPin size={13} /> Change unit
                       </button>
-                      <button onClick={() => { onComplete(index); onClose(); }} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+                      <button onClick={() => { onComplete(index); onClose(); }} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
                         <CheckCircle2 size={13} /> Mark as completed
                       </button>
                     </div>
@@ -4410,7 +4413,7 @@ function AdminLoginForm({ onDone }) {
       <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="gc-input" />
       <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="gc-input" />
       {error && <div className="text-xs" style={{ color: "var(--overdue)" }}>{error}</div>}
-      <button type="submit" disabled={busy} className="text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: "var(--accent-dark)" }}>
+      <button type="submit" disabled={busy} className="text-xs font-bold px-3 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
         {busy ? "Signing in…" : "Sign in"}
       </button>
     </form>
