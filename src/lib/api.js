@@ -690,7 +690,9 @@ function bookingFieldsFromRequisition(req) {
   return {
     researcher_name: req.researcher,
     role: nullIfEmpty(req.role),
-    lab_group_id: req.labGroupId ?? null,
+    // Same fallback as requisitionFieldsToRow — an admin edit only carries the
+    // lab group's name, not a resolved id, so this must also check the cache.
+    lab_group_id: req.labGroupId ?? labGroupCache.idByName[req.labGroup] ?? null,
     project_title: req.projectTitle,
     discipline: req.discipline,
     species: req.species || [],

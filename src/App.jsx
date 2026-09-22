@@ -626,8 +626,8 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
           <Leaf size={19} color="#fff" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="gc-display font-extrabold text-[15.5px] text-white leading-tight">Facilities &amp; Estates</div>
-          <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: "var(--sidebar-text-dim)" }}>GROWTH SPACE ADMIN</div>
+          <div className="gc-display font-extrabold text-[15.5px] text-white leading-tight">GrowSpace</div>
+          <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: "var(--sidebar-text-dim)" }}>Plant &amp; Insect CER Management System</div>
         </div>
         <button onClick={onClose} className="lg:hidden p-1 -mr-1 flex-shrink-0" style={{ color: "var(--sidebar-text)" }} aria-label="Close menu">
           <X size={20} />
@@ -3087,7 +3087,10 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
           <Field label="PI/Supervisor">
             <select
               value={form.labGroup}
-              onChange={(e) => { const lab = e.target.value; setForm((f) => ({ ...f, labGroup: lab, pi: PI_BY_LAB[lab] || "" })); }}
+              // form starts as a spread of the original requisition, so it still carries the OLD
+              // labGroupId. api.js prefers a non-null labGroupId over resolving the name — must null
+              // it out here or the update silently keeps writing the pre-edit lab group's id.
+              onChange={(e) => { const lab = e.target.value; setForm((f) => ({ ...f, labGroup: lab, labGroupId: null, pi: PI_BY_LAB[lab] || "" })); }}
               className="gc-input"
             >
               {LAB_GROUPS.map((l) => <option key={l} value={l}>{PI_BY_LAB[l] || l}</option>)}
@@ -4675,7 +4678,7 @@ export default function GrowthCabinetApp() {
               <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--gradient)" }}>
                 <Leaf size={15} color="#fff" />
               </div>
-              <span className="gc-display font-extrabold text-[14px]">Growth Space Admin</span>
+              <span className="gc-display font-extrabold text-[14px]">GrowSpace</span>
             </div>
             {session ? (
               <button onClick={() => supabase.auth.signOut()} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Sign out</button>
@@ -4722,7 +4725,7 @@ export default function GrowthCabinetApp() {
           <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--gradient)" }}>
             <Leaf size={14} color="#fff" />
           </div>
-          <span className="gc-display font-extrabold text-[13px] text-white truncate">Growth Space Admin</span>
+          <span className="gc-display font-extrabold text-[13px] text-white truncate">GrowSpace</span>
           {pendingCount > 0 && (
             <span className="ml-auto text-[10px] rounded-full px-1.5 py-0.5 font-bold flex-shrink-0" style={{ background: "#B23A34", color: "white" }}>
               {pendingCount}
