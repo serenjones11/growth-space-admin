@@ -63,7 +63,7 @@ import { useSession } from "./lib/useSession";
 import * as api from "./lib/api";
 
 /* ---------------------------------------------------------------------- */
-/* Design tokens — dark sidebar / light workspace, warm-green readouts     */
+/* Design tokens - dark sidebar / light workspace, warm-green readouts     */
 /* ---------------------------------------------------------------------- */
 const TOKENS = `
   :root {
@@ -76,13 +76,13 @@ const TOKENS = `
     --ink-faint: #93A29B;
 
     /* Same hue as Heather Whitney's line on the space-usage graph
-       (OKABE_ITO[2], #009E73 — she's index 2 once lab groups are sorted
+       (OKABE_ITO[2], #009E73 - she's index 2 once lab groups are sorted
        by PI name). --accent uses that exact hex; --accent-dark is a
        darker step of the same hue, used for text links, icons, and other
        small accents that need to read against light backgrounds. */
     --accent: #009E73;
     --accent-dark: #007A5A;
-    /* Solid button green — its own token (rather than reusing --accent-dark)
+    /* Solid button green - its own token (rather than reusing --accent-dark)
        so it can stay close to the brand green #61BC84 without also
        recoloring the text links/icons that share --accent-dark. Darkened
        just enough off #61BC84 for white button text to stay legible. */
@@ -136,7 +136,7 @@ const TOKENS = `
   .gc-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   /* Every native <select> gets the same chevron the custom dropdown
      buttons (species picker, date picker, etc.) use, instead of each
-     browser's own default arrow — one visual language for "this opens a
+     browser's own default arrow - one visual language for "this opens a
      list of options" everywhere on the form. */
   select.gc-input {
     appearance: none; -webkit-appearance: none; cursor: pointer;
@@ -175,12 +175,12 @@ const TOKENS = `
 
 /* Live lab-group list, replacing the old hardcoded seed-data snapshot.
    Populated by applyLabGroups() from GrowthCabinetApp's data-loading effect
-   (ALL lab groups — verified and pending — so a self-registered PI's
+   (ALL lab groups - verified and pending - so a self-registered PI's
    requisitions/bookings still display correctly everywhere an admin looks,
    not just once approved). Every existing LAB_GROUPS/PI_BY_LAB/piDisplay()
-   call site below needs no changes — they keep reading these same module
+   call site below needs no changes - they keep reading these same module
    bindings, just now backed by live data instead of a hardcoded snapshot.
-   The anonymous Request Space form never reads these — its PI picker uses
+   The anonymous Request Space form never reads these - its PI picker uses
    api.listLabGroups() directly (verified-only, RLS-safe for anon). */
 let LAB_GROUPS = [];
 let PI_BY_LAB = {};
@@ -197,24 +197,35 @@ const DISCIPLINE_META = {
 const MANUFACTURERS = ["Conviron", "Percival", "Sanyo/Panasonic", "Snijders", "BioChambers"];
 const MODELS = ["E-15", "AR-66", "MLR-352H", "GC-8", "TC-30"];
 const LIGHT_CYCLES = ["8/16 h (L/D)", "12/12 h (L/D)", "16/8 h (L/D)", "24 h dark", "Continuous light"];
+const isSet = (v) => v !== null && v !== undefined && v !== "";
+// Temp/humidity are genuinely optional for reftech rooms, so either can be
+// null. Shows only what was actually specified, or "Not specified".
+function fmtEnv(temp, humidity) {
+  const parts = [isSet(temp) ? `${temp}°C` : null, isSet(humidity) ? `${humidity}% RH` : null].filter(Boolean);
+  return parts.length ? parts.join(" / ") : "Not specified";
+}
+function fmtDawnDusk(dawn, dusk) {
+  const parts = [dawn ? `Dawn ${dawn}` : null, dusk ? `Dusk ${dusk}` : null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "Not specified";
+}
 const LIGHTING_TYPES = ["LED", "Fluorescent", "LED + Fluorescent"];
 const BALLAST_TYPES = ["Electronic", "Magnetic"];
 const ROLES = ["PhD Student", "Postdoc", "Technician", "Masters Student", "PI / Academic Staff"];
 const CONTAINMENT_LEVELS = ["Wild-Type", "GMO", "DEFRA"];
 
-/* Floors — LG, Level 1, Level 2a, Level 2b, Level 3 */
+/* Floors - LG, Level 1, Level 2a, Level 2b, Level 3 */
 const FLOORS = ["LG", "L1", "L2A", "L2B", "L3"];
 const FLOOR_LABEL = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
 
-/* Strips everything but letters/digits and lowercases — lets a search
+/* Strips everything but letters/digits and lowercases - lets a search
    match regardless of hyphens/spaces/case ("GC01" finds "GC-01"). */
 function normalizeSearch(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
 function addDays(base, days) { const d = new Date(base); d.setDate(d.getDate() + days); return d; }
 function fmt(date) { return date.toISOString().slice(0, 10); }
-/* British date display — "YYYY-MM-DD" (or a full timestamp, date-only
+/* British date display - "YYYY-MM-DD" (or a full timestamp, date-only
    portion taken) -> "DD/MM/YYYY" */
 function fmtGB(iso) {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const [y, m, d] = String(iso).slice(0, 10).split("-");
   if (!y || !m || !d) return iso;
   return `${d}/${m}/${y}`;
@@ -227,9 +238,9 @@ const TODAY = new Date(new Date().toISOString().slice(0, 10));
 function rangesOverlap(aStart, aEnd, bStart, bEnd) {
   return new Date(aStart) <= new Date(bEnd) && new Date(bStart) <= new Date(aEnd);
 }
-/* Is a unit available for a given requested date window — even if it's not free "right now".
+/* Is a unit available for a given requested date window - even if it's not free "right now".
    Reftech rooms are multi-occupancy by design (see canAssign/isClash in
-   UnitDetailContent, which never restrict or flag reftech on overlap) — so
+   UnitDetailContent, which never restrict or flag reftech on overlap) - so
    an existing overlapping booking never makes one unavailable, only being
    out of service does. Cabinets are single-occupancy: any overlap blocks. */
 function unitAvailableForWindow(unit, startDate, endDate) {
@@ -242,7 +253,7 @@ function unitAvailableForWindow(unit, startDate, endDate) {
 function findRequisitionIndex(requests, o) {
   if (!o) return null;
   // Match by the real FK when we have it (every booking created via
-  // decideRequisition carries one) — matching by researcher+dates instead
+  // decideRequisition carries one) - matching by researcher+dates instead
   // breaks the moment an admin edits a requisition's dates after
   // approval, since the booking's denormalized dates no longer line up
   // with the requisition's current ones.
@@ -254,7 +265,7 @@ function findRequisitionIndex(requests, o) {
   return idx === -1 ? null : idx;
 }
 /* Which Requisitions-page tab a given requisition belongs on. "Active" covers anything not yet
-   closed out — still awaiting review, or approved and ongoing. "Completed" is anything closed:
+   closed out - still awaiting review, or approved and ongoing. "Completed" is anything closed:
    declined outright, or manually confirmed finished by an admin. */
 function requisitionTab(status) {
   return status === "pending" || status === "approved" ? "pending" : "completed";
@@ -262,23 +273,23 @@ function requisitionTab(status) {
 
 /* A single shared fallback swatch for a service-log category that's no
    longer in the categories list (e.g. deleted after entries were logged
-   against it) — replaces the old hardcoded MAINTENANCE_CATEGORIES map now
+   against it) - replaces the old hardcoded MAINTENANCE_CATEGORIES map now
    that categories are real, admin-managed rows from the database. */
 const FALLBACK_CATEGORY_COLOR = { bg: "#EFF6FF", ink: "#1D4ED8", border: "#C7DDFB" };
 const DOCUMENT_TYPES = ["Manual", "Certificate", "Risk Assessment"];
 
 /* ---------------------------------------------------------------------- */
-/* Status helpers — unify cabinet (single occupant) & reftech (bookings)  */
+/* Status helpers - unify cabinet (single occupant) & reftech (bookings)  */
 /* ---------------------------------------------------------------------- */
 function daysUntil(dateStr) { return Math.round((new Date(dateStr) - TODAY) / 86400000); }
 
 /* For reftech rooms: a booking counts as "current" once it's started,
-   regardless of whether its end date has passed — it only stops being
+   regardless of whether its end date has passed - it only stops being
    current when its requisition is completed (which is enforced upstream,
    in src/lib/api.js's fetchAdminData: unit.bookings only ever contains
    bookings from status='approved' requisitions). This is what lets a
    lapsed-but-uncompleted booking show up as overdue instead of the room
-   silently reading as free — see supabase/schema.sql's design note 5. */
+   silently reading as free - see supabase/schema.sql's design note 5. */
 function currentBooking(unit) {
   if (unit.type !== "reftech") return null;
   return unit.bookings.find((b) => new Date(b.startDate) <= TODAY) || null;
@@ -292,7 +303,7 @@ function unitOccupant(unit) {
 }
 /* Every currently-active booking on a unit, not just the first. A cabinet
    is meant to only ever have one (unit.occupant/currentBooking() reflect
-   that assumption), but nothing in the schema enforces it — an admin can
+   that assumption), but nothing in the schema enforces it - an admin can
    edit a requisition's dates into overlapping another approved booking on
    the same cabinet. This is what lets the unit detail page detect that
    and show both instead of silently hiding whichever one currentBooking()
@@ -301,7 +312,7 @@ function currentBookingsList(unit) {
   return (unit.bookings || []).filter((b) => new Date(b.startDate) <= TODAY);
 }
 /* Whether the exact set of currently-overlapping bookings matches what was
-   last explicitly approved as intentional — not a bare boolean, so a
+   last explicitly approved as intentional - not a bare boolean, so a
    materially different overlap (a date moves, a third one joins) makes
    this false again instead of staying dismissed forever. */
 function isClashAcknowledged(unit, currentList) {
@@ -310,7 +321,7 @@ function isClashAcknowledged(unit, currentList) {
   return currentIds.length > 1 && currentIds.length === acknowledgedIds.length && currentIds.every((id, i) => id === acknowledgedIds[i]);
 }
 /* Discipline is no longer a fixed unit property (any cabinet can be
-   assigned to any requisition) — it's derived from whoever's currently
+   assigned to any requisition) - it's derived from whoever's currently
    using it, for both unit types. Returns null when free: there's nothing
    to show discipline-wise for an unoccupied unit. */
 function unitDiscipline(unit) {
@@ -345,7 +356,7 @@ function displayStatus(unit) {
 }
 
 /* Same overdue/warning/occupied colour language as displayStatus(), but for
-   a single booking rather than a unit's current occupant — used by the
+   a single booking rather than a unit's current occupant - used by the
    dashboard timeline, which (unlike displayStatus) needs to plot upcoming
    bookings too, not just whichever one is current right now. */
 function bookingStatus(booking) {
@@ -361,7 +372,7 @@ function bookingStatus(booking) {
 /* ---------------------------------------------------------------------- */
 /* Icon pills replacing the old "All Areas / Plant Sciences / Insect
    Sciences" text dropdown wherever discipline is a filter (not a value
-   being set on a requisition/unit) — a plant leaf, a bug, or both together
+   being set on a requisition/unit) - a plant leaf, a bug, or both together
    for "all," instead of reading a sentence to find the right option. */
 function DisciplineFilterPills({ value, onChange }) {
   const pills = [
@@ -448,7 +459,7 @@ const WEEKDAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 function isSameDate(a, b) { return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
 function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 
-/* Custom calendar popup replacing the browser's native type="date" input —
+/* Custom calendar popup replacing the browser's native type="date" input -
    that native control can't be restyled beyond its edges (the actual
    picker is drawn by the OS, not the page), so it never stopped looking
    dated no matter how the surrounding field was styled. This one is built
@@ -533,25 +544,24 @@ function DateField({ label, value, onChange }) {
 /* Checkbox styled to match the height/border of the other gc-input fields
    it sits beside in a form grid, instead of a bare checkbox that needs a
    manual top-margin fudge to line up with its neighbours.
-   A <div>, not a <label>, wrapping the checkbox — Field already wraps its
-   children in a <label>, and a <label> nested inside another <label> is
-   invalid HTML that makes browsers double-fire the click (toggling it
-   straight back), which is exactly why the old version needed two clicks
-   to register one change. The checkbox itself is inert (pointerEvents:
-   none, no onChange) so the div's own onClick is the only thing driving it. */
+   Deliberately not built on Field: Field wraps its children in a <label>,
+   and a label forwards every click inside it to its checkbox, so a click
+   handler on anything in there fired twice and toggled straight back. Here
+   the row itself is the one and only <label>, driving a normal checkbox. */
 function CheckField({ label, checked, onChange }) {
   return (
-    <Field label={label}>
-      <div onClick={() => onChange({ target: { checked: !checked } })} className="gc-input flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
-        <input type="checkbox" checked={checked} readOnly style={{ accentColor: "var(--accent)", pointerEvents: "none" }} />
+    <div className="block">
+      <span className="text-xs font-medium block mb-1" style={{ color: "var(--ink-soft)" }}>{label}</span>
+      <label className="gc-input flex items-center gap-2 cursor-pointer" style={{ userSelect: "none" }}>
+        <input type="checkbox" checked={checked} onChange={onChange} style={{ accentColor: "var(--accent)" }} />
         <span className="text-sm font-medium">{checked ? "Yes" : "No"}</span>
-      </div>
-    </Field>
+      </label>
+    </div>
   );
 }
 
 /* Small inline-editable textarea with a save button that only appears once
-   the text actually changes — used for both a requisition's admin notes
+   the text actually changes - used for both a requisition's admin notes
    and a unit's notes. onSave is expected to already handle its own errors
    (the withErrorAlert-wrapped handlers this is given elsewhere do). */
 function NotesEditor({ label, value, onSave, placeholder }) {
@@ -603,7 +613,7 @@ const NAV = [
 ];
 
 // Fixed/off-canvas below `lg` (toggled by GrowthCabinetApp's mobile top bar +
-// backdrop), back to a normal in-flow sticky column at `lg` and up — the
+// backdrop), back to a normal in-flow sticky column at `lg` and up - the
 // desktop layout is unchanged, only the positioning strategy swaps at the
 // breakpoint.
 function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
@@ -664,7 +674,7 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
           );
         })}
 
-        {/* Request Space is an action, not a page — set apart with a divider and CTA styling so it
+        {/* Request Space is an action, not a page - set apart with a divider and CTA styling so it
             doesn't read as just another item in the nav list. */}
         <div className="pt-3 mt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
           <button
@@ -712,7 +722,7 @@ const ACTIVITY_META = {
 // `units`/`requests` still-live state gives us bookings, servicing, and
 // requisition status changes by inference (the row is still there to read).
 // `activityLog` covers what inference structurally can't: events whose row
-// is now gone (a deleted unit, a deleted PI, a deleted requisition) — see
+// is now gone (a deleted unit, a deleted PI, a deleted requisition) - see
 // supabase/schema.sql § 16. Booking-assigned and requisition status-change
 // events are NOT duplicated into activity_log, so merging the two here is
 // safe from double-counting.
@@ -723,7 +733,7 @@ function buildActivityFeed(units, requests, activityLog = []) {
       items.push({
         // createdAt (when the booking was actually made), not startDate
         // (when the occupancy period is scheduled for, which can be far in
-        // the future or past) — "recent activity" should reflect when
+        // the future or past) - "recent activity" should reflect when
         // things really happened, not what they're scheduled around.
         type: "booking", date: u.occupant.createdAt, unitId: u.id,
         title: `${u.occupant.researcher} was assigned ${u.id}`,
@@ -751,14 +761,14 @@ function buildActivityFeed(units, requests, activityLog = []) {
     if (r.status === "approved" || r.status === "declined") {
       items.push({
         type: "completed", date: r.decidedAt || r.decidedDate || r.submittedAt || r.submittedDate, reqIndex: i,
-        title: `Requisition ${r.status === "approved" ? "approved" : "declined"} — ${r.projectTitle}`,
+        title: `Requisition ${r.status === "approved" ? "approved" : "declined"} - ${r.projectTitle}`,
         subtitle: `${r.researcher} · ${piDisplay(r.labGroup)}${r.assignedUnitId ? ` · assigned ${r.assignedUnitId}` : ""}`,
       });
     }
     if (r.status === "completed") {
       items.push({
         type: "completed", date: r.completedAt || r.completedDate || r.decidedAt || r.decidedDate, reqIndex: i,
-        title: `Requisition marked finished — ${r.projectTitle}`,
+        title: `Requisition marked finished - ${r.projectTitle}`,
         subtitle: `${r.researcher} · ${piDisplay(r.labGroup)}${r.assignedUnitId ? ` · freed ${r.assignedUnitId}` : ""}`,
       });
     }
@@ -803,12 +813,12 @@ function ActivityRow({ item, onClick }) {
    Validated with the dataviz skill's validate_palette.js: the CVD
    (colour-blindness) separation and normal-vision separation checks both
    pass on every adjacent pair in this exact order (worst case ΔE 15.8
-   CVD / 16.4 normal-vision, both clearing their floors) — the ordering
+   CVD / 16.4 normal-vision, both clearing their floors) - the ordering
    of the eight dark slots specifically was chosen (of all 8! orderings)
    to maximize that worst-case gap, so don't reorder them without
    re-running the validator. Two dark slots (vermillion, blue) and gray/
    gray-dark fall outside the validator's light-surface "vivid line/bar"
-   lightness band by design — they're meant to be genuinely darker for
+   lightness band by design - they're meant to be genuinely darker for
    distinctness, which is fine for this app's actual use (filled circular
    badges with an overlaid text label, not thin chart strokes needing
    maximum surface contrast) and, if anything, gives more surface
@@ -819,7 +829,7 @@ const OKABE_ITO = [
   "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#4D4D4D",
   "#b0a300", "#00613b", "#0076a8", "#911a00", "#003773", "#a46100", "#8b3e6b", "#292929",
 ];
-// Text colour for each swatch above when used as a solid badge fill — everything is white-on-colour
+// Text colour for each swatch above when used as a solid badge fill - everything is white-on-colour
 // except the yellows (both light and dark), which need dark text to stay readable (WCAG contrast
 // checked directly: yellow-dark clears only 2.6:1 with white text vs >=4.5:1 needed).
 const OKABE_ITO_TEXT = [
@@ -831,7 +841,7 @@ function LineMarker({ cx, cy, color, r = 4 }) {
   return <circle cx={cx} cy={cy} r={r} fill={color} />;
 }
 
-/* Custom month picker — trigger pill + popover grid grouped by year, styled to match the app
+/* Custom month picker - trigger pill + popover grid grouped by year, styled to match the app
    instead of the browser's native <input type="month">. */
 function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "left" }) {
   const [open, setOpen] = useState(false);
@@ -841,7 +851,7 @@ function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "
   keys.forEach((k, i) => { const y = k.slice(0, 4); (byYear[y] = byYear[y] || []).push({ key: k, i }); });
   const years = Object.keys(byYear).sort((a, b) => b - a); // most recent year first
 
-  // The list can span well over a century (2100 at the top) — jump straight
+  // The list can span well over a century (2100 at the top) - jump straight
   // to the selected value's year (falling back to the current year) on
   // open instead of making an admin scroll down from the far end every time.
   useEffect(() => {
@@ -895,9 +905,9 @@ function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "
 
 function LabUsageTrend({ units, labUsageHistory }) {
   const allKeys = labUsageHistory.keys;
-  // The window now runs years past "now" (so the picker can reach 2100 —
+  // The window now runs years past "now" (so the picker can reach 2100 -
   // see labUsageWindow()), so the current month is no longer the array's
-  // last entry — anchor both the default range and the "live" splice below
+  // last entry - anchor both the default range and the "live" splice below
   // on TODAY's own index instead of allKeys.length - 1.
   const nowIdx = Math.max(0, allKeys.indexOf(monthKeyOf(TODAY)));
   const [fromKey, setFromKey] = useState(() => allKeys[Math.max(0, nowIdx - 11)]); // default: last 12 months
@@ -916,7 +926,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
   const handleFrom = (key) => { setFromKey(key); if (allKeys.indexOf(key) > allKeys.indexOf(toKey)) setToKey(key); };
   const handleTo = (key) => { setToKey(key); if (allKeys.indexOf(key) < allKeys.indexOf(fromKey)) setFromKey(key); };
 
-  // Counts every currently-active booking, not just one per unit —
+  // Counts every currently-active booking, not just one per unit -
   // unitOccupant() only ever returns the first, which silently undercounts
   // both a reftech room's normal multiple simultaneous occupants and a
   // cabinet clash's second (unintended) booking.
@@ -965,7 +975,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
       </div>
 
       <p className="text-xs mt-2 mb-1" style={{ color: "var(--ink-soft)" }}>
-        Highest right now: <strong style={{ color: "var(--ink)" }}>{piDisplay(top.lab)}</strong> at {top.current} units — {avg > 0 ? `${Math.round(((top.current - avg) / avg) * 100)}% above` : ""} the group average ({avg.toFixed(1)}).
+        Highest right now: <strong style={{ color: "var(--ink)" }}>{piDisplay(top.lab)}</strong> at {top.current} units - {avg > 0 ? `${Math.round(((top.current - avg) / avg) * 100)}% above` : ""} the group average ({avg.toFixed(1)}).
       </p>
 
       <div className="relative">
@@ -1051,7 +1061,7 @@ function PendingPIsPanel({ pendingLabGroups, verifiedLabGroups, onApprove, onMer
       <div className="mb-4">
         <h3 className="gc-display font-bold text-sm">Pending PIs</h3>
         <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>
-          Self-registered from the Request Space form — approve or merge before they appear in the PI picker.
+          Self-registered from the Request Space form - approve or merge before they appear in the PI picker.
         </p>
       </div>
       <div className="space-y-3">
@@ -1115,7 +1125,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
   const shownActivity = activityExpanded ? activity.slice(0, 25) : activity.slice(0, 4);
 
   const [labsExpanded, setLabsExpanded] = useState(false);
-  // Counts every currently-active booking, not just one per unit — see the
+  // Counts every currently-active booking, not just one per unit - see the
   // same fix/comment in LabUsageTrend's currentCounts above.
   const byLabAll = LAB_GROUPS
     .map((lab) => ({ lab, count: units.reduce((sum, u) => sum + currentBookingsList(u).filter((b) => b.labGroup === lab).length, 0) }))
@@ -1125,8 +1135,8 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
 
   const handleActivityClick = (item) => {
     // item.type === "completed" is just this activity item's display/icon
-    // category (shared by approved/declined/completed requisition events —
-    // see buildActivityFeed) — NOT the requisition's actual status. Route
+    // category (shared by approved/declined/completed requisition events -
+    // see buildActivityFeed) - NOT the requisition's actual status. Route
     // by the real status via requisitionTab() instead, so a freshly
     // approved (still-active) requisition opens on the Active tab rather
     // than always landing on Completed.
@@ -1143,7 +1153,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
     <div className="space-y-5">
       <h1 className="gc-display text-2xl font-extrabold">Dashboard</h1>
 
-      {/* Pending PIs — surfaced right at the top so it's never missed; the
+      {/* Pending PIs - surfaced right at the top so it's never missed; the
           panel itself renders nothing once there's nothing pending. */}
       <PendingPIsPanel
         pendingLabGroups={labGroups.filter((g) => !g.isVerified)}
@@ -1152,7 +1162,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
         onMerge={onMergeLabGroup}
       />
 
-      {/* KPI readout row — same dark-chip language as the inventory cards, for a consistent system */}
+      {/* KPI readout row - same dark-chip language as the inventory cards, for a consistent system */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
         <button
           onClick={() => goInventory({})}
@@ -1185,7 +1195,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
         </button>
       </div>
 
-      {/* timeline — moved up, close to the top of the dashboard */}
+      {/* timeline - moved up, close to the top of the dashboard */}
       <div className="gc-card p-5">
         <div className="flex items-center justify-between mb-2">
           <h3 className="gc-display font-bold text-sm">Requisition timeline</h3>
@@ -1240,7 +1250,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="gc-display font-bold text-sm">Lab groups</h3>
-                <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units currently held, by group — click one to filter inventory</p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units currently held, by group - click one to filter inventory</p>
               </div>
               <button
                 onClick={() => setManagingPIs(true)}
@@ -1302,7 +1312,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
   );
 }
 
-/* Add/edit/delete PIs directly — distinct from the Pending PIs approve/
+/* Add/edit/delete PIs directly - distinct from the Pending PIs approve/
    merge flow above (self-registrations awaiting review); this is for
    ongoing maintenance of the PI list itself, e.g. removing someone who's
    left or fixing a name change without creating a whole new PI. */
@@ -1436,7 +1446,7 @@ function PIManagementModal({ labGroups, onAdd, onUpdate, onDelete, onClose }) {
 /* ---------------------------------------------------------------------- */
 /* Colour/soft values here are the exact same ones bookingStatus()/
    timelineRowStatus() hand back per row, so a filter pill always matches
-   the bars it filters — see those functions below. */
+   the bars it filters - see those functions below. */
 const TIMELINE_STATUS_OPTIONS = [
   { key: "occupied", label: "Occupied", color: "var(--occupied)", soft: "var(--occupied-soft)" },
   { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" },
@@ -1446,7 +1456,7 @@ const TIMELINE_STATUS_OPTIONS = [
 ];
 
 /* Same colour language as bookingStatus(), plus a distinct grey for
-   completed requisitions (which bookingStatus never sees — completed
+   completed requisitions (which bookingStatus never sees - completed
    bookings are excluded from unit.bookings upstream, see api.js). */
 function timelineRowStatus(req) {
   if (req.status === "completed") return { key: "completed", label: "Completed", color: "var(--service)", soft: "var(--service-soft)" };
@@ -1454,7 +1464,7 @@ function timelineRowStatus(req) {
 }
 
 /* Greedily assigns each item (sorted by start) to the lowest-numbered lane
-   whose previous occupant has already ended — so a unit's requisitions all
+   whose previous occupant has already ended - so a unit's requisitions all
    live in one timeline row, and only genuinely overlapping ones stack into
    extra lanes within that same row. */
 function assignLanes(items) {
@@ -1467,7 +1477,7 @@ function assignLanes(items) {
   });
 }
 
-/* Month-key/full-label range TimelineView's date pickers choose from —
+/* Month-key/full-label range TimelineView's date pickers choose from -
    generated independently of any single data source (unlike
    labUsageHistory's keys) since the timeline spans arbitrary past/future
    scheduling, not just months with recorded usage. */
@@ -1497,7 +1507,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
   const [urgencyFilters, setUrgencyFilters] = useState(new Set()); // empty = show all
   const [disciplineFilter, setDisciplineFilter] = useState("all");
   const [hoveredRow, setHoveredRow] = useState(null);
-  // Default window: 2 months behind today, 10 months ahead — same on the
+  // Default window: 2 months behind today, 10 months ahead - same on the
   // dashboard preview and the full-screen view.
   const [fromKey, setFromKey] = useState(() => monthKeyOf(addMonths(TODAY, -2)));
   const [toKey, setToKey] = useState(() => monthKeyOf(addMonths(TODAY, 10)));
@@ -1515,7 +1525,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
   const totalMs = rangeEnd - rangeStart;
   const pct = (date) => Math.max(0, Math.min(100, ((date - rangeStart) / totalMs) * 100));
 
-  // Month-boundary ticks instead of the old fixed 5 — more detail on a
+  // Month-boundary ticks instead of the old fixed 5 - more detail on a
   // short window, thinned as the span grows so labels never crowd.
   const spanMonths = Math.max(1, Math.round(totalMs / (30.44 * 86400000)));
   const tickEvery = spanMonths > 24 ? 4 : spanMonths > 12 ? 2 : 1;
@@ -1532,7 +1542,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
     }
   }
 
-  // Built from requests, not units.bookings — a completed requisition's
+  // Built from requests, not units.bookings - a completed requisition's
   // booking is deliberately excluded from unit.bookings upstream (it no
   // longer counts as active occupancy), but it should still show here,
   // greyed out, as part of the unit's history.
@@ -1551,11 +1561,11 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
     return [{ u, o, s, reqIndex, start: start < rangeStart ? rangeStart : start, end }];
   });
 
-  // Pending requisitions aren't assigned to a unit yet — that's the whole
+  // Pending requisitions aren't assigned to a unit yet - that's the whole
   // point of this lane: lining a pending request's date window up against
   // the unit rows below shows at a glance which ones are free to assign it
   // to. Independent of floor/discipline/urgency filters (those describe
-  // existing bookings, not a not-yet-assigned request) — only clipped to
+  // existing bookings, not a not-yet-assigned request) - only clipped to
   // the visible date window like everything else here.
   const pending = requests.flatMap((r, reqIndex) => {
     if (r.status !== "pending") return [];
@@ -1572,12 +1582,12 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
     occupiedByUnit.get(it.u.id).push(it);
   });
 
-  // One row per unit (not per requisition) — requisitions sharing a unit
+  // One row per unit (not per requisition) - requisitions sharing a unit
   // share its row, laid out in lanes so genuinely overlapping ones stack
   // instead of covering each other, while non-overlapping ones fall back
   // to lane 0 and free stretches of the row read as visibly empty. The
-  // full view lists every unit on the floor — including ones with nothing
-  // booked — so a free room is as visible as a busy one; the compact
+  // full view lists every unit on the floor - including ones with nothing
+  // booked - so a free room is as visible as a busy one; the compact
   // dashboard preview stays a "highlights" list, same as before.
   const groups = FLOORS
     .filter((f) => floorFilter === "all" || floorFilter === f)
@@ -1594,7 +1604,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
     .filter((g) => g.unitRows.length)
     .slice(0, compact ? 2 : undefined);
 
-  // Renders one unit's row — its requisitions all land on this single row,
+  // Renders one unit's row - its requisitions all land on this single row,
   // in lanes only where their dates genuinely overlap, so a gap in the row
   // reads as free time and a lane stack reads as a clash. The unit label
   // opens that unit's detail modal (over the timeline, not navigating away).
@@ -1639,7 +1649,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                 >
                   <span className="text-[11.5px] font-bold truncate" style={{ color: s.color }}>{o.researcher}</span>
                 </button>
-                {/* hover detail card — visibility driven by React state (not a CSS-only hover selector) */}
+                {/* hover detail card - visibility driven by React state (not a CSS-only hover selector) */}
                 {isHovered && (
                   <div
                     className="absolute z-20 rounded-xl p-3.5 text-left"
@@ -1669,16 +1679,16 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
     <div>
       {!compact && (
         <p className="text-[13px] mb-4" style={{ color: "var(--ink-soft)" }}>
-          Each bar spans one requisition, from its start date to its end date. The dashed line marks today — bars
+          Each bar spans one requisition, from its start date to its end date. The dashed line marks today - bars
           ending before it (red) are overdue returns.
         </p>
       )}
 
-      {/* Filters are full-screen only — the dashboard preview is a fixed
+      {/* Filters are full-screen only - the dashboard preview is a fixed
           highlights list, not something worth narrowing down. Split into
           two calmer rows instead of one crowded line: scope (floor, area,
-          date range) on top, status — the only row that's inherently
-          colourful, since its colours double as the bar-colour legend —
+          date range) on top, status - the only row that's inherently
+          colourful, since its colours double as the bar-colour legend -
           on its own line below, muted to neutral until a status is
           actually toggled on so it doesn't compete with everything else. */}
       {!compact && (
@@ -1705,7 +1715,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border"
                   style={{
                     // Active state matches the bars themselves (soft fill +
-                    // coloured border/text), not an inverted solid fill —
+                    // coloured border/text), not an inverted solid fill -
                     // so the pill you toggled on looks like what it's
                     // filtering for on the timeline below.
                     background: active ? o.soft : "var(--surface)",
@@ -1736,7 +1746,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
       <div className="relative">
         <div className="absolute top-0 bottom-0 border-l border-dashed ml-16 sm:ml-24 pointer-events-none z-10" style={{ left: `${pct(TODAY)}%`, borderColor: "var(--ink-faint)" }} />
 
-        {/* Pending requests, lined up against their requested dates —
+        {/* Pending requests, lined up against their requested dates -
             lets an admin see at a glance which units below are free during
             that window, before they've been assigned to one. */}
         {pendingLanes.length > 0 && (
@@ -1748,7 +1758,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
               className="relative flex-1 rounded-lg"
               style={{
                 height: Math.max(0, ...pendingLanes.map((p) => p.lane)) * (TIMELINE_LANE_H + TIMELINE_LANE_GAP) + TIMELINE_LANE_H,
-                // Plain (not opacity-faded) background — `opacity` on this
+                // Plain (not opacity-faded) background - `opacity` on this
                 // wrapper would create its own stacking context and trap
                 // the hover card's z-index inside it, rendering the card
                 // behind the unit rows below instead of above them.
@@ -1804,7 +1814,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
           {groups.map((g) => {
             // Cabinets sharing a physical room cluster together under a
             // room subheading, so it's obvious at a glance which room is
-            // free vs. booked out — only in the full (non-compact) view,
+            // free vs. booked out - only in the full (non-compact) view,
             // where there's room for the extra hierarchy.
             const byRoom = new Map();
             g.unitRows.forEach((row) => {
@@ -1849,11 +1859,11 @@ function UnitCard({ unit, onClick }) {
   const isReftech = unit.type === "reftech";
   const occupant = unitOccupant(unit);
   const upcoming = upcomingBookings(unit);
-  // null when free — discipline isn't a fixed unit property, so there's
+  // null when free - discipline isn't a fixed unit property, so there's
   // nothing to show for an unoccupied unit.
   const disciplineKey = unitDiscipline(unit);
   const dm = disciplineKey ? DISCIPLINE_META[disciplineKey] : null;
-  // Cabinets are meant to only hold one booking at a time — more than one
+  // Cabinets are meant to only hold one booking at a time - more than one
   // active means an admin edit created an overlap. Surfaced here too (not
   // just on the unit detail page) so it's visible without opening it.
   // Hidden once the overlap has been explicitly approved as intentional.
@@ -1889,15 +1899,15 @@ function UnitCard({ unit, onClick }) {
         {isReftech ? "Reftech Room · " : ""}{unit.manufacturer} {unit.model}
       </div>
 
-      {/* room — the most-checked field, given its own prominent chip */}
+      {/* room - the most-checked field, given its own prominent chip */}
       <div className="mb-3"><RoomChip unit={unit} /></div>
 
       {/* live readouts if occupied, otherwise the operating range */}
       {occupant ? (
         <div className="grid grid-cols-3 gap-1.5 mb-3">
-          <div className="gc-readout"><div className="lbl">TEMP</div><div className="val" style={{ color: "var(--chip-temp)" }}>{occupant.setTemp}°C</div></div>
-          <div className="gc-readout"><div className="lbl">RH</div><div className="val" style={{ color: "var(--chip-rh)" }}>{occupant.setHumidity}%</div></div>
-          <div className="gc-readout"><div className="lbl">CYCLE</div><div className="val" style={{ color: "var(--chip-cycle)", fontSize: 12.5 }}>{occupant.lightCycle}</div></div>
+          <div className="gc-readout"><div className="lbl">TEMP</div><div className="val" style={{ color: "var(--chip-temp)" }}>{isSet(occupant.setTemp) ? `${occupant.setTemp}°C` : "-"}</div></div>
+          <div className="gc-readout"><div className="lbl">RH</div><div className="val" style={{ color: "var(--chip-rh)" }}>{isSet(occupant.setHumidity) ? `${occupant.setHumidity}%` : "-"}</div></div>
+          <div className="gc-readout"><div className="lbl">CYCLE</div><div className="val" style={{ color: "var(--chip-cycle)", fontSize: 12.5 }}>{occupant.lightCycle || "-"}</div></div>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-1.5 mb-3">
@@ -1906,7 +1916,7 @@ function UnitCard({ unit, onClick }) {
         </div>
       )}
 
-      {/* tags — discipline only shows when occupied; it's not a fixed unit property */}
+      {/* tags - discipline only shows when occupied; it's not a fixed unit property */}
       <div className="flex flex-wrap gap-1.5 mb-3">
         {dm && (
           <span className="gc-tag" style={{ background: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-bg)" : "var(--tag-insect-bg)", color: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-ink)" : "var(--tag-insect-ink)", borderColor: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-border)" : "var(--tag-insect-border)" }}>
@@ -1916,14 +1926,14 @@ function UnitCard({ unit, onClick }) {
         {unit.co2Control && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>CO₂</span>}
       </div>
 
-      {/* occupant / availability — a reftech room can genuinely hold several
+      {/* occupant / availability - a reftech room can genuinely hold several
           ongoing requisitions at once (unlike a cabinet's single occupant),
           so it gets a compact list instead of one occupant block: no
           per-row dates (the room-level status badge above already conveys
           urgency), species instead, capped so the tile can't grow unbounded.
           minHeight + centering keeps this box the same size across every
           tile in the deck regardless of how much (or little) it has to
-          show — a free cabinet's one-liner and a busy reftech room's list
+          show - a free cabinet's one-liner and a busy reftech room's list
           both read as the same footprint, not a ragged grid. */}
       <div
         className="mt-auto rounded-xl px-3.5 py-3"
@@ -1979,7 +1989,7 @@ function UnitCard({ unit, onClick }) {
             Under maintenance{unit.serviceLog[0] ? ` · serviced ${fmtGB(unit.serviceLog[0].date)} by contractor ${unit.serviceLog[0].engineer}` : ""}
           </div>
         ) : upcoming.length > 0 ? (
-          <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>Free now — next requisition {fmtGB(upcoming[0].startDate)}</div>
+          <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>Free now - next requisition {fmtGB(upcoming[0].startDate)}</div>
         ) : (
           <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>Free and ready to book</div>
         )}
@@ -2012,7 +2022,7 @@ function exportUnitsCSV(units) {
   const rows = units.map((u) => {
     const s = displayStatus(u);
     // Every currently-active booking, not just unitOccupant()'s first one
-    // — a reftech room's normal simultaneous occupants, or a cabinet
+    // - a reftech room's normal simultaneous occupants, or a cabinet
     // clash, would otherwise silently drop out of the export.
     const current = currentBookingsList(u);
     const disciplines = [...new Set(current.map((b) => DISCIPLINE_META[b.discipline]?.label).filter(Boolean))];
@@ -2045,7 +2055,7 @@ function exportRequisitionsCSV(requests) {
   downloadCSV(headers, rows, `requisitions-${fmt(TODAY)}.csv`);
 }
 
-function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
+function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChange }) {
   const [query, setQuery] = useState(initialFilter?.query || "");
   const [statusFilter, setStatusFilter] = useState(initialFilter?.status || "all");
   const [typeFilter, setTypeFilter] = useState(initialFilter?.type || "all");
@@ -2053,19 +2063,26 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
   const [labGroupFilter, setLabGroupFilter] = useState(initialFilter?.labGroup || "all");
   const [floorFilter, setFloorFilter] = useState(initialFilter?.floor || "all");
 
+  // Report every filter change back up, so when this page remounts (e.g.
+  // leaving via the sidebar and coming back) it restores what the admin
+  // last picked, not whatever filter a dashboard tile first opened it with.
+  useEffect(() => {
+    if (onFilterChange) onFilterChange({ query, status: statusFilter, type: typeFilter, discipline: disciplineFilter, labGroup: labGroupFilter, floor: floorFilter });
+  }, [query, statusFilter, typeFilter, disciplineFilter, labGroupFilter, floorFilter]);
+
   const cabinetCount = units.filter((u) => u.type === "cabinet").length;
   const reftechCount = units.filter((u) => u.type === "reftech").length;
 
   const filtered = units.filter((u) => {
     const s = displayStatus(u);
     // Checks every currently-active booking, not just unitOccupant()'s
-    // first one — otherwise a unit with more than one active booking (a
+    // first one - otherwise a unit with more than one active booking (a
     // reftech room's normal simultaneous occupants, or a cabinet clash)
     // could wrongly disappear from a lab-group/discipline/search match
     // that a booking other than the first one actually satisfies.
     const currentAll = currentBookingsList(u);
-    // Punctuation/case-insensitive — "GC01" or "gc 01" should still find
-    // "GC-01" — strip everything but letters/digits from both sides
+    // Punctuation/case-insensitive - "GC01" or "gc 01" should still find
+    // "GC-01" - strip everything but letters/digits from both sides
     // before comparing, rather than requiring an exact-punctuation match.
     const q = normalizeSearch(query);
     const matchesQuery = q === "" || normalizeSearch(u.id).includes(q) || normalizeSearch(u.room).includes(q) ||
@@ -2148,7 +2165,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter }) {
         <span className="text-xs gc-mono font-semibold ml-auto" style={{ color: "var(--ink-faint)" }}>{filtered.length} of {units.length}</span>
       </div>
 
-      {/* floor filter as individual buttons — quicker for admins than a dropdown */}
+      {/* floor filter as individual buttons - quicker for admins than a dropdown */}
       <div className="flex flex-wrap items-center gap-1.5 mb-6">
         <button
           onClick={() => setFloorFilter("all")}
@@ -2199,7 +2216,7 @@ function SpecRow({ label, value }) {
     </div>
   );
 }
-/* Plain grey-caps label, no underline — used for every section header in the unit modal */
+/* Plain grey-caps label, no underline - used for every section header in the unit modal */
 function SectionLabel({ children }) {
   return <h3 className="gc-display text-[13px] font-bold" style={{ color: "var(--ink)" }}>{children}</h3>;
 }
@@ -2207,7 +2224,7 @@ function SectionLabel({ children }) {
 function BoxLabel({ children }) {
   return <h3 className="gc-display text-[13px] font-bold mb-2.5" style={{ color: "var(--ink)" }}>{children}</h3>;
 }
-/* Definition-list style field row — label left, value right, a hairline divider between rows.
+/* Definition-list style field row - label left, value right, a hairline divider between rows.
    Arranged two-up by the caller (FieldGrid) so it stays compact without feeling like a spreadsheet. */
 function FieldPair({ label, value }) {
   return (
@@ -2411,13 +2428,13 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
                       <span>Scheduled</span>
                       <button onClick={() => logAsDone(entry)} className="text-[11.5px] font-bold text-left" style={{ color: "var(--accent-dark)" }}>Log as done</button>
                     </span>
-                  ) : (entry.engineer || "—")}
+                  ) : (entry.engineer || "-")}
                 </td>
                 <td className="py-2.5 pr-3 align-top">
                   <span className="gc-tag" style={{ background: cat.bg, color: cat.ink, borderColor: cat.border }}>{entry.category || "Maintenance"}</span>
                 </td>
                 <td className="py-2.5 pr-3 align-top" style={{ color: "var(--ink-soft)" }}>{entry.notes}</td>
-                <td className="py-2.5 pr-3 align-top text-right font-medium" style={{ whiteSpace: "nowrap" }}>{entry.cost != null ? `£${entry.cost.toLocaleString("en-GB")}` : "—"}</td>
+                <td className="py-2.5 pr-3 align-top text-right font-medium" style={{ whiteSpace: "nowrap" }}>{entry.cost != null ? `£${entry.cost.toLocaleString("en-GB")}` : "-"}</td>
                 <td className="py-2.5 align-top">
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 justify-end">
                     <button onClick={() => startEdit(entry)} className="p-1" style={{ color: "var(--ink-faint)" }} title="Edit entry"><Pencil size={13} /></button>
@@ -2568,7 +2585,7 @@ function BookingCard({ booking, status, onOpenRequisition }) {
         <div className="italic text-[13px] truncate" style={{ color, opacity: 0.85 }}>{booking.project} · {piDisplay(booking.labGroup)}</div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] font-semibold mt-1" style={{ color, opacity: 0.75 }}>
           <span>{fmtGB(booking.startDate)} → {fmtGB(booking.endDate)}</span>
-          <span>{booking.setTemp}°C · {booking.setHumidity}% · {booking.lightCycle}</span>
+          <span>{[fmtEnv(booking.setTemp, booking.setHumidity), booking.lightCycle, (booking.dawnTime || booking.duskTime) ? fmtDawnDusk(booking.dawnTime, booking.duskTime) : null].filter(Boolean).join(" · ")}</span>
         </div>
       </div>
       {clickable && <ChevronRight size={18} style={{ color, opacity: 0.6 }} className="flex-shrink-0" />}
@@ -2593,7 +2610,7 @@ function UnitDetailContent({
     .filter(({ r }) => r.status === "pending" && r.unitType === unit.type && unitAvailableForWindow(unit, r.startDate, r.endDate));
   const [assigning, setAssigning] = useState(false);
   const [chosenReqIndex, setChosenReqIndex] = useState("");
-  // Cabinets are meant to only ever hold one current booking — more than
+  // Cabinets are meant to only ever hold one current booking - more than
   // one means an admin's edit created an overlap that nothing blocked.
   // Acknowledging is per exact booking-id set: if the overlap later
   // changes (a date moves, a third one joins), that's a different
@@ -2619,7 +2636,7 @@ function UnitDetailContent({
             <AlertTriangle size={15} style={{ color: "var(--overdue)", flexShrink: 0, marginTop: 1 }} />
             <div className="text-xs flex-1">
               <div className="font-semibold" style={{ color: "var(--overdue)" }}>
-                {current.length} requisitions are overlapping on this cabinet right now — cabinets are meant to hold one at a time. Review and adjust the dates below, or approve the clash if this is genuinely intentional.
+                {current.length} requisitions are overlapping on this cabinet right now - cabinets are meant to hold one at a time. Review and adjust the dates below, or approve the clash if this is genuinely intentional.
               </div>
               <button
                 onClick={() => onAcknowledgeClash(unit.id, currentIds)}
@@ -2641,7 +2658,7 @@ function UnitDetailContent({
         )}
         {current.length === 0 && upcoming.length === 0 && (
           <p className="text-sm" style={{ color: "var(--ink-soft)" }}>
-            {unit.status === "service" ? "Marked out of service — no active requisition." : isReftech ? "No current or upcoming requisitions for this room." : "Currently free."}
+            {unit.status === "service" ? "Marked out of service - no active requisition." : isReftech ? "No current or upcoming requisitions for this room." : "Currently free."}
           </p>
         )}
         {upcoming.length > 0 && (
@@ -2676,7 +2693,7 @@ function UnitDetailContent({
                 <select value={chosenReqIndex} onChange={(e) => setChosenReqIndex(e.target.value)} className="gc-input">
                   <option value="">Select a pending requisition…</option>
                   {pendingCandidates.map(({ r, i }) => (
-                    <option key={i} value={i}>{r.researcher} — {r.projectTitle} ({fmtGB(r.startDate)} → {fmtGB(r.endDate)})</option>
+                    <option key={i} value={i}>{r.researcher} - {r.projectTitle} ({fmtGB(r.startDate)} → {fmtGB(r.endDate)})</option>
                   ))}
                 </select>
               )}
@@ -2731,7 +2748,7 @@ function UnitDetailContent({
   );
 }
 
-/* Generic confirm-before-destructive-action popup — matches the app's
+/* Generic confirm-before-destructive-action popup - matches the app's
    existing overlay/card styling rather than a bare window.confirm(). */
 function ConfirmDialog({ title, message, confirmLabel = "Delete", onConfirm, onCancel }) {
   return (
@@ -2768,7 +2785,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
   const hasActiveBooking = !!unitOccupant(unit);
   const handleDeleteClick = () => {
     if (hasActiveBooking) {
-      window.alert("This unit currently has an active booking — complete or reassign that requisition before deleting it.");
+      window.alert("This unit currently has an active booking - complete or reassign that requisition before deleting it.");
       return;
     }
     setConfirmingDelete(true);
@@ -2777,7 +2794,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
   return (
     <div
       className="flex items-center justify-center p-0 sm:p-6"
-      // zIndex 55 — above the dashboard's fullscreen timeline overlay
+      // zIndex 55 - above the dashboard's fullscreen timeline overlay
       // (z-50), so opening a unit from inside it pops the modal in front,
       // timeline still visible behind; below 60 so a ConfirmDialog spawned
       // from here (e.g. delete) still layers on top of this modal.
@@ -2848,14 +2865,14 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
   const firstRoomFor = (floor, type) => (rooms.find((r) => r.floor === floor && r.type === type) || {}).name || "";
 
   return (
-    // zIndex 58 — editing a unit is only ever triggered from inside
+    // zIndex 58 - editing a unit is only ever triggered from inside
     // UnitModal (z-55), so this always renders on top of it, not behind.
     <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 58, background: "rgba(32,43,44,0.35)" }} onClick={onClose}>
       <div className="gc-scroll rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto" style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
         <div className="p-5 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
           <h2 className="gc-display text-lg font-extrabold">{isEdit ? `Edit ${unit.id}` : "Add new unit"}</h2>
           {/* Editing always opens from UnitModal (see z-index note above), so
-              closing this always lands back on it — say so explicitly rather
+              closing this always lands back on it - say so explicitly rather
               than relying on people knowing a click outside does the same. */}
           {isEdit ? (
             <button onClick={onClose} className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg hover:bg-black/5" style={{ color: "var(--ink-soft)" }}>
@@ -2983,7 +3000,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
 /* ---------------------------------------------------------------------- */
 /* Requisitions                                                           */
 /* ---------------------------------------------------------------------- */
-/* Every field a researcher can submit on the Request Space form — shown in full to admins,
+/* Every field a researcher can submit on the Request Space form - shown in full to admins,
    reused by both the Requisitions page cards and the timeline's requisition preview panel. */
 function RequisitionDetailFields({ req }) {
   const isPlant = req.discipline === "plant";
@@ -2993,10 +3010,10 @@ function RequisitionDetailFields({ req }) {
         <BoxLabel>Requester</BoxLabel>
         <FieldGrid>
           <FieldPair label="Name" value={req.researcher} />
-          <FieldPair label="Role" value={req.role || "—"} />
+          <FieldPair label="Role" value={req.role || "-"} />
           <FieldPair label="Email" value={req.email} />
-          <FieldPair label="Emergency number" value={req.emergencyNumber || "—"} />
-          <FieldPair label="PI/Supervisor" value={req.pi || "—"} />
+          <FieldPair label="Emergency number" value={req.emergencyNumber || "-"} />
+          <FieldPair label="PI/Supervisor" value={req.pi || "-"} />
         </FieldGrid>
       </InfoBox>
 
@@ -3005,10 +3022,11 @@ function RequisitionDetailFields({ req }) {
         <FieldGrid>
           <FieldPair label="Space type" value={req.unitType === "reftech" ? "Reftech Room" : "Growth cabinet"} />
           <FieldPair label="Research area" value={DISCIPLINE_META[req.discipline].label} />
-          <FieldPair label="Species" value={req.species && req.species.length ? req.species.join(", ") : "—"} />
-          {isPlant && <FieldPair label="Containment level" value={req.containmentLevel || "—"} />}
-          <FieldPair label="Set temp / humidity" value={`${req.setTemp || "—"}°C / ${req.setHumidity || "—"}%`} />
-          <FieldPair label="Light cycle" value={req.lightCycle || "—"} />
+          <FieldPair label="Species" value={req.species && req.species.length ? req.species.join(", ") : "-"} />
+          {isPlant && <FieldPair label="Containment level" value={req.containmentLevel || "-"} />}
+          <FieldPair label="Set temp / humidity" value={fmtEnv(req.setTemp, req.setHumidity)} />
+          <FieldPair label="Light cycle" value={req.lightCycle || "Not specified"} />
+          <FieldPair label="Photoperiod (dawn / dusk)" value={fmtDawnDusk(req.dawnTime, req.duskTime)} />
           {isPlant ? (
             <FieldPair label="Pest outbreak consent" value={req.pestConsent ? "Consented" : "Not given"} />
           ) : (
@@ -3023,7 +3041,7 @@ function RequisitionDetailFields({ req }) {
         <FieldGrid>
           <FieldPair label="Dates requested" value={`${fmtGB(req.startDate)} → ${fmtGB(req.endDate)}`} />
           <FieldPair label="Preferred floor" value={req.preferredFloor === "any" ? "No preference" : FLOOR_LABEL[req.preferredFloor]} />
-          <FieldPair label="Submitted" value={fmtGB(req.submittedDate) || "—"} />
+          <FieldPair label="Submitted" value={fmtGB(req.submittedDate) || "-"} />
           {req.decidedDate && <FieldPair label="Decided" value={fmtGB(req.decidedDate)} />}
           {req.assignedUnitId && <FieldPair label="Assigned unit" value={req.assignedUnitId} />}
         </FieldGrid>
@@ -3032,11 +3050,11 @@ function RequisitionDetailFields({ req }) {
       <div className="space-y-4">
         <div>
           <SectionLabel>Space required</SectionLabel>
-          <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>{req.spaceDescription || "—"}</p>
+          <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>{req.spaceDescription || "-"}</p>
         </div>
         <div>
           <SectionLabel>Purpose of project</SectionLabel>
-          <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>{req.projectDesc || "—"}</p>
+          <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>{req.projectDesc || "-"}</p>
         </div>
         {req.notes && (
           <div>
@@ -3055,7 +3073,7 @@ function RequisitionDetailFields({ req }) {
   );
 }
 
-/* Full edit form for a requisition — mirrors the same section grouping as RequisitionDetailFields,
+/* Full edit form for a requisition - mirrors the same section grouping as RequisitionDetailFields,
    but with editable inputs. Used from both the Requisitions page and the timeline preview panel. */
 function RequisitionEditForm({ req, units, onSave, onCancel }) {
   const [form, setForm] = useState({ ...req });
@@ -3065,7 +3083,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
   const isPlant = form.discipline === "plant";
 
   // Warns (doesn't block) if the edited dates would overlap another active
-  // booking already on this requisition's assigned unit — e.g. a reftech
+  // booking already on this requisition's assigned unit - e.g. a reftech
   // room genuinely can hold overlapping bookings by design, so this is
   // informational, letting the admin judge whether it's actually a problem.
   const assignedUnit = req.assignedUnitId ? units.find((u) => u.id === req.assignedUnitId) : null;
@@ -3088,7 +3106,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
             <select
               value={form.labGroup}
               // form starts as a spread of the original requisition, so it still carries the OLD
-              // labGroupId. api.js prefers a non-null labGroupId over resolving the name — must null
+              // labGroupId. api.js prefers a non-null labGroupId over resolving the name - must null
               // it out here or the update silently keeps writing the pre-edit lab group's id.
               onChange={(e) => { const lab = e.target.value; setForm((f) => ({ ...f, labGroup: lab, labGroupId: null, pi: PI_BY_LAB[lab] || "" })); }}
               className="gc-input"
@@ -3122,14 +3140,19 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
             />
           </Field>
           {isPlant && <Field label="Containment level"><select value={form.containmentLevel || CONTAINMENT_LEVELS[0]} onChange={set("containmentLevel")} className="gc-input">{CONTAINMENT_LEVELS.map((c) => <option key={c}>{c}</option>)}</select></Field>}
-          <Field label="Set temp (°C)"><input type="number" min={0} max={60} value={form.setTemp || ""} onChange={setNum("setTemp")} className="gc-input" /></Field>
-          <Field label="Set humidity (%)"><input type="number" min={0} max={100} value={form.setHumidity || ""} onChange={setNum("setHumidity")} className="gc-input" /></Field>
+          <Field label="Set temp (°C)"><input type="number" min={0} max={60} value={form.setTemp ?? ""} onChange={setNum("setTemp")} className="gc-input" placeholder="Not specified" /></Field>
+          <Field label="Set humidity (%)"><input type="number" min={0} max={100} value={form.setHumidity ?? ""} onChange={setNum("setHumidity")} className="gc-input" placeholder="Not specified" /></Field>
           <Field label="Light cycle">
-            <select value={form.lightCycle || LIGHT_CYCLES[0]} onChange={set("lightCycle")} className="gc-input">
+            <select value={form.lightCycle || ""} onChange={set("lightCycle")} className="gc-input">
+              <option value="">Not specified</option>
               {/* Includes the current value even if it's a custom one entered via the request form's picker, so this never silently shows the wrong option. */}
               {(form.lightCycle && !LIGHT_CYCLES.includes(form.lightCycle) ? [...LIGHT_CYCLES, form.lightCycle] : LIGHT_CYCLES).map((l) => <option key={l}>{l}</option>)}
             </select>
           </Field>
+          <div className="grid grid-cols-2 gap-3.5">
+            <Field label="Dawn (lights on)"><input type="time" value={form.dawnTime || ""} onChange={set("dawnTime")} className="gc-input" /></Field>
+            <Field label="Dusk (lights off)"><input type="time" value={form.duskTime || ""} onChange={set("duskTime")} className="gc-input" /></Field>
+          </div>
           {isPlant ? (
             <CheckField label="Pest outbreak consent" checked={!!form.pestConsent} onChange={setBool("pestConsent")} />
           ) : (
@@ -3189,7 +3212,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   const [reassignUnit, setReassignUnit] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Any unit that matches type and is available across the *requested*
-  // date window — not just units that happen to be free right now.
+  // date window - not just units that happen to be free right now.
   // Discipline isn't a unit property: any cabinet can be assigned
   // regardless of what discipline the requisition is for.
   const windowCandidates = units.filter((u) =>
@@ -3270,7 +3293,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                     <option value="">Select an available unit…</option>
                     {windowCandidates.map((u) => (
                       <option key={u.id} value={u.id}>
-                        {u.id} — {FLOOR_LABEL[u.floor]}, {u.room}{displayStatus(u).key !== "free" ? " (free by requested start date)" : ""}
+                        {u.id} - {FLOOR_LABEL[u.floor]}, {u.room}{displayStatus(u).key !== "free" ? " (free by requested start date)" : ""}
                       </option>
                     ))}
                   </select>
@@ -3290,7 +3313,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                 <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>
-                      {overdueForCompletion ? "Past its end date — still shown as active until you confirm it's finished." : "Still ongoing, assigned to " + (req.assignedUnitId || "a unit") + "."}
+                      {overdueForCompletion ? "Past its end date - still shown as active until you confirm it's finished." : "Still ongoing, assigned to " + (req.assignedUnitId || "a unit") + "."}
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
                       <button onClick={() => setReassigning((v) => !v)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
@@ -3306,7 +3329,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                       <select value={reassignUnit} onChange={(e) => setReassignUnit(e.target.value)} className="gc-input mt-2">
                         <option value="">Select a different unit…</option>
                         {windowCandidates.filter((u) => u.id !== req.assignedUnitId).map((u) => (
-                          <option key={u.id} value={u.id}>{u.id} — {FLOOR_LABEL[u.floor]}, {u.room}</option>
+                          <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room}</option>
                         ))}
                       </select>
                       {windowCandidates.filter((u) => u.id !== req.assignedUnitId).length === 0 && (
@@ -3352,7 +3375,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
 }
 
 /* Popup shown when clicking a bar on the requisition timeline or a booking
-   on a unit's detail modal — lets the admin see, decide, reassign, or
+   on a unit's detail modal - lets the admin see, decide, reassign, or
    delete the requisition without leaving whichever view opened it (it
    overlays on top; that view stays visible behind it), with an option to
    jump to the full Requisitions page. */
@@ -3407,7 +3430,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
               </>
             )}
             {/* This panel opened over a unit's detail modal (still open
-                behind it) — say so explicitly rather than relying on people
+                behind it) - say so explicitly rather than relying on people
                 knowing a click outside does the same as this button. */}
             {backToUnitId ? (
               <button onClick={onClose} className="flex items-center gap-1 text-xs font-bold px-2.5 py-2 rounded-xl" style={{ background: "var(--surface-soft)", color: "var(--ink-soft)" }}>
@@ -3431,7 +3454,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                   <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Assign a unit to approve</div>
                   <select value={chosenUnit} onChange={(e) => setChosenUnit(e.target.value)} className="gc-input">
                     <option value="">Select an available unit…</option>
-                    {windowCandidates.map((u) => <option key={u.id} value={u.id}>{u.id} — {FLOOR_LABEL[u.floor]}, {u.room}</option>)}
+                    {windowCandidates.map((u) => <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room}</option>)}
                   </select>
                   <div className="flex gap-2 pt-1">
                     <button disabled={!chosenUnit} onClick={() => { onDecide(index, "approved", chosenUnit); onClose(); }} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--free)" }}>
@@ -3462,7 +3485,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                       <select value={reassignUnit} onChange={(e) => setReassignUnit(e.target.value)} className="gc-input mt-2">
                         <option value="">Select a different unit…</option>
                         {windowCandidates.filter((u) => u.id !== req.assignedUnitId).map((u) => (
-                          <option key={u.id} value={u.id}>{u.id} — {FLOOR_LABEL[u.floor]}, {u.room}</option>
+                          <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room}</option>
                         ))}
                       </select>
                       {windowCandidates.filter((u) => u.id !== req.assignedUnitId).length === 0 && (
@@ -3528,7 +3551,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
   const withIdx = requests.map((r, i) => ({ r, i }));
 
   // Active = still needs attention or is still ongoing. A requisition only leaves Active once an
-  // admin manually marks it completed — passing its end date does not move it on its own.
+  // admin manually marks it completed - passing its end date does not move it on its own.
   const awaitingReview = withIdx.filter(({ r }) => r.status === "pending").filter(byType).filter(bySearch)
     .sort((a, b) => new Date(a.r.submittedDate || 0) - new Date(b.r.submittedDate || 0)); // longest-waiting first
   const ongoing = withIdx.filter(({ r }) => r.status === "approved").filter(byType).filter(bySearch)
@@ -3540,9 +3563,9 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
     .filter(({ r }) => historyFilter === "all" || r.status === historyFilter)
     .sort((a, b) => new Date(b.r.decidedDate || 0) - new Date(a.r.decidedDate || 0)); // most recently approved/declined first
 
-  // Counts on the type-filter toggle reflect whichever tab is open — active
+  // Counts on the type-filter toggle reflect whichever tab is open - active
   // counts on the Active tab, completed/declined counts on the Completed
-  // tab — and respect the search box too, rather than a blended total that
+  // tab - and respect the search box too, rather than a blended total that
   // doesn't match what's shown.
   const relevantForCounts = (tab === "pending"
     ? requests.filter((r) => r.status === "pending" || r.status === "approved")
@@ -3552,8 +3575,8 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
   const cabinetCount = relevantForCounts.filter((r) => r.unitType === "cabinet").length;
   const reftechCount = relevantForCounts.filter((r) => r.unitType === "reftech").length;
 
-  // Exports whichever set is actually on screen — Active (pending + ongoing)
-  // or the filtered Completed/Declined history — matching the inventory
+  // Exports whichever set is actually on screen - Active (pending + ongoing)
+  // or the filtered Completed/Declined history - matching the inventory
   // page's "export what's currently shown" behaviour.
   const visibleForExport = (tab === "pending" ? [...awaitingReview, ...ongoing] : filteredHistoric).map(({ r }) => r);
 
@@ -3588,7 +3611,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
         </div>
       </div>
 
-      {/* space-type filter — applies to both Active and Completed */}
+      {/* space-type filter - applies to both Active and Completed */}
       <div className="inline-flex items-center p-1 rounded-2xl mb-5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
         {[
           { key: "all", label: "All", count: allCount },
@@ -3639,7 +3662,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           {activeCount === 0 && (
             <div className="text-center py-12" style={{ color: "var(--ink-soft)" }}>
               <CheckCircle2 size={26} className="mx-auto mb-2" style={{ color: "var(--free)" }} />
-              <p className="text-sm">Nothing active — every requisition has been reviewed and wrapped up.</p>
+              <p className="text-sm">Nothing active - every requisition has been reviewed and wrapped up.</p>
             </div>
           )}
         </div>
@@ -3673,7 +3696,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
 }
 
 /* ---------------------------------------------------------------------- */
-/* Request space — guided wizard                                          */
+/* Request space - guided wizard                                          */
 /* ---------------------------------------------------------------------- */
 function WizardChoice({ icon: Icon, title, subtitle, onClick }) {
   return (
@@ -3734,13 +3757,41 @@ function SliderField({ label, value, onChange, min, max, unit, icon: Icon }) {
     </div>
   );
 }
-/* Single-value version of the species picker's "add custom" pattern — a
+/* SliderField for a value that may be left blank (reftech conditions).
+   A slider always has *some* value, so blank is its own state here: shows
+   "Not specified" plus an Add button, and a Clear link once it's set. */
+function OptionalSliderField({ label, value, onChange, onClear, defaultValue, min, max, unit, icon: Icon }) {
+  if (!isSet(value)) {
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--ink-soft)" }}>
+            {Icon && <Icon size={13} style={{ color: "var(--accent-dark)" }} />}
+            {label}
+          </span>
+          <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>Not specified</span>
+        </div>
+        <button type="button" onClick={() => onChange({ target: { value: defaultValue } })} className="w-full text-xs font-bold py-2 rounded-lg border" style={{ borderColor: "var(--border)", color: "var(--accent-ink)", background: "var(--surface)" }}>
+          + Add {label.replace(/ \(optional\)$/, "").toLowerCase()}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <SliderField label={label} value={value} onChange={onChange} min={min} max={max} unit={unit} icon={Icon} />
+      <button type="button" onClick={onClear} className="text-xs font-semibold underline mt-1" style={{ color: "var(--ink-faint)" }}>Clear</button>
+    </div>
+  );
+}
+
+/* Single-value version of the species picker's "add custom" pattern - a
    plain select plus a toggleable custom-entry input, for fields with a
    fixed option list that still occasionally needs a one-off value (e.g. a
    light cycle no preset covers). Always includes the current value as an
    option even if it's a previously-entered custom one, so the select
    never silently shows the wrong thing. */
-function SelectWithCustom({ value, onChange, options, label }) {
+function SelectWithCustom({ value, onChange, options, label, allowEmpty = false }) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
   const allOptions = value && !options.includes(value) ? [...options, value] : options;
@@ -3748,6 +3799,7 @@ function SelectWithCustom({ value, onChange, options, label }) {
     <div>
       <div className="flex gap-2">
         <select value={value} onChange={(e) => onChange(e.target.value)} className="gc-input flex-1">
+          {allowEmpty && <option value="">Not specified</option>}
           {allOptions.map((o) => <option key={o}>{o}</option>)}
         </select>
         <button type="button" onClick={() => setCustomOpen((v) => !v)} className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface)" }} title={`Add a custom ${label}`}>
@@ -3771,7 +3823,7 @@ function SelectWithCustom({ value, onChange, options, label }) {
   );
 }
 
-/* Room picker for the add/edit unit form — like SelectWithCustom, but a
+/* Room picker for the add/edit unit form - like SelectWithCustom, but a
    new room persists to the rooms table (so it stays offered next time,
    not just for this session) and an existing one can be deleted, behind a
    confirm dialog since it's a destructive, if reversible-by-re-adding,
@@ -3826,7 +3878,7 @@ function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
       {confirmingDelete && selected && (
         <ConfirmDialog
           title="Delete this room?"
-          message={`This removes "${selected.name}" from the room list. Units already using it keep their current room field — this only stops it being offered for new ones.`}
+          message={`This removes "${selected.name}" from the room list. Units already using it keep their current room field - this only stops it being offered for new ones.`}
           onCancel={() => setConfirmingDelete(false)}
           onConfirm={() => { setConfirmingDelete(false); onDelete(selected.id); }}
         />
@@ -3835,7 +3887,7 @@ function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
   );
 }
 
-/* Checkbox dropdown — open once, tick several species, close — instead of
+/* Checkbox dropdown - open once, tick several species, close - instead of
    the old "pick one from a select, it gets added and the select resets,
    repeat" flow, which only supported multiple species one re-open at a
    time. */
@@ -3853,12 +3905,12 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
   const addCustom = (val) => { if (!val || species.includes(val)) return; onChange([...species, val]); };
 
   // The popup is portalled straight to <body> (see below) rather than
-  // rendered in place — it used to sit inside Field's own <label>, and a
+  // rendered in place - it used to sit inside Field's own <label>, and a
   // plain click landing on anything in there that ISN'T itself a labelable
   // element (a checkbox row `<div>`, the manage-list toggle, the backdrop)
   // made the browser re-forward a synthetic click to the label's implicit
   // associated control (this picker's own toggle button), instantly
-  // flipping `open` back — closing the dropdown after every single
+  // flipping `open` back - closing the dropdown after every single
   // selection. Portalling it out from under the <label> removes that
   // relationship entirely instead of chasing it with stopPropagation.
   // Repositions on scroll/resize so it tracks the toggle button.
@@ -3985,7 +4037,7 @@ function FormSectionTitle({ children }) {
   );
 }
 
-// Sentinel value for the PI picker's "My PI isn't listed" option — never a
+// Sentinel value for the PI picker's "My PI isn't listed" option - never a
 // real lab_groups id, so it can't collide with one.
 const PI_NOT_LISTED = "__pi_not_listed__";
 
@@ -3998,7 +4050,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Verified PIs for the picker — fetched directly via the anon-safe
+  // Verified PIs for the picker - fetched directly via the anon-safe
   // list_lab_groups() RPC (this form works without a session, so it can't
   // rely on the admin-side LAB_GROUPS/PI_BY_LAB lookup, which is never
   // populated for an anonymous visitor).
@@ -4013,7 +4065,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
     return () => { cancelled = true; };
   }, []);
 
-  // Species options — DB-backed (species_options table, publicly readable)
+  // Species options - DB-backed (species_options table, publicly readable)
   // rather than the old hardcoded PLANT_SPECIES/INSECT_SPECIES consts, so
   // admins can manage the list from right inside this picker (see
   // SpeciesPicker's "Manage species list" panel, isAdmin-gated).
@@ -4036,7 +4088,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
     role: ROLES[0], emergencyNumber: "",
     species: [], containmentLevel: CONTAINMENT_LEVELS[0], spaceDescription: "",
     projectTitle: "", projectDesc: "",
-    setTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0], co2: "",
+    setTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0], dawnTime: "", duskTime: "", co2: "",
     pestConsent: false, dimmingRequired: false, safetyCompliance: false,
     preferredFloor: "any", startDate: "", endDate: "",
     hazardNotes: "", notes: "",
@@ -4045,6 +4097,13 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setNum = (k) => (e) => setForm((f) => ({ ...f, [k]: Number(e.target.value) }));
   const setBool = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
+
+  // Reftech rooms aren't individually climate-controlled, so their
+  // conditions start unset instead of pre-filled. Otherwise untouched
+  // defaults got submitted and showed up as if the researcher had asked for them.
+  const defaultConditions = (disc) => spaceType === "reftech"
+    ? { setTemp: null, setHumidity: null, lightCycle: "" }
+    : { setTemp: disc === "insect" ? 25 : 22, setHumidity: disc === "insect" ? 65 : 60, lightCycle: LIGHT_CYCLES[0] };
 
   const goBack = () => setStepIndex((i) => Math.max(0, i - 1));
   const goNext = () => setStepIndex((i) => Math.min(steps.length - 1, i + 1));
@@ -4098,11 +4157,11 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
       <WizardShell step={2} totalSteps={steps.length} onBack={goBack} title="Which research area is this for?" subtitle="This helps us route your request to the right reviewer, and shows you the right form.">
         <WizardChoice
           icon={Leaf} title="Plant Sciences"
-          onClick={() => { setDiscipline("plant"); setForm((f) => ({ ...f, setTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0] })); goNext(); }}
+          onClick={() => { setDiscipline("plant"); setForm((f) => ({ ...f, ...defaultConditions("plant") })); goNext(); }}
         />
         <WizardChoice
           icon={Bug} title="Insects"
-          onClick={() => { setDiscipline("insect"); setForm((f) => ({ ...f, setTemp: 25, setHumidity: 65, lightCycle: LIGHT_CYCLES[0] })); goNext(); }}
+          onClick={() => { setDiscipline("insect"); setForm((f) => ({ ...f, ...defaultConditions("insect") })); goNext(); }}
         />
       </WizardShell>
     );
@@ -4127,7 +4186,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
                 <option value="" disabled>Select a requisition…</option>
                 {amendCandidates.map(({ r, i }) => (
                   <option key={i} value={i}>
-                    {r.projectTitle} — {r.researcher} · {r.status === "approved" ? "Approved" : "Pending review"}
+                    {r.projectTitle} - {r.researcher} · {r.status === "approved" ? "Approved" : "Pending review"}
                   </option>
                 ))}
               </select>
@@ -4140,7 +4199,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
                 // strings) back into the picker's id-based shape. If the
                 // PI is still a verified option, pre-select it; otherwise
                 // (role was PI themselves, or the PI is still pending)
-                // fall back to "not listed" pre-filled with their name —
+                // fall back to "not listed" pre-filled with their name -
                 // harmless either way since a matching find_or_create_lab_group
                 // call on resubmit just resolves back to the same row.
                 const matchingGroup = piGroups.find((g) => g.piName === r.pi);
@@ -4153,8 +4212,11 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
                   species: r.species || [], containmentLevel: r.containmentLevel || CONTAINMENT_LEVELS[0],
                   spaceDescription: r.spaceDescription || "",
                   projectTitle: r.projectTitle, projectDesc: r.projectDesc || "",
-                  setTemp: r.setTemp || (discipline === "insect" ? 25 : 22), setHumidity: r.setHumidity || (discipline === "insect" ? 65 : 60),
-                  lightCycle: r.lightCycle || LIGHT_CYCLES[0], co2: r.co2 || "",
+                  ...defaultConditions(discipline),
+                  ...(isSet(r.setTemp) ? { setTemp: r.setTemp } : {}),
+                  ...(isSet(r.setHumidity) ? { setHumidity: r.setHumidity } : {}),
+                  ...(r.lightCycle ? { lightCycle: r.lightCycle } : {}),
+                  dawnTime: r.dawnTime || "", duskTime: r.duskTime || "", co2: r.co2 || "",
                   pestConsent: r.pestConsent || false, dimmingRequired: r.dimmingRequired || false,
                   safetyCompliance: r.safetyCompliance || false,
                   preferredFloor: r.preferredFloor || "any", startDate: r.startDate, endDate: r.endDate,
@@ -4203,7 +4265,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
           if (submitting) return;
           // DateField is a custom picker (not a real <input>), so a native
           // "required" attribute can't stop submission the way it does for
-          // the other fields above — check explicitly instead.
+          // the other fields above - check explicitly instead.
           if (!form.startDate || !form.endDate) {
             window.alert("Please select a start and end date.");
             return;
@@ -4228,7 +4290,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
             setSubmitted(true);
           } catch (err) {
             console.error(err);
-            window.alert(err.message || "Something went wrong submitting this — please try again.");
+            window.alert(err.message || "Something went wrong submitting this - please try again.");
           } finally {
             setSubmitting(false);
           }
@@ -4263,7 +4325,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
               {form.labGroupId === PI_NOT_LISTED && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label="PI's Full Name *"><input required value={form.notListedPiName} onChange={set("notListedPiName")} className="gc-input" placeholder="e.g. Jordan Ellis" /></Field>
-                  <Field label="PI's Email"><input type="email" value={form.notListedPiEmail} onChange={set("notListedPiEmail")} className="gc-input" placeholder="Optional — helps us match them later" /></Field>
+                  <Field label="PI's Email"><input type="email" value={form.notListedPiEmail} onChange={set("notListedPiEmail")} className="gc-input" placeholder="Optional - helps us match them later" /></Field>
                 </div>
               )}
             </>
@@ -4315,16 +4377,33 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
           <FormSectionTitle>{isPlant ? "Growth Conditions" : "Conditions"}</FormSectionTitle>
           {isReftech && (
             <p className="text-xs -mt-2" style={{ color: "var(--ink-faint)" }}>
-              Reftech rooms aren't individually climate-controlled — temperature, humidity, and light cycle below are optional.
+              Reftech rooms aren't individually climate-controlled, so all the conditions below are optional. Leave anything you don't need blank.
             </p>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <SliderField label={`Temperature${isReftech ? " (optional)" : ""}`} value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" icon={Thermometer} />
-            <SliderField label={`Humidity${isReftech ? " (optional)" : ""}`} value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" icon={Droplets} />
+            {isReftech ? (
+              <>
+                <OptionalSliderField label="Temperature (optional)" value={form.setTemp} onChange={setNum("setTemp")} onClear={() => setForm((f) => ({ ...f, setTemp: null }))} defaultValue={isPlant ? 22 : 25} min={0} max={60} unit="°C" icon={Thermometer} />
+                <OptionalSliderField label="Humidity (optional)" value={form.setHumidity} onChange={setNum("setHumidity")} onClear={() => setForm((f) => ({ ...f, setHumidity: null }))} defaultValue={isPlant ? 60 : 65} min={0} max={100} unit="%" icon={Droplets} />
+              </>
+            ) : (
+              <>
+                <SliderField label="Temperature" value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" icon={Thermometer} />
+                <SliderField label="Humidity" value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" icon={Droplets} />
+              </>
+            )}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label={`Dawn - lights on${isReftech ? " (optional)" : ""}`}>
+              <input type="time" value={form.dawnTime} onChange={set("dawnTime")} className="gc-input" />
+            </Field>
+            <Field label={`Dusk - lights off${isReftech ? " (optional)" : ""}`}>
+              <input type="time" value={form.duskTime} onChange={set("duskTime")} className="gc-input" />
+            </Field>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:items-end">
             <Field label={`Light Cycle${isReftech ? " (optional)" : ""}`}>
-              <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={LIGHT_CYCLES} label="light cycle" />
+              <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={LIGHT_CYCLES} label="light cycle" allowEmpty={isReftech} />
             </Field>
             {isPlant ? (
               <div className="rounded-xl p-3" style={{ background: "var(--surface-soft)" }}>
@@ -4391,7 +4470,7 @@ function LoadingScreen({ message = "Loading…", isError = false }) {
   );
 }
 
-/* Minimal email/password sign-in — the temporary stand-in for Entra ID SSO
+/* Minimal email/password sign-in - the temporary stand-in for Entra ID SSO
    until that's wired up for this org. Not styled beyond matching the
    existing gc-* utility classes. */
 function AdminLoginForm({ onDone }) {
@@ -4436,7 +4515,7 @@ export default function GrowthCabinetApp() {
   const reload = async () => {
     try {
       const data = await api.fetchAdminData();
-      applyLabGroups(data.labGroups); // must run before setAppData — see LAB_GROUPS/PI_BY_LAB comment
+      applyLabGroups(data.labGroups); // must run before setAppData - see LAB_GROUPS/PI_BY_LAB comment
       setAppData(data);
       setLoadError(null);
     } catch (err) {
@@ -4452,7 +4531,7 @@ export default function GrowthCabinetApp() {
   }, [isAdmin]);
 
   const [page, setPage] = useState("dashboard");
-  // Holds only the id, not a snapshot of the unit object — so the drawer
+  // Holds only the id, not a snapshot of the unit object - so the drawer
   // always reflects the freshly-reloaded unit after any mutation (add/
   // remove a document, update service log, etc.) instead of showing stale
   // data until it's closed and reopened.
@@ -4468,7 +4547,7 @@ export default function GrowthCabinetApp() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false); // below `lg`, the sidebar is an off-canvas drawer toggled from the mobile top bar
 
   // Lock background scroll while the mobile drawer is open, same as any
-  // modal — otherwise the page behind it scrolls along with touch drags.
+  // modal - otherwise the page behind it scrolls along with touch drags.
   useEffect(() => {
     if (!mobileNavOpen) return;
     const prev = document.body.style.overflow;
@@ -4490,13 +4569,13 @@ export default function GrowthCabinetApp() {
 
   // Wraps a mutation so a failed Supabase call (RLS denial, constraint
   // violation, network error) surfaces to the admin instead of failing
-  // silently — the old mock handlers never had a failure path to handle.
+  // silently - the old mock handlers never had a failure path to handle.
   const withErrorAlert = (fn) => async (...args) => {
     try {
       await fn(...args);
     } catch (err) {
       console.error(err);
-      window.alert(err.message || "Something went wrong saving that — see the console for details.");
+      window.alert(err.message || "Something went wrong saving that - see the console for details.");
     }
   };
 
@@ -4594,7 +4673,7 @@ export default function GrowthCabinetApp() {
   });
 
   /* Admin manually confirms an ongoing (approved) requisition has finished. This closes the
-     requisition out to "completed" — the booking row is kept as history, not deleted, and simply
+     requisition out to "completed" - the booking row is kept as history, not deleted, and simply
      stops counting as active occupancy because fetchAdminData only pulls bookings whose requisition
      is still 'approved'. */
   const handleCompleteRequisition = withErrorAlert(async (index) => {
@@ -4661,7 +4740,7 @@ export default function GrowthCabinetApp() {
 
   if (authLoading) return <LoadingScreen />;
 
-  // Non-admin — including signed out — only ever sees the request form.
+  // Non-admin - including signed out - only ever sees the request form.
   // This matches the real end-state design for researchers once Entra ID
   // SSO is live (see supabase/schema.sql's design notes and CLAUDE.md): the
   // request-submission INSERT works anonymously today via a temporary RLS
@@ -4743,7 +4822,7 @@ export default function GrowthCabinetApp() {
             />
           )}
           {page === "inventory" && (
-            <InventoryPage key={inventoryKey} units={units} onSelect={setSelected} onAddNew={() => setEditingUnit(null)} initialFilter={inventoryFilter} />
+            <InventoryPage key={inventoryKey} units={units} onSelect={setSelected} onAddNew={() => setEditingUnit(null)} initialFilter={inventoryFilter} onFilterChange={setInventoryFilter} />
           )}
           {page === "requisitions" && (
             <RequisitionsPage

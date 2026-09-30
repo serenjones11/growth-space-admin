@@ -3,10 +3,10 @@ import { supabase } from "./supabaseClient";
 /* Live lab-group lookup, replacing the old hardcoded LAB_GROUP_ID_BY_NAME/
    LAB_GROUP_NAME_BY_ID maps now that admins can read lab_groups directly
    and self-registered (pending) PIs need to show up correctly too.
-   Populated by fetchLabGroups() (called at the top of fetchAdminData()) —
+   Populated by fetchLabGroups() (called at the top of fetchAdminData()) -
    every admin-side read/write of a lab group name<->id goes through this
    cache rather than a hardcoded snapshot of the seed data. The anonymous
-   Request Space form never touches this cache — it always resolves a real
+   Request Space form never touches this cache - it always resolves a real
    id itself (via listLabGroups()/findOrCreateLabGroup()) before calling
    into anything here, since RLS wouldn't let it populate this cache. */
 let labGroupCache = { idByName: {}, nameById: {}, piById: {} };
@@ -21,7 +21,7 @@ function setLabGroupCache(rows) {
   labGroupCache = { idByName, nameById, piById };
 }
 
-/* Admin-side: ALL lab groups, verified and pending — this is what the
+/* Admin-side: ALL lab groups, verified and pending - this is what the
    Dashboard/Inventory/Requisitions displays and the pending-PIs review
    panel need. Admins already have direct RLS read access to lab_groups,
    no RPC needed. */
@@ -37,7 +37,7 @@ export async function fetchLabGroups() {
 
 /* Public/anonymous-safe: verified lab groups only, via the SECURITY DEFINER
    list_lab_groups() RPC (anon can't read lab_groups directly under RLS).
-   Used exclusively by the Request Space form's PI picker — never by the
+   Used exclusively by the Request Space form's PI picker - never by the
    admin side, which must see pending entries too. */
 export async function listLabGroups() {
   const { data, error } = await supabase.rpc("list_lab_groups");
@@ -59,7 +59,7 @@ export async function findOrCreateLabGroup(piName, piEmail) {
 }
 
 /* Admin review actions for pending (is_verified = false) lab groups. Both
-   are plain authenticated writes — admins already have full RLS access to
+   are plain authenticated writes - admins already have full RLS access to
    lab_groups/requisitions/bookings, no dedicated RPC needed. */
 export async function approveLabGroup(id) {
   const { error } = await supabase.from("lab_groups").update({ is_verified: true }).eq("id", id);
@@ -69,7 +69,7 @@ export async function approveLabGroup(id) {
 /* Re-points every requisition/booking referencing the pending lab group to
    the chosen existing one, then deletes the now-unreferenced pending row.
    (lab_group_id is ON DELETE SET NULL on both tables, so a plain delete
-   wouldn't actually fail — this is still the right call for a duplicate
+   wouldn't actually fail - this is still the right call for a duplicate
    pending PI specifically, since merging keeps their history correctly
    attributed to the real, existing lab group instead of just orphaning it.) */
 export async function mergeLabGroup(fromId, intoId) {
@@ -81,7 +81,7 @@ export async function mergeLabGroup(fromId, intoId) {
   if (res.error) throw res.error;
 }
 
-/* Direct PI management (Dashboard's "Edit PIs" panel) — distinct from the
+/* Direct PI management (Dashboard's "Edit PIs" panel) - distinct from the
    self-registration flow (find_or_create_lab_group): these are trusted
    admin actions, so new entries are verified immediately, no pending
    review needed. */
@@ -96,7 +96,7 @@ export async function updateLabGroup(id, { name, piName, piEmail }) {
 }
 
 /* lab_group_id is ON DELETE SET NULL on requisitions/bookings/profiles, so
-   this doesn't need a merge target — a departed PI can just be removed
+   this doesn't need a merge target - a departed PI can just be removed
    directly, and their historical requisitions/bookings keep existing with
    the reference cleared (see the ON DELETE SET NULL comments in
    schema.sql). */
@@ -107,7 +107,7 @@ export async function deleteLabGroup(id) {
 
 const UNIT_FILES_BUCKET = "unit-files";
 
-/* Signed URLs (not public ones — the bucket is private, admin-only). Swallows
+/* Signed URLs (not public ones - the bucket is private, admin-only). Swallows
    errors so one stale/missing storage object can't break the whole fetch. */
 async function trySignedUrl(path, expiresIn = 3600) {
   if (!path) return null;
@@ -126,13 +126,17 @@ function nullIfEmpty(v) {
 function numOrNull(v) {
   return v === "" || v === undefined || v === null ? null : Number(v);
 }
+// Postgres `time` comes back as "06:30:00"; <input type="time"> wants "06:30".
+function hhmm(v) {
+  return v ? String(v).slice(0, 5) : "";
+}
 
 /* ---------------------------------------------------------------------- */
 /* Historical lab usage (dashboard trend chart)                           */
 /* ---------------------------------------------------------------------- */
 
 const LAB_USAGE_WINDOW_START = new Date(2022, 8, 1); // Sep 2022
-const LAB_USAGE_WINDOW_END = new Date(2100, 11, 1); // Dec 2100 — matches the date pickers' range elsewhere in the app
+const LAB_USAGE_WINDOW_END = new Date(2100, 11, 1); // Dec 2100 - matches the date pickers' range elsewhere in the app
 const LAB_USAGE_WINDOW_MONTHS =
   (LAB_USAGE_WINDOW_END.getFullYear() - LAB_USAGE_WINDOW_START.getFullYear()) * 12
   + (LAB_USAGE_WINDOW_END.getMonth() - LAB_USAGE_WINDOW_START.getMonth()) + 1;
@@ -149,10 +153,10 @@ function labUsageWindow() {
 }
 
 /* Real per-lab-group, per-month occupied-unit counts, computed from actual
-   booking history — replaces the old mock generator's random series. A lab
+   booking history - replaces the old mock generator's random series. A lab
    group's count for a month is the number of distinct units it had a
    booking in that overlaps any day of that month (regardless of the
-   linked requisition's status — history stays history even once a
+   linked requisition's status - history stays history even once a
    requisition is completed). On a freshly-live database most months will
    legitimately show near-zero until real usage accumulates; that's
    correct, not a bug. */
@@ -161,7 +165,7 @@ export async function fetchLabUsageHistory() {
   const { data, error } = await supabase.from("bookings").select("unit_id, lab_group_id, start_date, end_date");
   if (error) throw error;
 
-  // Relies on labGroupCache already being populated — fetchAdminData() calls
+  // Relies on labGroupCache already being populated - fetchAdminData() calls
   // fetchLabGroups() before this, which is the only caller of this function.
   const series = {};
   Object.values(labGroupCache.nameById).forEach((lab) => { series[lab] = new Array(keys.length).fill(0); });
@@ -239,16 +243,18 @@ function mapBookingRow(b) {
     setTemp: b.set_temp,
     setHumidity: b.set_humidity,
     lightCycle: b.light_cycle,
+    dawnTime: hhmm(b.dawn_time),
+    duskTime: hhmm(b.dusk_time),
     // Denormalized read-only from the linked requisition (b.requisitions is
-    // the join added purely to scope the fetch to status='approved' rows —
+    // the join added purely to scope the fetch to status='approved' rows -
     // see the query above), so the occupant bar can show it without a
-    // separate lookup. Never written back from here — admin_notes is only
+    // separate lookup. Never written back from here - admin_notes is only
     // ever set via updateAdminNotes() directly on requisitions.
     adminNotes: b.requisitions?.admin_notes || "",
     startDate: b.start_date,
     endDate: b.end_date,
     // When this booking row was actually created (i.e. when the
-    // requisition was approved) — used for "recent activity" sorting
+    // requisition was approved) - used for "recent activity" sorting
     // instead of startDate, which can be scheduled far in the future or
     // past and would otherwise sort as more/less "recent" than a real
     // action that just happened.
@@ -305,6 +311,8 @@ function mapRequisitionRow(r) {
     setTemp: r.set_temp,
     setHumidity: r.set_humidity,
     lightCycle: r.light_cycle || "",
+    dawnTime: hhmm(r.dawn_time),
+    duskTime: hhmm(r.dusk_time),
     pestConsent: r.pest_consent,
     dimmingRequired: r.dimming_required,
     safetyCompliance: r.safety_compliance,
@@ -330,11 +338,11 @@ function mapRequisitionRow(r) {
 }
 
 /* Fetches everything an admin session needs in one go. Bookings are scoped
-   to requisitions.status = 'approved' — a booking stops counting as active
+   to requisitions.status = 'approved' - a booking stops counting as active
    occupancy the moment its requisition is completed (or if it was never
    approved), matching the unit_current_bookings view's semantics. */
 export async function fetchAdminData() {
-  // Must resolve before the Promise.all below — fetchLabUsageHistory() and
+  // Must resolve before the Promise.all below - fetchLabUsageHistory() and
   // the row mappers used inside it all read the module-level
   // labGroupCache that this call populates.
   const labGroups = await fetchLabGroups();
@@ -370,7 +378,7 @@ export async function fetchAdminData() {
     (documentsByUnit[d.unitId] ||= []).push(d);
   });
 
-  // Truncated to midnight, matching App.jsx's TODAY constant — kept as a
+  // Truncated to midnight, matching App.jsx's TODAY constant - kept as a
   // local calculation (rather than importing TODAY from App.jsx) to avoid
   // a circular import between the two modules.
   const today = new Date(new Date().toISOString().slice(0, 10));
@@ -387,7 +395,7 @@ export async function fetchAdminData() {
     }
 
     // Cabinet: at most one active (approved, started) booking is the
-    // occupant — mirrors currentBooking()'s fixed predicate in App.jsx
+    // occupant - mirrors currentBooking()'s fixed predicate in App.jsx
     // (started, regardless of whether the end date has passed).
     const current = bookings.find((b) => new Date(b.startDate) <= today) || null;
     let status, urgency = null;
@@ -407,7 +415,7 @@ export async function fetchAdminData() {
   });
 
   // photoDataUrl holds a raw storage path from mapUnitRow (units.photo_url)
-  // until here — the bucket is private, so what the UI actually needs is a
+  // until here - the bucket is private, so what the UI actually needs is a
   // signed URL. Same for each document's storage_path. Resolved in one
   // batch after the main fetch rather than during it, so a slow/failing
   // signed-url call can't hold up everything else.
@@ -449,7 +457,7 @@ export async function fetchAdminData() {
 
 /* Replacing a photo uploads a new object under a fresh timestamped path
    (rather than overwriting the old one in place) then deletes the old
-   object — this way a failed upload never leaves the unit's existing
+   object - this way a failed upload never leaves the unit's existing
    photo half-overwritten. */
 export async function uploadUnitPhoto(unitId, file) {
   const { data: existing } = await supabase.from("units").select("photo_url").eq("id", unitId).single();
@@ -478,7 +486,7 @@ export async function addUnitDocument(unitId, file, name, type, addedByUserId) {
   if (error) throw error;
 }
 
-/* Removes both the DB row and the underlying storage object — leaving an
+/* Removes both the DB row and the underlying storage object - leaving an
    orphaned file in the bucket would be silently wasted storage with no way
    to find it again once its only reference (the row) is gone. */
 export async function removeUnitDocument(docId) {
@@ -529,7 +537,7 @@ export async function updateUnitNotes(unitId, notes) {
 }
 
 /* bookingIds: the exact set of currently-overlapping booking ids being
-   dismissed — see the acknowledged_clash_booking_ids column comment for
+   dismissed - see the acknowledged_clash_booking_ids column comment for
    why it's a specific set rather than a bare boolean. */
 export async function acknowledgeClash(unitId, bookingIds) {
   const { error } = await supabase.from("units").update({ acknowledged_clash_booking_ids: bookingIds }).eq("id", unitId);
@@ -537,7 +545,7 @@ export async function acknowledgeClash(unitId, bookingIds) {
 }
 
 /* bookings/service_log/documents cascade-delete with the unit. requisitions
-   referencing it via assigned_unit_id keep existing (ON DELETE SET NULL) —
+   referencing it via assigned_unit_id keep existing (ON DELETE SET NULL) -
    see supabase/schema.sql's requisitions table comment. The caller is
    responsible for checking the unit has no active booking first (the app
    blocks the delete with a message in that case rather than relying on a
@@ -647,7 +655,7 @@ function requisitionFieldsToRow(payload) {
     role: nullIfEmpty(payload.role),
     emergency_number: nullIfEmpty(payload.emergencyNumber),
     // RequestSpacePage always resolves and supplies labGroupId directly
-    // (it can't rely on the admin-only labGroupCache — an anonymous
+    // (it can't rely on the admin-only labGroupCache - an anonymous
     // submitter never populates it). RequisitionEditForm's admin edit path
     // still only knows the lab group's name, so falls back to the cache,
     // which IS populated for any session that can reach that form.
@@ -663,6 +671,8 @@ function requisitionFieldsToRow(payload) {
     set_temp: numOrNull(payload.setTemp),
     set_humidity: numOrNull(payload.setHumidity),
     light_cycle: nullIfEmpty(payload.lightCycle),
+    dawn_time: nullIfEmpty(payload.dawnTime),
+    dusk_time: nullIfEmpty(payload.duskTime),
     pest_consent: !!payload.pestConsent,
     dimming_required: !!payload.dimmingRequired,
     safety_compliance: !!payload.safetyCompliance,
@@ -681,7 +691,7 @@ export async function submitRequisition(payload, researcherId) {
 }
 
 /* Bookings denormalize a snapshot of these fields off their requisition at
-   approval time (see decideRequisition below) — occupancy, the dashboard
+   approval time (see decideRequisition below) - occupancy, the dashboard
    timeline, and everything else that reads unit.occupant/unit.bookings
    reads that snapshot, not the requisition directly. Shared here so
    editing a requisition's dates (or researcher/temp/etc.) after approval
@@ -690,7 +700,7 @@ function bookingFieldsFromRequisition(req) {
   return {
     researcher_name: req.researcher,
     role: nullIfEmpty(req.role),
-    // Same fallback as requisitionFieldsToRow — an admin edit only carries the
+    // Same fallback as requisitionFieldsToRow - an admin edit only carries the
     // lab group's name, not a resolved id, so this must also check the cache.
     lab_group_id: req.labGroupId ?? labGroupCache.idByName[req.labGroup] ?? null,
     project_title: req.projectTitle,
@@ -699,6 +709,8 @@ function bookingFieldsFromRequisition(req) {
     set_temp: numOrNull(req.setTemp),
     set_humidity: numOrNull(req.setHumidity),
     light_cycle: nullIfEmpty(req.lightCycle),
+    dawn_time: nullIfEmpty(req.dawnTime),
+    dusk_time: nullIfEmpty(req.duskTime),
     start_date: req.startDate,
     end_date: req.endDate,
   };
@@ -715,7 +727,7 @@ export async function editRequisition(reqId, updates) {
   if (bookingError) throw bookingError;
 }
 
-/* Deliberately separate from requisitionFieldsToRow/editRequisition — this
+/* Deliberately separate from requisitionFieldsToRow/editRequisition - this
    is the only code path that ever writes admin_notes, so the anonymous
    Request Space submission path can never include it (there's no shared
    column list for a crafted request to piggyback on). */
@@ -761,7 +773,7 @@ export async function decideRequisition(req, decision, unitId, decidedByUserId) 
   }
 }
 
-/* Moves an already-approved requisition's booking to a different unit —
+/* Moves an already-approved requisition's booking to a different unit -
    e.g. the originally assigned cabinet needs to go out of service, or was
    simply the wrong pick. Updates both the requisition's assigned_unit_id
    and its booking's unit_id together so occupancy correctly moves off the
@@ -773,7 +785,7 @@ export async function reassignRequisitionUnit(reqId, newUnitId) {
   if (bookingError) throw bookingError;
 }
 
-/* Does NOT delete the booking row — completing a requisition is what makes
+/* Does NOT delete the booking row - completing a requisition is what makes
    its booking stop counting as active occupancy (fetchAdminData only pulls
    bookings from status='approved' requisitions). The row stays as history. */
 export async function completeRequisition(reqId, completedByUserId) {
@@ -784,7 +796,7 @@ export async function completeRequisition(reqId, completedByUserId) {
   if (error) throw error;
 }
 
-/* Undoes completeRequisition — for an accidental "Complete" click. No
+/* Undoes completeRequisition - for an accidental "Complete" click. No
    booking needs recreating: completing never deleted it, only the
    requisition's status controlled whether it counted as active (see the
    bookings fetch above), so flipping status back is sufficient. */
@@ -797,7 +809,7 @@ export async function revertRequisitionToActive(reqId) {
 }
 
 /* bookings.requisition_id is ON DELETE CASCADE, so this also removes the
-   requisition's booking (if any) — unlike deleting a unit or PI, there's
+   requisition's booking (if any) - unlike deleting a unit or PI, there's
    nothing left for that booking to be a record of once its requisition is
    gone. */
 export async function deleteRequisition(reqId) {

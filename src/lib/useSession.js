@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 
-/* Minimal auth hook — the temporary stand-in for Entra ID SSO. Tracks the
+/* Minimal auth hook - the temporary stand-in for Entra ID SSO. Tracks the
    Supabase auth session and the matching `profiles` row (role/lab group).
    session === undefined means "still checking"; null means "signed out". */
 export function useSession() {

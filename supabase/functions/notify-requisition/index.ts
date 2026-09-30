@@ -1,6 +1,6 @@
 // Sends requisition notification emails via Resend.
 // Called by Postgres triggers (see supabase/migrations/*_requisition_email_notifications.sql)
-// through pg_net, not by the frontend — authenticated by a shared secret
+// through pg_net, not by the frontend - authenticated by a shared secret
 // (x-webhook-secret header) rather than a Supabase JWT, since Postgres has
 // no user session to attach one from. That's also why verify_jwt is off
 // for this function.
@@ -8,7 +8,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET");
-// Resend's shared test sender — works with no domain setup, but real
+// Resend's shared test sender - works with no domain setup, but real
 // deliverability (and sending to arbitrary recipients without it landing in
 // spam) needs a verified sending domain. Set NOTIFY_FROM_EMAIL once one's
 // ready (e.g. "Growth Space Admin <notifications@yourdomain.ac.uk>").
@@ -25,7 +25,7 @@ const UNIT_TYPE_LABEL: Record<string, string> = { cabinet: "Growth Cabinet", ref
 const DISCIPLINE_LABEL: Record<string, string> = { plant: "Plant Sciences", insect: "Insect Sciences" };
 const FLOOR_LABEL: Record<string, string> = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
 
-// Same palette as the app's TOKENS (src/App.jsx) — kept as plain hex here
+// Same palette as the app's TOKENS (src/App.jsx) - kept as plain hex here
 // since CSS custom properties aren't reliable in email clients. `occupied`
 // is the same blue the app uses for an "Ongoing/Approved" status pill.
 const COLOR = {
@@ -56,7 +56,7 @@ function detailRow(label: string, value: string): string {
     </tr>`;
 }
 
-// Shared card shell for both notification emails — mirrors the app's own
+// Shared card shell for both notification emails - mirrors the app's own
 // visual language (Plus Jakarta Sans display type, soft pill badges/status
 // colors, muted uppercase field labels). Built with inline styles and a
 // table layout throughout for compatibility with Outlook/older email
@@ -100,7 +100,7 @@ function ctaButton(): string {
   return `<div style="margin-top:22px;"><a href="${APP_URL}" style="display:inline-block;padding:11px 20px;border-radius:10px;background:${COLOR.accentDark};color:#FFFFFF;font-family:${FONT_STACK};font-size:14px;font-weight:700;text-decoration:none;">Open in Growth Space Admin →</a></div>`;
 }
 
-// Admin-facing "a new requisition came in" preview — the full picture, so
+// Admin-facing "a new requisition came in" preview - the full picture, so
 // an admin can review and decide without switching to the app first.
 function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string, dateRange: string): string {
   const disciplineLabel = DISCIPLINE_LABEL[r.discipline] || r.discipline;
@@ -125,6 +125,7 @@ function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string,
     detailRow("Containment level", esc(r.containment_level)),
     detailRow("Set temp / humidity", esc(envParts)),
     detailRow("Light cycle", esc(r.light_cycle)),
+    detailRow("Dawn / dusk", esc([r.dawn_time ? `Dawn ${String(r.dawn_time).slice(0, 5)}` : null, r.dusk_time ? `Dusk ${String(r.dusk_time).slice(0, 5)}` : null].filter(Boolean).join(" / "))),
   ].join("");
 
   const bodyHtml = `
@@ -171,10 +172,10 @@ function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string,
 }
 
 // Requester-facing "you've been assigned a space" preview. Deliberately
-// slim — just what changes for the requester (dates, code, the assigned
+// slim - just what changes for the requester (dates, code, the assigned
 // unit and its location) rather than the full admin picture above. Reads
 // straight from the live requisitions row, so it always reflects the
-// requisition's current, possibly admin-edited values — never a stale
+// requisition's current, possibly admin-edited values - never a stale
 // snapshot of what the requester originally submitted (see the trigger in
 // 20260908120000_requisition_assigned_email_on_edit.sql, which re-fires
 // this email if an admin edits the dates or unit after the fact too).
@@ -184,7 +185,7 @@ function renderAssignedPreview(r: Record<string, any>, unit: { id: string; floor
   const bodyHtml = `
     <div style="padding:16px 18px;border-radius:12px;background:${COLOR.occupiedSoft};margin-bottom:18px;">
       <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR.occupiedInk};margin-bottom:4px;">Assigned to</div>
-      <div style="font-family:${FONT_STACK};font-size:22px;font-weight:800;color:${COLOR.ink};">${esc(unit?.id ?? "—")}</div>
+      <div style="font-family:${FONT_STACK};font-size:22px;font-weight:800;color:${COLOR.ink};">${esc(unit?.id ?? "-")}</div>
       <div style="font-size:13px;color:${COLOR.inkSoft};margin-top:2px;">${esc(unitTypeLabel)}${unit ? ` &middot; ${esc(floorLabel)}, ${esc(unit.room)}` : ""}</div>
     </div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -203,11 +204,11 @@ function renderAssignedPreview(r: Record<string, any>, unit: { id: string; floor
 
 async function sendEmail(to: string[], subject: string, html: string) {
   if (!RESEND_API_KEY) {
-    console.error("RESEND_API_KEY is not set — email not sent. Subject:", subject);
+    console.error("RESEND_API_KEY is not set - email not sent. Subject:", subject);
     return;
   }
   if (to.length === 0) {
-    console.error("No recipients — email not sent. Subject:", subject);
+    console.error("No recipients - email not sent. Subject:", subject);
     return;
   }
   const res = await fetch("https://api.resend.com/emails", {
@@ -277,7 +278,7 @@ Deno.serve(async (req) => {
     const assignedUnitTypeLabel = unit ? (UNIT_TYPE_LABEL[unit.type] || unit.type) : unitTypeLabel;
     await sendEmail(
       [req_.email],
-      `Your space request has been approved — ${req_.project_title}`,
+      `Your space request has been approved - ${req_.project_title}`,
       renderAssignedPreview(req_, unit, assignedUnitTypeLabel, dateRange),
     );
   } else {

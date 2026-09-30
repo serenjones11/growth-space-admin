@@ -239,6 +239,8 @@ create table requisitions (
   set_temp          numeric,
   set_humidity      numeric,
   light_cycle       text,
+  dawn_time         time,                                -- photoperiod lights on
+  dusk_time         time,                                -- photoperiod lights off
   pest_consent      boolean not null default false,
   dimming_required  boolean not null default false,
   safety_compliance boolean not null default false,
@@ -308,6 +310,8 @@ create table bookings (
   set_temp        numeric,
   set_humidity    numeric,
   light_cycle     text,
+  dawn_time       time,
+  dusk_time       time,
 
   start_date      date not null,
   end_date        date not null,
