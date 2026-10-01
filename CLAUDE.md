@@ -113,7 +113,8 @@ the repo doesn't have to reconstruct current-state by replaying 30+ migration fi
 
 **Tables**: `lab_groups`, `profiles` (extends `auth.users`, `role` = `admin`/researcher),
 `maintenance_categories`, `units`, `rooms`, `requisitions`, `bookings`, `service_log`,
-`documents`, `activity_log`, `species_options`, `requisition_code_counters`.
+`documents`, `activity_log`, `species_options`, `requisition_code_counters`,
+`notification_preferences`.
 
 **RLS shape**: admins (`profiles.role = 'admin'`, checked via `is_admin()`) can read/write
 everything. Everyone else — including anonymous visitors, since there's no researcher SSO yet —

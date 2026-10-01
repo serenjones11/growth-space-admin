@@ -269,6 +269,8 @@ create table requisitions (
   decided_by        uuid references profiles(id),
   completed_date    timestamptz,
   completed_by      uuid references profiles(id),
+  -- Set once the "ending soon" email has been queued - see section 21.
+  end_date_reminder_sent_at timestamptz,
 
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
@@ -984,6 +986,68 @@ insert into species_options (discipline, name) values
   ('insect', 'Apis mellifera'),
   ('insect', 'Tenebrio molitor')
 on conflict (discipline, name) do nothing;
+
+
+-- ----------------------------------------------------------------------------
+-- 21. END-DATE REMINDER EMAILS  ("requisition ending soon", ~2 weeks out)
+-- ----------------------------------------------------------------------------
+-- Time-based rather than row-trigger-based like the section 18 emails, so it
+-- runs daily via pg_cron. The UPDATE...RETURNING claims and marks-sent in one
+-- statement inside one transaction, so "sent" can't be set without the
+-- webhook having been enqueued, or vice versa. The 2-day window means a
+-- missed daily run still catches it the next day; end_date_reminder_sent_at
+-- IS NULL guarantees it only ever fires once per requisition.
+create extension if not exists pg_cron;
+
+create or replace function send_end_date_reminders()
+returns void as $$
+declare
+  r record;
+begin
+  for r in
+    update requisitions
+    set end_date_reminder_sent_at = now()
+    where status = 'approved'
+      and end_date_reminder_sent_at is null
+      and end_date between current_date + 13 and current_date + 14
+    returning id
+  loop
+    perform notify_requisition_webhook(
+      jsonb_build_object('type', 'end_date_reminder', 'requisitionId', r.id)
+    );
+  end loop;
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function send_end_date_reminders() from public, anon, authenticated;
+
+select cron.schedule('send-end-date-reminders', '0 7 * * *', $$select send_end_date_reminders();$$);
+
+
+-- ----------------------------------------------------------------------------
+-- 22. NOTIFICATION PREFERENCES  (per-admin: which automated emails, and
+--     which discipline to scope them to)
+-- ----------------------------------------------------------------------------
+-- A missing row means defaults (notify=true, scope='all') - enforced in
+-- application code, not via a proactive insert trigger. Self-service only:
+-- an admin manages their own settings, not anyone else's.
+create table notification_preferences (
+  admin_id                 uuid primary key references profiles(id) on delete cascade,
+  notify_new_requisition   boolean not null default true,
+  notify_end_date_reminder boolean not null default true,
+  discipline_scope         text not null default 'all' check (discipline_scope in ('all','plant','insect')),
+  updated_at               timestamptz not null default now()
+);
+
+create trigger trg_notification_preferences_updated_at
+  before update on notification_preferences for each row execute procedure set_updated_at();
+
+alter table notification_preferences enable row level security;
+create policy "read own notification_preferences" on notification_preferences
+  for select using (admin_id = auth.uid());
+create policy "insert own notification_preferences" on notification_preferences
+  for insert with check (is_admin() and admin_id = auth.uid());
+create policy "update own notification_preferences" on notification_preferences
+  for update using (admin_id = auth.uid()) with check (admin_id = auth.uid());
 
 -- ============================================================================
 -- End of schema. Next steps once this has run cleanly:
