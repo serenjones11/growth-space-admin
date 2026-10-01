@@ -125,7 +125,11 @@ public request form needs them without a session.
 **Email notifications**: `supabase/functions/notify-requisition` (Deno Edge Function, called via
 `pg_net` from triggers on `requisitions`, not from the frontend) sends Resend emails — admins get
 a full requisition preview when one comes in; the requester gets a slimmer "approved and
-assigned" email once a unit is assigned, re-sent if an admin later edits the dates or unit. Auth
+assigned" email once a unit is assigned, re-sent if an admin later edits the dates or unit; and
+admins get an "ending soon" email ~2 weeks before an approved requisition's end date (daily
+`pg_cron` job `send-end-date-reminders`, re-armed if the end date moves). Admin emails respect
+each admin's `notification_preferences` row (no row = everything); there's no UI for that table
+yet, so for now it's set directly in the database. Auth
 is a shared secret (`x-webhook-secret`, stored in `supabase_vault`), since Postgres triggers have
 no user session to attach a JWT to — that's also why the function has `verify_jwt: false`.
 Secrets (`RESEND_API_KEY`, `WEBHOOK_SECRET`, optionally `NOTIFY_FROM_EMAIL`/`APP_URL`) are set as

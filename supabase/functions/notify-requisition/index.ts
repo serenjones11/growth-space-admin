@@ -56,7 +56,7 @@ function detailRow(label: string, value: string): string {
     </tr>`;
 }
 
-// Shared card shell for both notification emails - mirrors the app's own
+// Shared card shell for all the notification emails - mirrors the app's own
 // visual language (Plus Jakarta Sans display type, soft pill badges/status
 // colors, muted uppercase field labels). Built with inline styles and a
 // table layout throughout for compatibility with Outlook/older email
@@ -202,6 +202,66 @@ function renderAssignedPreview(r: Record<string, any>, unit: { id: string; floor
   });
 }
 
+// Admin-facing "this requisition ends in ~2 weeks" heads-up, queued daily by
+// send_end_date_reminders() (pg_cron, see
+// 20260922145308_end_date_reminder_emails.sql). Gives an admin what they
+// need to chase it up: which unit frees up, when, and who to contact.
+function renderEndDateReminder(r: Record<string, any>, unit: { id: string; floor: string; room: string; type: string } | null, unitTypeLabel: string, dateRange: string): string {
+  const floorLabel = unit ? (FLOOR_LABEL[unit.floor] || unit.floor) : "";
+  const daysLeft = daysUntil(r.end_date);
+  const endsIn = daysLeft === 0 ? "today" : daysLeft === 1 ? "tomorrow" : `in ${daysLeft} days`;
+
+  const bodyHtml = `
+    <div style="padding:16px 18px;border-radius:12px;background:${COLOR.warningSoft};margin-bottom:18px;">
+      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR.warning};margin-bottom:4px;">Ends ${esc(endsIn)}</div>
+      <div style="font-family:${FONT_STACK};font-size:22px;font-weight:800;color:${COLOR.ink};">${esc(r.end_date)}</div>
+      <div style="font-size:13px;color:${COLOR.inkSoft};margin-top:2px;">${esc(unit?.id ?? "No unit assigned")}${unit ? ` &middot; ${esc(unitTypeLabel)} &middot; ${esc(floorLabel)}, ${esc(unit.room)}` : ""}</div>
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+      ${detailRow("Booked dates", esc(dateRange))}
+      ${detailRow("Researcher", esc(r.researcher_name))}
+      ${detailRow("Contact", r.email ? `<a href="mailto:${esc(r.email)}" style="color:${COLOR.accentDark};">${esc(r.email)}</a>` : "")}
+      ${detailRow("PI", esc(r.pi_name))}
+    </table>
+    ${ctaButton()}`;
+
+  return emailCard({
+    topBarColor: COLOR.warning,
+    eyebrowText: "Ending soon", eyebrowBg: COLOR.warningSoft, eyebrowColor: COLOR.warning,
+    title: r.project_title, code: r.code,
+    metaHtml: `${esc(r.researcher_name)}${r.pi_name ? ` &middot; PI: ${esc(r.pi_name)}` : ""}`,
+    bodyHtml,
+  });
+}
+
+// Whole days from today (UTC, matching the cron job's current_date) to a
+// yyyy-mm-dd date.
+function daysUntil(isoDate: string): number {
+  const today = new Date(new Date().toISOString().slice(0, 10));
+  return Math.round((new Date(isoDate).getTime() - today.getTime()) / 86_400_000);
+}
+
+// Admin recipients for an admin-facing email, honouring each admin's
+// notification_preferences row. A missing row means the defaults (every
+// email, every discipline) - see 20260922145959_notification_preferences.sql.
+async function adminRecipients(pref: "notify_new_requisition" | "notify_end_date_reminder", discipline: string): Promise<string[]> {
+  const { data: admins, error } = await supabase
+    .from("profiles")
+    .select("id, prefs:notification_preferences(notify_new_requisition, notify_end_date_reminder, discipline_scope)")
+    .eq("role", "admin");
+  if (error) throw error;
+
+  const emails: string[] = [];
+  for (const admin of admins ?? []) {
+    const prefs = Array.isArray(admin.prefs) ? admin.prefs[0] : admin.prefs;
+    if (prefs && prefs[pref] === false) continue;
+    if (prefs && prefs.discipline_scope !== "all" && prefs.discipline_scope !== discipline) continue;
+    const { data } = await supabase.auth.admin.getUserById(admin.id);
+    if (data?.user?.email) emails.push(data.user.email);
+  }
+  return emails;
+}
+
 async function sendEmail(to: string[], subject: string, html: string) {
   if (!RESEND_API_KEY) {
     console.error("RESEND_API_KEY is not set - email not sent. Subject:", subject);
@@ -253,29 +313,35 @@ Deno.serve(async (req) => {
   const dateRange = `${req_.start_date} to ${req_.end_date}`;
   const unitTypeLabel = UNIT_TYPE_LABEL[req_.unit_type] || req_.unit_type;
 
-  if (type === "new_requisition") {
-    const { data: admins, error: adminErr } = await supabase
-      .from("profiles")
-      .select("id")
-      .eq("role", "admin");
-    if (adminErr) {
+  const unit = req_.unit as { id: string; floor: string; room: string; type: string } | null;
+  const assignedUnitTypeLabel = unit ? (UNIT_TYPE_LABEL[unit.type] || unit.type) : unitTypeLabel;
+
+  if (type === "new_requisition" || type === "end_date_reminder") {
+    let emails: string[];
+    try {
+      emails = await adminRecipients(
+        type === "new_requisition" ? "notify_new_requisition" : "notify_end_date_reminder",
+        req_.discipline,
+      );
+    } catch (adminErr) {
       console.error("admin lookup failed", adminErr);
       return new Response("admin lookup failed", { status: 500 });
     }
-    const emails: string[] = [];
-    for (const admin of admins ?? []) {
-      const { data } = await supabase.auth.admin.getUserById(admin.id);
-      if (data?.user?.email) emails.push(data.user.email);
-    }
 
-    await sendEmail(
-      emails,
-      `New requisition: ${req_.project_title}`,
-      renderRequisitionPreview(req_, unitTypeLabel, dateRange),
-    );
+    if (type === "new_requisition") {
+      await sendEmail(
+        emails,
+        `New requisition: ${req_.project_title}`,
+        renderRequisitionPreview(req_, unitTypeLabel, dateRange),
+      );
+    } else {
+      await sendEmail(
+        emails,
+        `Ending soon: ${req_.project_title}${unit ? ` (${unit.id})` : ""} - ends ${req_.end_date}`,
+        renderEndDateReminder(req_, unit, assignedUnitTypeLabel, dateRange),
+      );
+    }
   } else if (type === "requisition_assigned") {
-    const unit = req_.unit as { id: string; floor: string; room: string; type: string } | null;
-    const assignedUnitTypeLabel = unit ? (UNIT_TYPE_LABEL[unit.type] || unit.type) : unitTypeLabel;
     await sendEmail(
       [req_.email],
       `Your space request has been approved - ${req_.project_title}`,

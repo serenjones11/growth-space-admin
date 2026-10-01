@@ -1022,6 +1022,24 @@ revoke execute on function send_end_date_reminders() from public, anon, authenti
 
 select cron.schedule('send-end-date-reminders', '0 7 * * *', $$select send_end_date_reminders();$$);
 
+-- Moving the end date (typically an extension) re-arms the reminder for the
+-- new date. Recipients are admins, filtered by notification_preferences
+-- (section 22) inside the Edge Function.
+create or replace function reset_end_date_reminder()
+returns trigger as $$
+begin
+  if new.end_date is distinct from old.end_date then
+    new.end_date_reminder_sent_at := null;
+  end if;
+  return new;
+end;
+$$ language plpgsql set search_path = public;
+revoke execute on function reset_end_date_reminder() from public, anon, authenticated;
+
+create trigger trg_reset_end_date_reminder
+  before update of end_date on requisitions
+  for each row execute procedure reset_end_date_reminder();
+
 
 -- ----------------------------------------------------------------------------
 -- 22. NOTIFICATION PREFERENCES  (per-admin: which automated emails, and
