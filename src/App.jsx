@@ -2513,9 +2513,20 @@ function DocumentsSection({ unit, onAdd, onRemove }) {
   );
 }
 
+/* Photo is shown at its own aspect ratio (never cropped), capped small -
+   cabinet photos are tall and portrait, so a fixed-height cover crop cut
+   off most of the cabinet. Clicking it opens the full-size image;
+   replacing goes through the header button. */
 function PhotoCard({ unit, onUpdate }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState(false);
+  useEffect(() => {
+    if (!viewing) return;
+    const onKey = (e) => { if (e.key === "Escape") setViewing(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewing]);
   const openPicker = () => inputRef.current && inputRef.current.click();
   const handleFile = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -2535,25 +2546,46 @@ function PhotoCard({ unit, onUpdate }) {
         <button disabled={busy} onClick={openPicker} className="text-xs font-bold disabled:opacity-40" style={{ color: "var(--accent-dark)" }}>{busy ? "Uploading…" : unit.photoDataUrl ? "Replace" : "Add photo"}</button>
         <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
       </div>
-      <button
-        onClick={openPicker}
-        className="group relative w-full rounded-xl flex items-center justify-center overflow-hidden"
-        style={{ background: "var(--surface-soft)", height: 190 }}
-      >
-        {unit.photoDataUrl ? (
-          <>
-            <img src={unit.photoDataUrl} alt={unit.id} className="w-full h-full object-cover" />
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: "rgba(22,33,29,0.45)" }}>
-              <span className="text-white text-xs font-bold">Click to replace</span>
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col items-center gap-2" style={{ color: "var(--ink-faint)" }}>
-            {unit.type === "reftech" ? <DoorOpen size={28} /> : <Leaf size={28} />}
-            <span className="text-xs font-semibold">Click to add a photo</span>
+      {unit.photoDataUrl ? (
+        <button
+          onClick={() => setViewing(true)}
+          className="group relative inline-block align-top rounded-xl overflow-hidden"
+          style={{ background: "var(--surface-soft)", border: "1px solid var(--border)", maxWidth: "min(100%, 320px)" }}
+          title="View full size"
+        >
+          <img src={unit.photoDataUrl} alt={unit.id} className="block w-auto h-auto" style={{ maxHeight: 220, maxWidth: "100%" }} />
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: "rgba(22,33,29,0.45)" }}>
+            <span className="flex items-center gap-1.5 text-white text-xs font-bold"><Maximize2 size={12} /> View full size</span>
           </div>
-        )}
-      </button>
+        </button>
+      ) : (
+        <button
+          onClick={openPicker}
+          className="w-full rounded-xl flex flex-col items-center justify-center gap-2"
+          style={{ background: "var(--surface-soft)", height: 120, color: "var(--ink-faint)" }}
+        >
+          {unit.type === "reftech" ? <DoorOpen size={24} /> : <Leaf size={24} />}
+          <span className="text-xs font-semibold">Click to add a photo</span>
+        </button>
+      )}
+      {viewing && unit.photoDataUrl && createPortal(
+        <div
+          onClick={() => setViewing(false)}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-6"
+          style={{ background: "rgba(10,16,14,0.82)" }}
+        >
+          <img
+            src={unit.photoDataUrl} alt={unit.id}
+            onClick={(e) => e.stopPropagation()}
+            className="rounded-xl shadow-2xl"
+            style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+          />
+          <button onClick={() => setViewing(false)} className="absolute top-4 right-4 w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(255,255,255,0.15)", color: "white" }} title="Close">
+            <X size={18} />
+          </button>
+        </div>,
+        document.body
+      )}
     </>
   );
 }
