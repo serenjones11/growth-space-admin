@@ -396,8 +396,12 @@ export async function fetchAdminData() {
 
     // Cabinet: at most one active (approved, started) booking is the
     // occupant - mirrors currentBooking()'s fixed predicate in App.jsx
-    // (started, regardless of whether the end date has passed).
-    const current = bookings.find((b) => new Date(b.startDate) <= today) || null;
+    // (started, regardless of whether the end date has passed). If a clash
+    // leaves more than one current, the earliest-ending wins, so an overdue
+    // booking isn't masked by a newer one that's still running.
+    const current = bookings
+      .filter((b) => new Date(b.startDate) <= today)
+      .sort((a, b) => new Date(a.endDate) - new Date(b.endDate))[0] || null;
     let status, urgency = null;
     if (base.isOutOfService) {
       status = "service";

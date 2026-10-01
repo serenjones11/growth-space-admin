@@ -289,10 +289,12 @@ function daysUntil(dateStr) { return Math.round((new Date(dateStr) - TODAY) / 86
    in src/lib/api.js's fetchAdminData: unit.bookings only ever contains
    bookings from status='approved' requisitions). This is what lets a
    lapsed-but-uncompleted booking show up as overdue instead of the room
-   silently reading as free - see supabase/schema.sql's design note 5. */
+   silently reading as free - see supabase/schema.sql's design note 5.
+   When several are current, the earliest-ending one wins, so an overdue
+   booking can't be hidden behind a newer one that's still running. */
 function currentBooking(unit) {
   if (unit.type !== "reftech") return null;
-  return unit.bookings.find((b) => new Date(b.startDate) <= TODAY) || null;
+  return currentBookingsList(unit).sort((a, b) => new Date(a.endDate) - new Date(b.endDate))[0] || null;
 }
 function upcomingBookings(unit) {
   if (!unit.bookings) return [];
@@ -319,14 +321,6 @@ function isClashAcknowledged(unit, currentList) {
   const currentIds = currentList.map((b) => b.id).slice().sort();
   const acknowledgedIds = (unit.acknowledgedClashBookingIds || []).slice().sort();
   return currentIds.length > 1 && currentIds.length === acknowledgedIds.length && currentIds.every((id, i) => id === acknowledgedIds[i]);
-}
-/* Discipline is no longer a fixed unit property (any cabinet can be
-   assigned to any requisition) - it's derived from whoever's currently
-   using it, for both unit types. Returns null when free: there's nothing
-   to show discipline-wise for an unoccupied unit. */
-function unitDiscipline(unit) {
-  const o = unitOccupant(unit);
-  return o ? o.discipline : null;
 }
 
 const STATUS_META = {
@@ -696,10 +690,6 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
         <LogOut size={17} />
         Log out
       </button>
-
-      <div className="text-[10.5px] leading-relaxed px-2 pt-4 mt-2" style={{ color: "var(--sidebar-text-dim)" }}>
-        Plant &amp; Insect Growth<br />Facility Management System
-      </div>
     </aside>
   );
 }
@@ -1859,15 +1849,15 @@ function UnitCard({ unit, onClick }) {
   const isReftech = unit.type === "reftech";
   const occupant = unitOccupant(unit);
   const upcoming = upcomingBookings(unit);
-  // null when free - discipline isn't a fixed unit property, so there's
-  // nothing to show for an unoccupied unit.
-  const disciplineKey = unitDiscipline(unit);
-  const dm = disciplineKey ? DISCIPLINE_META[disciplineKey] : null;
   // Cabinets are meant to only hold one booking at a time - more than one
   // active means an admin edit created an overlap. Surfaced here too (not
   // just on the unit detail page) so it's visible without opening it.
   // Hidden once the overlap has been explicitly approved as intentional.
   const currentForClash = currentBookingsList(unit);
+  // One pill per discipline across every current booking - a reftech room
+  // can hold plant and insect requisitions at once. Empty when free:
+  // discipline isn't a fixed unit property.
+  const disciplines = Object.keys(DISCIPLINE_META).filter((k) => currentForClash.some((b) => b.discipline === k));
   const hasClash = !isReftech && currentForClash.length > 1 && !isClashAcknowledged(unit, currentForClash);
 
   // occupant / availability box colour follows the same status language used everywhere else
@@ -1918,11 +1908,14 @@ function UnitCard({ unit, onClick }) {
 
       {/* tags - discipline only shows when occupied; it's not a fixed unit property */}
       <div className="flex flex-wrap gap-1.5 mb-3">
-        {dm && (
-          <span className="gc-tag" style={{ background: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-bg)" : "var(--tag-insect-bg)", color: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-ink)" : "var(--tag-insect-ink)", borderColor: dm.color === DISCIPLINE_META.plant.color ? "var(--tag-plant-border)" : "var(--tag-insect-border)" }}>
-            <dm.icon size={11} /> {dm.label}
-          </span>
-        )}
+        {disciplines.map((k) => {
+          const dm = DISCIPLINE_META[k];
+          return (
+            <span key={k} className="gc-tag" style={{ background: `var(--tag-${k}-bg)`, color: `var(--tag-${k}-ink)`, borderColor: `var(--tag-${k}-border)` }}>
+              <dm.icon size={11} /> {dm.label}
+            </span>
+          );
+        })}
         {unit.co2Control && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>CO₂</span>}
       </div>
 
