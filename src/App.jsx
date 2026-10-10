@@ -2888,7 +2888,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
 /* ---------------------------------------------------------------------- */
 /* Add / edit unit modal                                                  */
 /* ---------------------------------------------------------------------- */
-function AddEditUnitModal({ unit, units, onClose, onSave, rooms, onAddRoom, onRenameRoom, onDeleteRoom, manufacturers, onAddManufacturer, onRenameManufacturer, onDeleteManufacturer }) {
+function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoom, onDeleteRoom, manufacturers, onAddManufacturer, onRenameManufacturer, onDeleteManufacturer }) {
   const isEdit = !!unit;
   const [form, setForm] = useState(
     unit
@@ -2962,18 +2962,16 @@ function AddEditUnitModal({ unit, units, onClose, onSave, rooms, onAddRoom, onRe
                 {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
               </select>
             </Field>
-            {/* Rooms belong to one floor and unit type, so the list is scoped to
-                both and the scope is shown on the field itself. */}
+            {/* Rooms belong to one floor and unit type, so the list is scoped
+                to both; the add row names the floor. */}
             <div className="sm:col-span-2">
               <ManagedSelectField
                 label="Room" noun="room" addTo={FLOOR_LABEL[form.floor]}
-                scope={`${FLOOR_LABEL[form.floor]} · ${form.type === "reftech" ? "Reftech rooms" : "Growth cabinets"}`}
                 value={form.room} options={rooms.filter((r) => r.floor === form.floor && r.type === form.type)}
                 onChange={(v) => setForm((f) => ({ ...f, room: v }))}
                 onAdd={(name) => onAddRoom(form.floor, form.type, name)}
                 onRename={(row, name) => onRenameRoom(row, name)}
                 onDelete={onDeleteRoom}
-                unitCountFor={(name) => units.filter((u) => u.floor === form.floor && u.type === form.type && u.room === name).length}
               />
             </div>
           </div>
@@ -2983,7 +2981,6 @@ function AddEditUnitModal({ unit, units, onClose, onSave, rooms, onAddRoom, onRe
               value={form.manufacturer} options={manufacturers}
               onChange={(v) => setForm((f) => ({ ...f, manufacturer: v }))}
               onAdd={onAddManufacturer} onRename={onRenameManufacturer} onDelete={onDeleteManufacturer}
-              unitCountFor={(name) => units.filter((u) => u.manufacturer === name).length}
             />
             <Field label="Model"><input value={form.model} onChange={set("model")} className="gc-input" placeholder="e.g. E-15" /></Field>
           </div>
@@ -3892,7 +3889,7 @@ function SelectWithCustom({ value, onChange, options, label, allowEmpty = false 
    Renders its own label row rather than sitting inside <Field> - Field is a
    <label>, which would forward clicks on the panel to the select.
    onAdd/onRename/onDelete may be async; the panel waits for them. */
-function ManagedSelectField({ label, scope, addTo = scope, value, options, onChange, onAdd, onRename, onDelete, noun, unitCountFor }) {
+function ManagedSelectField({ label, addTo, value, options, onChange, onAdd, onRename, onDelete, noun }) {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);   // row being renamed, or "new" for the add row
   const [draft, setDraft] = useState("");
@@ -3901,8 +3898,7 @@ function ManagedSelectField({ label, scope, addTo = scope, value, options, onCha
   const [busy, setBusy] = useState(false);
   const names = options.map((o) => o.name);
   const allNames = value && !names.includes(value) ? [...names, value] : names;
-  const where = scope ? ` on ${scope}` : "";
-  const unitsLabel = (n) => `${n} unit${n === 1 ? "" : "s"}`;
+  const where = addTo ? ` on ${addTo}` : "";
 
   const cancel = () => { setEditingId(null); setDeletingId(null); setDraft(""); setError(""); };
   const startEdit = (o) => { cancel(); setEditingId(o.id); setDraft(o.name); };
@@ -3954,12 +3950,7 @@ function ManagedSelectField({ label, scope, addTo = scope, value, options, onCha
         <button type="button" disabled={busy} onClick={save} className={iconBtn} style={{ background: "var(--btn-accent)", color: "white" }} title="Save"><Check size={14} /></button>
         <button type="button" disabled={busy} onClick={cancel} className={iconBtn} style={{ color: "var(--ink-soft)" }} title="Cancel"><X size={14} /></button>
       </div>
-      {error ? (
-        <div className="text-[11.5px] mt-1" style={{ color: "var(--overdue)" }}>{error}</div>
-      ) : editingId !== "new" && unitCountFor && (() => {
-        const n = unitCountFor(options.find((o) => o.id === editingId)?.name);
-        return n > 0 ? <div className="text-[11.5px] mt-1" style={{ color: "var(--ink-faint)" }}>Also renames it on {unitsLabel(n)}.</div> : null;
-      })()}
+      {error && <div className="text-[11.5px] mt-1" style={{ color: "var(--overdue)" }}>{error}</div>}
     </div>
   );
 
@@ -3968,7 +3959,6 @@ function ManagedSelectField({ label, scope, addTo = scope, value, options, onCha
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs font-medium" style={{ color: "var(--ink-soft)" }}>
           {label}
-          {scope && <span className="ml-1.5 inline-flex items-center gap-1 rounded-full px-2 py-px text-[10.5px] font-bold align-middle" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}><MapPin size={10} />{scope}</span>}
         </span>
         <button type="button" onClick={() => { setOpen((v) => !v); cancel(); }} className="flex items-center gap-1 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
           {open ? "Done" : "Manage"}
@@ -3982,19 +3972,15 @@ function ManagedSelectField({ label, scope, addTo = scope, value, options, onCha
 
       {open && (
         <div className="mt-2 rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)", background: "var(--surface)" }}>
-          <div className="px-3 py-2 text-[10.5px] font-bold uppercase tracking-wider" style={{ background: "var(--surface-soft)", color: "var(--ink-faint)" }}>
-            {noun}s{where}
-          </div>
           {options.length === 0 && editingId !== "new" && (
             <div className="px-3 py-2.5 text-[13px]" style={{ color: "var(--ink-faint)" }}>No {noun}s{where} yet.</div>
           )}
-          {options.map((o) => (
-            <div key={o.id} style={{ borderTop: "1px solid var(--border)" }}>
+          {options.map((o, i) => (
+            <div key={o.id} style={i > 0 ? { borderTop: "1px solid var(--border)" } : undefined}>
               {editingId === o.id ? editRow : deletingId === o.id ? (
                 <div className="flex items-center gap-2 px-3 py-2 text-[13px]" style={{ background: "var(--overdue-soft)" }}>
                   <span className="flex-1 min-w-0" style={{ color: "var(--overdue)" }}>
                     Delete <strong>{o.name}</strong>?
-                    {unitCountFor && unitCountFor(o.name) > 0 && <span className="block text-[11.5px]" style={{ color: "var(--ink-soft)" }}>{unitsLabel(unitCountFor(o.name))} keep this name.</span>}
                   </span>
                   <button type="button" disabled={busy} onClick={() => confirmDelete(o)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--overdue)" }}>Delete</button>
                   <button type="button" disabled={busy} onClick={cancel} className="text-xs font-semibold px-1.5" style={{ color: "var(--ink-soft)" }}>Cancel</button>
@@ -4008,7 +3994,7 @@ function ManagedSelectField({ label, scope, addTo = scope, value, options, onCha
               )}
             </div>
           ))}
-          <div style={{ borderTop: "1px solid var(--border)" }}>
+          <div style={options.length > 0 || editingId === "new" ? { borderTop: "1px solid var(--border)" } : undefined}>
             {editingId === "new" ? editRow : (
               <button type="button" onClick={startAdd} className="w-full flex items-center gap-1.5 px-3 py-2 text-[13px] font-bold text-left" style={{ color: "var(--accent-dark)" }}>
                 <PlusCircle size={14} /> Add {noun}{addTo ? ` to ${addTo}` : ""}
@@ -5045,7 +5031,7 @@ export default function GrowthCabinetApp() {
         />
       )}
       {editingUnit !== undefined && (
-        <AddEditUnitModal unit={editingUnit} units={units} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onRenameRoom={handleRenameRoom} onDeleteRoom={handleDeleteRoom} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onRenameManufacturer={handleRenameManufacturer} onDeleteManufacturer={handleDeleteManufacturer} />
+        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onRenameRoom={handleRenameRoom} onDeleteRoom={handleDeleteRoom} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onRenameManufacturer={handleRenameManufacturer} onDeleteManufacturer={handleDeleteManufacturer} />
       )}
       {previewReqIndex !== null && (
         <RequisitionPreviewPanel
