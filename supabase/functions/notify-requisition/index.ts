@@ -108,13 +108,15 @@ function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string,
     ? r.species.map((s: string) => pill(s, COLOR.accentSoft, COLOR.accentInk)).join("")
     : `<span style="font-size:13px;color:${COLOR.inkFaint};">None specified</span>`;
 
-  const envParts = [
-    r.set_temp != null ? `${r.set_temp}°C` : null,
-    r.set_humidity != null ? `${r.set_humidity}% RH` : null,
+  // set_temp is the day temperature; night_temp the night one.
+  const tempParts = [
+    r.set_temp != null ? `${r.set_temp}°C day` : null,
+    r.night_temp != null ? `${r.night_temp}°C night` : null,
   ].filter(Boolean).join(" / ");
 
   const flags = [
     r.pest_consent ? "Pest management consent given" : null,
+    r.invertebrate_welfare_ack ? "Invertebrate Welfare Policy read and understood" : null,
     r.dimming_required ? "Corridor dimming required" : null,
     r.safety_compliance ? "Safety compliance confirmed" : null,
   ].filter(Boolean) as string[];
@@ -123,7 +125,8 @@ function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string,
     detailRow("Requested dates", esc(dateRange)),
     detailRow("Preferred floor", r.preferred_floor && r.preferred_floor !== "any" ? esc(r.preferred_floor) : "No preference"),
     detailRow("Containment level", esc(r.containment_level)),
-    detailRow("Set temp / humidity", esc(envParts)),
+    detailRow("Day / night temp", esc(tempParts)),
+    detailRow("Humidity", r.set_humidity != null ? esc(`${r.set_humidity}% RH`) : ""),
     detailRow("Light cycle", esc(r.light_cycle)),
     detailRow("Dawn / dusk", esc([r.dawn_time ? `Dawn ${String(r.dawn_time).slice(0, 5)}` : null, r.dusk_time ? `Dusk ${String(r.dusk_time).slice(0, 5)}` : null].filter(Boolean).join(" / "))),
   ].join("");

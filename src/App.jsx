@@ -8,7 +8,7 @@ import {
   Search,
   PlusCircle,
   Pencil,
-  Thermometer,
+  Moon,
   Droplets,
   Wrench,
   Sun,
@@ -194,14 +194,25 @@ const DISCIPLINE_META = {
   insect: { label: "Insect Sciences", icon: Bug, color: "#A6763F" },
 };
 
-const MANUFACTURERS = ["Conviron", "Percival", "Sanyo/Panasonic", "Snijders", "BioChambers"];
 const MODELS = ["E-15", "AR-66", "MLR-352H", "GC-8", "TC-30"];
 const LIGHT_CYCLES = ["8/16 h (L/D)", "12/12 h (L/D)", "16/8 h (L/D)", "24 h dark", "Continuous light"];
 const isSet = (v) => v !== null && v !== undefined && v !== "";
-// Temp/humidity are genuinely optional for reftech rooms, so either can be
-// null. Shows only what was actually specified, or "Not specified".
-function fmtEnv(temp, humidity) {
-  const parts = [isSet(temp) ? `${temp}°C` : null, isSet(humidity) ? `${humidity}% RH` : null].filter(Boolean);
+// Day temp (stored as set_temp), night temp and humidity are each optional
+// (always for reftech rooms), so any can be null. Shows only what was
+// actually specified, or "Not specified".
+function fmtTemps(dayTemp, nightTemp) {
+  const parts = [isSet(dayTemp) ? `${dayTemp}°C day` : null, isSet(nightTemp) ? `${nightTemp}°C night` : null].filter(Boolean);
+  return parts.length ? parts.join(" / ") : "Not specified";
+}
+// Compact form for the unit tile readout: "22°C", or "22/18°C" when the
+// night temp differs from the day temp.
+function fmtTileTemp(dayTemp, nightTemp) {
+  if (!isSet(dayTemp)) return isSet(nightTemp) ? `-/${nightTemp}°C` : "-";
+  return isSet(nightTemp) && nightTemp !== dayTemp ? `${dayTemp}/${nightTemp}°C` : `${dayTemp}°C`;
+}
+function fmtEnv(dayTemp, nightTemp, humidity) {
+  const temps = fmtTemps(dayTemp, nightTemp);
+  const parts = [temps !== "Not specified" ? temps : null, isSet(humidity) ? `${humidity}% RH` : null].filter(Boolean);
   return parts.length ? parts.join(" / ") : "Not specified";
 }
 function fmtDawnDusk(dawn, dusk) {
@@ -1895,7 +1906,7 @@ function UnitCard({ unit, onClick }) {
       {/* live readouts if occupied, otherwise the operating range */}
       {occupant ? (
         <div className="grid grid-cols-3 gap-1.5 mb-3">
-          <div className="gc-readout"><div className="lbl">TEMP</div><div className="val" style={{ color: "var(--chip-temp)" }}>{isSet(occupant.setTemp) ? `${occupant.setTemp}°C` : "-"}</div></div>
+          <div className="gc-readout"><div className="lbl">{isSet(occupant.nightTemp) && occupant.nightTemp !== occupant.setTemp ? "DAY/NIGHT" : "TEMP"}</div><div className="val" style={{ color: "var(--chip-temp)" }}>{fmtTileTemp(occupant.setTemp, occupant.nightTemp)}</div></div>
           <div className="gc-readout"><div className="lbl">RH</div><div className="val" style={{ color: "var(--chip-rh)" }}>{isSet(occupant.setHumidity) ? `${occupant.setHumidity}%` : "-"}</div></div>
           <div className="gc-readout"><div className="lbl">CYCLE</div><div className="val" style={{ color: "var(--chip-cycle)", fontSize: 12.5 }}>{occupant.lightCycle || "-"}</div></div>
         </div>
@@ -2610,7 +2621,7 @@ function BookingCard({ booking, status, onOpenRequisition }) {
         <div className="italic text-[13px] truncate" style={{ color, opacity: 0.85 }}>{booking.project} · {piDisplay(booking.labGroup)}</div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] font-semibold mt-1" style={{ color, opacity: 0.75 }}>
           <span>{fmtGB(booking.startDate)} → {fmtGB(booking.endDate)}</span>
-          <span>{[fmtEnv(booking.setTemp, booking.setHumidity), booking.lightCycle, (booking.dawnTime || booking.duskTime) ? fmtDawnDusk(booking.dawnTime, booking.duskTime) : null].filter(Boolean).join(" · ")}</span>
+          <span>{[fmtEnv(booking.setTemp, booking.nightTemp, booking.setHumidity), booking.lightCycle, (booking.dawnTime || booking.duskTime) ? fmtDawnDusk(booking.dawnTime, booking.duskTime) : null].filter(Boolean).join(" · ")}</span>
         </div>
       </div>
       {clickable && <ChevronRight size={18} style={{ color, opacity: 0.6 }} className="flex-shrink-0" />}
@@ -2872,14 +2883,14 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
 /* ---------------------------------------------------------------------- */
 /* Add / edit unit modal                                                  */
 /* ---------------------------------------------------------------------- */
-function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoom }) {
+function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoom, manufacturers, onAddManufacturer, onDeleteManufacturer }) {
   const isEdit = !!unit;
   const [form, setForm] = useState(
     unit
       ? { ...unit, tempMin: unit.tempRange[0], tempMax: unit.tempRange[1], humMin: unit.humidityRange[0], humMax: unit.humidityRange[1] }
       : {
           id: "", type: "cabinet", floor: "L1", room: (rooms.find((r) => r.floor === "L1" && r.type === "cabinet") || {}).name || "",
-          manufacturer: MANUFACTURERS[0], model: "", serialNumber: "", assetNumber: "", tscanId: "",
+          manufacturer: (manufacturers[0] || {}).name || "", model: "", serialNumber: "", assetNumber: "", tscanId: "",
           shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: BALLAST_TYPES[0],
           co2Control: false, dimmingControl: false,
           installDate: "", tempMin: 4, tempMax: 30, humMin: 30, humMax: 85, status: "free",
@@ -2957,9 +2968,11 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Manufacturer">
-              <select value={form.manufacturer} onChange={set("manufacturer")} className="gc-input">
-                {MANUFACTURERS.map((m) => <option key={m}>{m}</option>)}
-              </select>
+              <ManagedSelectField
+                value={form.manufacturer} options={manufacturers}
+                onChange={(v) => setForm((f) => ({ ...f, manufacturer: v }))}
+                onAdd={onAddManufacturer} onDelete={onDeleteManufacturer} noun="manufacturer"
+              />
             </Field>
             <Field label="Model"><input value={form.model} onChange={set("model")} className="gc-input" placeholder="e.g. E-15" /></Field>
           </div>
@@ -3049,13 +3062,17 @@ function RequisitionDetailFields({ req }) {
           <FieldPair label="Research area" value={DISCIPLINE_META[req.discipline].label} />
           <FieldPair label="Species" value={req.species && req.species.length ? req.species.join(", ") : "-"} />
           {isPlant && <FieldPair label="Containment level" value={req.containmentLevel || "-"} />}
-          <FieldPair label="Set temp / humidity" value={fmtEnv(req.setTemp, req.setHumidity)} />
+          <FieldPair label="Day / night temp" value={fmtTemps(req.setTemp, req.nightTemp)} />
+          <FieldPair label="Humidity" value={isSet(req.setHumidity) ? `${req.setHumidity}% RH` : "Not specified"} />
           <FieldPair label="Light cycle" value={req.lightCycle || "Not specified"} />
           <FieldPair label="Photoperiod (dawn / dusk)" value={fmtDawnDusk(req.dawnTime, req.duskTime)} />
           {isPlant ? (
             <FieldPair label="Pest outbreak consent" value={req.pestConsent ? "Consented" : "Not given"} />
           ) : (
-            <FieldPair label="Dimming required" value={req.dimmingRequired ? "Yes" : "No"} />
+            <>
+              <FieldPair label="Invertebrate Welfare Policy" value={req.invertebrateWelfareAck ? "Read and understood" : "Not confirmed"} />
+              <FieldPair label="Dimming required" value={req.dimmingRequired ? "Yes" : "No"} />
+            </>
           )}
           <FieldPair label="Safety compliance" value={req.safetyCompliance ? "Confirmed" : "Not confirmed"} />
         </FieldGrid>
@@ -3165,7 +3182,10 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
             />
           </Field>
           {isPlant && <Field label="Containment level"><select value={form.containmentLevel || CONTAINMENT_LEVELS[0]} onChange={set("containmentLevel")} className="gc-input">{CONTAINMENT_LEVELS.map((c) => <option key={c}>{c}</option>)}</select></Field>}
-          <Field label="Set temp (°C)"><input type="number" min={0} max={60} value={form.setTemp ?? ""} onChange={setNum("setTemp")} className="gc-input" placeholder="Not specified" /></Field>
+          <div className="grid grid-cols-2 gap-3.5">
+            <Field label="Day temp (°C)"><input type="number" min={0} max={60} value={form.setTemp ?? ""} onChange={setNum("setTemp")} className="gc-input" placeholder="Not specified" /></Field>
+            <Field label="Night temp (°C)"><input type="number" min={0} max={60} value={form.nightTemp ?? ""} onChange={setNum("nightTemp")} className="gc-input" placeholder="Not specified" /></Field>
+          </div>
           <Field label="Set humidity (%)"><input type="number" min={0} max={100} value={form.setHumidity ?? ""} onChange={setNum("setHumidity")} className="gc-input" placeholder="Not specified" /></Field>
           <Field label="Light cycle">
             <select value={form.lightCycle || ""} onChange={set("lightCycle")} className="gc-input">
@@ -3181,7 +3201,10 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
           {isPlant ? (
             <CheckField label="Pest outbreak consent" checked={!!form.pestConsent} onChange={setBool("pestConsent")} />
           ) : (
-            <CheckField label="Dimming required" checked={!!form.dimmingRequired} onChange={setBool("dimmingRequired")} />
+            <>
+              <CheckField label="Read and understood the Invertebrate Welfare Policy" checked={!!form.invertebrateWelfareAck} onChange={setBool("invertebrateWelfareAck")} />
+              <CheckField label="Dimming required" checked={!!form.dimmingRequired} onChange={setBool("dimmingRequired")} />
+            </>
           )}
           <CheckField label="Safety compliance" checked={!!form.safetyCompliance} onChange={setBool("safetyCompliance")} />
         </div>
@@ -3848,26 +3871,27 @@ function SelectWithCustom({ value, onChange, options, label, allowEmpty = false 
   );
 }
 
-/* Room picker for the add/edit unit form - like SelectWithCustom, but a
-   new room persists to the rooms table (so it stays offered next time,
+/* Admin-managed dropdown for the add/edit unit form - like SelectWithCustom,
+   but a new entry persists to its table (so it stays offered next time,
    not just for this session) and an existing one can be deleted, behind a
    confirm dialog since it's a destructive, if reversible-by-re-adding,
-   admin action. */
-function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
+   admin action. Used for rooms and manufacturers. `options` are table rows
+   ({ id, name }); `value` is the unit's own free-text field, so it can
+   hold a name that's since been removed from the list. */
+function ManagedSelectField({ value, options, onChange, onAdd, onDelete, noun }) {
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const roomOptions = rooms.filter((r) => r.floor === floor && r.type === type);
-  const names = roomOptions.map((r) => r.name);
-  const allNames = room && !names.includes(room) ? [...names, room] : names;
-  const selected = roomOptions.find((r) => r.name === room);
+  const names = options.map((o) => o.name);
+  const allNames = value && !names.includes(value) ? [...names, value] : names;
+  const selected = options.find((o) => o.name === value);
   return (
     <div>
       <div className="flex gap-2">
-        <select value={room} onChange={(e) => onChange(e.target.value)} className="gc-input flex-1">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="gc-input flex-1">
           {allNames.map((n) => <option key={n}>{n}</option>)}
         </select>
-        <button type="button" onClick={() => setCustomOpen((v) => !v)} className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface)" }} title="Add a new room">
+        <button type="button" onClick={() => setCustomOpen((v) => !v)} className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface)" }} title={`Add a new ${noun}`}>
           <PlusCircle size={16} style={{ color: "var(--accent-ink)" }} />
         </button>
         <button
@@ -3876,14 +3900,14 @@ function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
           disabled={!selected}
           className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 disabled:opacity-30"
           style={{ borderColor: "var(--border)", background: "var(--surface)" }}
-          title={selected ? "Delete this room" : "Pick an existing room to delete it"}
+          title={selected ? `Delete this ${noun}` : `Pick an existing ${noun} to delete it`}
         >
           <Trash2 size={15} style={{ color: "var(--overdue)" }} />
         </button>
       </div>
       {customOpen && (
         <div className="flex gap-2 mt-2">
-          <input className="gc-input flex-1" placeholder="New room name" value={customValue} onChange={(e) => setCustomValue(e.target.value)} />
+          <input className="gc-input flex-1" placeholder={`New ${noun} name`} value={customValue} onChange={(e) => setCustomValue(e.target.value)} />
           <button
             type="button"
             onClick={() => {
@@ -3902,13 +3926,23 @@ function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
       )}
       {confirmingDelete && selected && (
         <ConfirmDialog
-          title="Delete this room?"
-          message={`This removes "${selected.name}" from the room list. Units already using it keep their current room field - this only stops it being offered for new ones.`}
+          title={`Delete this ${noun}?`}
+          message={`This removes "${selected.name}" from the ${noun} list. Units already using it keep their current ${noun} - this only stops it being offered for new ones.`}
           onCancel={() => setConfirmingDelete(false)}
           onConfirm={() => { setConfirmingDelete(false); onDelete(selected.id); }}
         />
       )}
     </div>
+  );
+}
+
+/* Rooms are scoped to the unit's floor and type. */
+function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
+  return (
+    <ManagedSelectField
+      value={room} options={rooms.filter((r) => r.floor === floor && r.type === type)}
+      onChange={onChange} onAdd={onAdd} onDelete={onDelete} noun="room"
+    />
   );
 }
 
@@ -4113,8 +4147,8 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
     role: ROLES[0], emergencyNumber: "",
     species: [], containmentLevel: CONTAINMENT_LEVELS[0], spaceDescription: "",
     projectTitle: "", projectDesc: "",
-    setTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0], dawnTime: "", duskTime: "", co2: "",
-    pestConsent: false, dimmingRequired: false, safetyCompliance: false,
+    setTemp: 22, nightTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0], dawnTime: "", duskTime: "", co2: "",
+    pestConsent: false, invertebrateWelfareAck: false, dimmingRequired: false, safetyCompliance: false,
     preferredFloor: "any", startDate: "", endDate: "",
     hazardNotes: "", notes: "",
   };
@@ -4127,8 +4161,8 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
   // conditions start unset instead of pre-filled. Otherwise untouched
   // defaults got submitted and showed up as if the researcher had asked for them.
   const defaultConditions = (disc) => spaceType === "reftech"
-    ? { setTemp: null, setHumidity: null, lightCycle: "" }
-    : { setTemp: disc === "insect" ? 25 : 22, setHumidity: disc === "insect" ? 65 : 60, lightCycle: LIGHT_CYCLES[0] };
+    ? { setTemp: null, nightTemp: null, setHumidity: null, lightCycle: "" }
+    : { setTemp: disc === "insect" ? 25 : 22, nightTemp: disc === "insect" ? 25 : 22, setHumidity: disc === "insect" ? 65 : 60, lightCycle: LIGHT_CYCLES[0] };
 
   const goBack = () => setStepIndex((i) => Math.max(0, i - 1));
   const goNext = () => setStepIndex((i) => Math.min(steps.length - 1, i + 1));
@@ -4239,10 +4273,14 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
                   projectTitle: r.projectTitle, projectDesc: r.projectDesc || "",
                   ...defaultConditions(discipline),
                   ...(isSet(r.setTemp) ? { setTemp: r.setTemp } : {}),
+                  // Requisitions from before day/night temps only have the one
+                  // temperature - a cabinet's night slider starts from that.
+                  ...(isSet(r.nightTemp) ? { nightTemp: r.nightTemp } : isSet(r.setTemp) && spaceType !== "reftech" ? { nightTemp: r.setTemp } : {}),
                   ...(isSet(r.setHumidity) ? { setHumidity: r.setHumidity } : {}),
                   ...(r.lightCycle ? { lightCycle: r.lightCycle } : {}),
                   dawnTime: r.dawnTime || "", duskTime: r.duskTime || "", co2: r.co2 || "",
-                  pestConsent: r.pestConsent || false, dimmingRequired: r.dimmingRequired || false,
+                  pestConsent: r.pestConsent || false, invertebrateWelfareAck: r.invertebrateWelfareAck || false,
+                  dimmingRequired: r.dimmingRequired || false,
                   safetyCompliance: r.safetyCompliance || false,
                   preferredFloor: r.preferredFloor || "any", startDate: r.startDate, endDate: r.endDate,
                   hazardNotes: r.hazardNotes || "", notes: r.notes || "",
@@ -4408,12 +4446,14 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             {isReftech ? (
               <>
-                <OptionalSliderField label="Temperature (optional)" value={form.setTemp} onChange={setNum("setTemp")} onClear={() => setForm((f) => ({ ...f, setTemp: null }))} defaultValue={isPlant ? 22 : 25} min={0} max={60} unit="°C" icon={Thermometer} />
+                <OptionalSliderField label="Day temperature (optional)" value={form.setTemp} onChange={setNum("setTemp")} onClear={() => setForm((f) => ({ ...f, setTemp: null }))} defaultValue={isPlant ? 22 : 25} min={0} max={60} unit="°C" icon={Sun} />
+                <OptionalSliderField label="Night temperature (optional)" value={form.nightTemp} onChange={setNum("nightTemp")} onClear={() => setForm((f) => ({ ...f, nightTemp: null }))} defaultValue={isPlant ? 22 : 25} min={0} max={60} unit="°C" icon={Moon} />
                 <OptionalSliderField label="Humidity (optional)" value={form.setHumidity} onChange={setNum("setHumidity")} onClear={() => setForm((f) => ({ ...f, setHumidity: null }))} defaultValue={isPlant ? 60 : 65} min={0} max={100} unit="%" icon={Droplets} />
               </>
             ) : (
               <>
-                <SliderField label="Temperature" value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" icon={Thermometer} />
+                <SliderField label="Day temperature" value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" icon={Sun} />
+                <SliderField label="Night temperature" value={form.nightTemp} onChange={setNum("nightTemp")} min={0} max={60} unit="°C" icon={Moon} />
                 <SliderField label="Humidity" value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" icon={Droplets} />
               </>
             )}
@@ -4439,13 +4479,22 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
                 </label>
               </div>
             ) : (
-              <div className="rounded-xl p-3 flex items-center" style={{ background: "var(--surface-soft)", border: "1px solid var(--border)" }}>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={form.dimmingRequired} onChange={setBool("dimmingRequired")} style={{ accentColor: "var(--accent)" }} /> Dimming required
+              <div className="rounded-xl p-3" style={{ background: "var(--surface-soft)" }}>
+                <div className="text-xs font-bold mb-1.5" style={{ color: "var(--warning)" }}>Invertebrate Welfare Policy</div>
+                <label className="flex items-start gap-2 text-xs">
+                  <input type="checkbox" className="mt-0.5" checked={form.invertebrateWelfareAck} onChange={setBool("invertebrateWelfareAck")} style={{ accentColor: "var(--warning)" }} />
+                  <span style={{ color: "var(--ink-soft)" }}>I have read and understood the Invertebrate Welfare Policy</span>
                 </label>
               </div>
             )}
           </div>
+          {!isPlant && (
+            <div className="rounded-xl p-3 flex items-center" style={{ background: "var(--surface-soft)", border: "1px solid var(--border)" }}>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={form.dimmingRequired} onChange={setBool("dimmingRequired")} style={{ accentColor: "var(--accent)" }} /> Dimming required
+              </label>
+            </div>
+          )}
         </section>
 
         <section className="space-y-4">
@@ -4591,6 +4640,7 @@ export default function GrowthCabinetApp() {
   const labGroups = appData ? appData.labGroups : [];
   const activityLog = appData ? appData.activityLog : [];
   const rooms = appData ? appData.rooms : [];
+  const manufacturers = appData ? appData.manufacturers : [];
 
   // Wraps a mutation so a failed Supabase call (RLS denial, constraint
   // violation, network error) surfaces to the admin instead of failing
@@ -4623,6 +4673,14 @@ export default function GrowthCabinetApp() {
   });
   const handleDeleteRoom = withErrorAlert(async (id) => {
     await api.removeRoom(id);
+    await reload();
+  });
+  const handleAddManufacturer = withErrorAlert(async (name) => {
+    await api.addManufacturer(name);
+    await reload();
+  });
+  const handleDeleteManufacturer = withErrorAlert(async (id) => {
+    await api.removeManufacturer(id);
     await reload();
   });
 
@@ -4896,7 +4954,7 @@ export default function GrowthCabinetApp() {
         />
       )}
       {editingUnit !== undefined && (
-        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onDeleteRoom={handleDeleteRoom} />
+        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onDeleteRoom={handleDeleteRoom} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onDeleteManufacturer={handleDeleteManufacturer} />
       )}
       {previewReqIndex !== null && (
         <RequisitionPreviewPanel

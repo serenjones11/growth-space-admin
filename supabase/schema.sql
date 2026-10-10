@@ -236,12 +236,14 @@ create table requisitions (
   -- environment
   -- Note: no `co2` column here on purpose — CO2 is a unit property
   -- (units.co2_control). See design note 6.
-  set_temp          numeric,
+  set_temp          numeric,                             -- day temperature
+  night_temp        numeric,
   set_humidity      numeric,
   light_cycle       text,
   dawn_time         time,                                -- photoperiod lights on
   dusk_time         time,                                -- photoperiod lights off
-  pest_consent      boolean not null default false,
+  pest_consent      boolean not null default false,      -- plant requisitions
+  invertebrate_welfare_ack boolean not null default false, -- insect: read the Invertebrate Welfare Policy
   dimming_required  boolean not null default false,
   safety_compliance boolean not null default false,
 
@@ -309,7 +311,8 @@ create table bookings (
   -- species without a separate lookup.
   species         text[] default array[]::text[],
 
-  set_temp        numeric,
+  set_temp        numeric,                               -- day temperature
+  night_temp      numeric,
   set_humidity    numeric,
   light_cycle     text,
   dawn_time       time,
@@ -1066,6 +1069,27 @@ create policy "insert own notification_preferences" on notification_preferences
   for insert with check (is_admin() and admin_id = auth.uid());
 create policy "update own notification_preferences" on notification_preferences
   for update using (admin_id = auth.uid()) with check (admin_id = auth.uid());
+
+
+-- ----------------------------------------------------------------------------
+-- 23. MANUFACTURERS  (admin-manageable, same pattern as rooms)
+-- ----------------------------------------------------------------------------
+-- Previously a hardcoded frontend list (MANUFACTURERS in App.jsx).
+-- units.manufacturer stays free text (deliberately not a foreign key), so
+-- removing a manufacturer here only stops it being offered for new units.
+create table manufacturers (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null unique,
+  created_at  timestamptz not null default now()
+);
+
+alter table manufacturers enable row level security;
+create policy "read manufacturers" on manufacturers for select using (is_admin());
+create policy "admin write manufacturers" on manufacturers for all using (is_admin()) with check (is_admin());
+
+insert into manufacturers (name) values
+  ('Conviron'), ('Percival'), ('Sanyo/Panasonic'), ('Snijders'), ('BioChambers')
+on conflict (name) do nothing;
 
 -- ============================================================================
 -- End of schema. Next steps once this has run cleanly:

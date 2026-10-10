@@ -241,6 +241,7 @@ function mapBookingRow(b) {
     discipline: b.discipline,
     species: b.species || [],
     setTemp: b.set_temp,
+    nightTemp: b.night_temp,
     setHumidity: b.set_humidity,
     lightCycle: b.light_cycle,
     dawnTime: hhmm(b.dawn_time),
@@ -309,11 +310,13 @@ function mapRequisitionRow(r) {
     projectTitle: r.project_title,
     projectDesc: r.project_desc || "",
     setTemp: r.set_temp,
+    nightTemp: r.night_temp,
     setHumidity: r.set_humidity,
     lightCycle: r.light_cycle || "",
     dawnTime: hhmm(r.dawn_time),
     duskTime: hhmm(r.dusk_time),
     pestConsent: r.pest_consent,
+    invertebrateWelfareAck: r.invertebrate_welfare_ack,
     dimmingRequired: r.dimming_required,
     safetyCompliance: r.safety_compliance,
     preferredFloor: r.preferred_floor || "any",
@@ -347,7 +350,7 @@ export async function fetchAdminData() {
   // labGroupCache that this call populates.
   const labGroups = await fetchLabGroups();
 
-  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes, roomsRes] = await Promise.all([
+  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes, roomsRes, manufacturersRes] = await Promise.all([
     supabase.from("units").select("*"),
     supabase.from("bookings").select("*, requisitions!inner(status, admin_notes)").eq("requisitions.status", "approved"),
     supabase.from("service_log").select("*, maintenance_categories(name)"),
@@ -357,8 +360,9 @@ export async function fetchAdminData() {
     fetchLabUsageHistory(),
     supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(200),
     supabase.from("rooms").select("*").order("name"),
+    supabase.from("manufacturers").select("*").order("name"),
   ]);
-  for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes, activityLogRes, roomsRes]) {
+  for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes, activityLogRes, roomsRes, manufacturersRes]) {
     if (res.error) throw res.error;
   }
 
@@ -451,8 +455,9 @@ export async function fetchAdminData() {
   }));
 
   const rooms = roomsRes.data.map((r) => ({ id: r.id, floor: r.floor, type: r.type, name: r.name }));
+  const manufacturers = manufacturersRes.data.map((m) => ({ id: m.id, name: m.name }));
 
-  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog, rooms };
+  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog, rooms, manufacturers };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -633,6 +638,16 @@ export async function removeRoom(id) {
   if (error) throw error;
 }
 
+export async function addManufacturer(name) {
+  const { error } = await supabase.from("manufacturers").insert({ name });
+  if (error) throw error;
+}
+
+export async function removeManufacturer(id) {
+  const { error } = await supabase.from("manufacturers").delete().eq("id", id);
+  if (error) throw error;
+}
+
 /* Public-safe: unlike rooms, species_options has a public-select RLS policy
    (the picker it feeds appears on the anonymous request form, not just the
    admin side), so this is a plain select rather than an RPC. */
@@ -673,11 +688,13 @@ function requisitionFieldsToRow(payload) {
     project_title: payload.projectTitle,
     project_desc: nullIfEmpty(payload.projectDesc),
     set_temp: numOrNull(payload.setTemp),
+    night_temp: numOrNull(payload.nightTemp),
     set_humidity: numOrNull(payload.setHumidity),
     light_cycle: nullIfEmpty(payload.lightCycle),
     dawn_time: nullIfEmpty(payload.dawnTime),
     dusk_time: nullIfEmpty(payload.duskTime),
     pest_consent: !!payload.pestConsent,
+    invertebrate_welfare_ack: !!payload.invertebrateWelfareAck,
     dimming_required: !!payload.dimmingRequired,
     safety_compliance: !!payload.safetyCompliance,
     preferred_floor: nullIfEmpty(payload.preferredFloor),
@@ -711,6 +728,7 @@ function bookingFieldsFromRequisition(req) {
     discipline: req.discipline,
     species: req.species || [],
     set_temp: numOrNull(req.setTemp),
+    night_temp: numOrNull(req.nightTemp),
     set_humidity: numOrNull(req.setHumidity),
     light_cycle: nullIfEmpty(req.lightCycle),
     dawn_time: nullIfEmpty(req.dawnTime),
