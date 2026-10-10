@@ -34,6 +34,8 @@ const COLOR = {
   accent: "#009E73", accentDark: "#007A5A", accentSoft: "#E1F7F0", accentInk: "#053D2C",
   warning: "#C97A2B", warningSoft: "#FBEDDD",
   occupied: "#3B6EA5", occupiedSoft: "#E4EDF6", occupiedInk: "#1D3A57",
+  // Amended fields - the app's --overdue red.
+  changed: "#B23A34", changedSoft: "#FAE4E2",
 };
 const FONT_STACK = "'Plus Jakarta Sans','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
 
@@ -47,12 +49,15 @@ function pill(text: string, bg: string, color: string): string {
   return `<span style="display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;background:${bg};color:${color};margin:0 6px 6px 0;">${esc(text)}</span>`;
 }
 
-function detailRow(label: string, value: string): string {
-  if (!value) return "";
+// `was` (already escaped) marks the row as changed by an amendment: label
+// and value in red, with the previous value underneath.
+function detailRow(label: string, value: string, was?: string): string {
+  if (!value && was === undefined) return "";
+  const changed = was !== undefined;
   return `
     <tr>
-      <td style="padding:6px 0;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR.inkFaint};width:150px;vertical-align:top;">${esc(label)}</td>
-      <td style="padding:6px 0;font-size:14px;color:${COLOR.ink};font-weight:600;">${value}</td>
+      <td style="padding:6px 0;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${changed ? COLOR.changed : COLOR.inkFaint};width:150px;vertical-align:top;">${esc(label)}</td>
+      <td style="padding:6px 0;font-size:14px;color:${changed ? COLOR.changed : COLOR.ink};font-weight:600;">${value || "Not specified"}${changed ? `<div style="font-size:12px;font-weight:500;color:${COLOR.inkFaint};margin-top:2px;">was ${was || "not specified"}</div>` : ""}</td>
     </tr>`;
 }
 
@@ -100,73 +105,111 @@ function ctaButton(): string {
   return `<div style="margin-top:22px;"><a href="${APP_URL}" style="display:inline-block;padding:11px 20px;border-radius:10px;background:${COLOR.accentDark};color:#FFFFFF;font-family:${FONT_STACK};font-size:14px;font-weight:700;text-decoration:none;">Open in Growth Space Admin →</a></div>`;
 }
 
-// Admin-facing "a new requisition came in" preview - the full picture, so
-// an admin can review and decide without switching to the app first.
-function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string, dateRange: string): string {
+// Labels for the columns an amendment can change (requisitions.amended_fields).
+const FIELD_LABEL: Record<string, string> = {
+  researcher_name: "Name", email: "Email", role: "Role", emergency_number: "Emergency number",
+  lab_group_id: "PI", pi_name: "PI", unit_type: "Space type", discipline: "Research area",
+  species: "Species", containment_level: "Containment level", space_description: "Space requirements",
+  project_title: "Project title", project_desc: "Purpose of project", set_temp: "Day temp",
+  night_temp: "Night temp", set_humidity: "Humidity", light_cycle: "Light cycle",
+  dawn_time: "Dawn", dusk_time: "Dusk", pest_consent: "Pest consent",
+  invertebrate_welfare_ack: "Invertebrate Welfare Policy", dimming_required: "Dimming",
+  safety_compliance: "Safety compliance", preferred_floor: "Preferred floor",
+  start_date: "Start date", end_date: "End date", hazard_notes: "Hazard notes", notes: "Notes",
+};
+
+type Amendment = { fields: string[]; before: Record<string, any> };
+
+// Admin-facing preview of a new requisition - the full picture, so an
+// admin can review and decide without switching to the app first. With
+// `amendment`, it's the amended-requisition version: changed fields in red
+// with their previous values, and a summary of what changed at the top.
+function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string, amendment?: Amendment): string {
   const disciplineLabel = DISCIPLINE_LABEL[r.discipline] || r.discipline;
+  const changed = (...cols: string[]) => !!amendment && cols.some((c) => amendment.fields.includes(c));
+  // Escaped previous value for a changed row, else undefined (unchanged).
+  const was = (cols: string[], fmt: (x: Record<string, any>) => string) =>
+    changed(...cols) ? esc(fmt(amendment!.before)) : undefined;
+
+  const fmtDates = (x: Record<string, any>) => `${x.start_date} to ${x.end_date}`;
+  const fmtFloor = (x: Record<string, any>) => x.preferred_floor && x.preferred_floor !== "any" ? x.preferred_floor : "No preference";
+  // set_temp is the day temperature; night_temp the night one.
+  const fmtTemps = (x: Record<string, any>) => [
+    x.set_temp != null ? `${x.set_temp}°C day` : null,
+    x.night_temp != null ? `${x.night_temp}°C night` : null,
+  ].filter(Boolean).join(" / ");
+  const fmtHumidity = (x: Record<string, any>) => x.set_humidity != null ? `${x.set_humidity}% RH` : "";
+  const fmtDawnDusk = (x: Record<string, any>) => [
+    x.dawn_time ? `Dawn ${String(x.dawn_time).slice(0, 5)}` : null,
+    x.dusk_time ? `Dusk ${String(x.dusk_time).slice(0, 5)}` : null,
+  ].filter(Boolean).join(" / ");
+  const fmtSpecies = (x: Record<string, any>) => (x.species && x.species.length ? x.species.join(", ") : "None specified");
+
   const speciesHtml = (r.species && r.species.length)
-    ? r.species.map((s: string) => pill(s, COLOR.accentSoft, COLOR.accentInk)).join("")
+    ? r.species.map((s: string) => pill(s, changed("species") ? COLOR.changedSoft : COLOR.accentSoft, changed("species") ? COLOR.changed : COLOR.accentInk)).join("")
     : `<span style="font-size:13px;color:${COLOR.inkFaint};">None specified</span>`;
 
-  // set_temp is the day temperature; night_temp the night one.
-  const tempParts = [
-    r.set_temp != null ? `${r.set_temp}°C day` : null,
-    r.night_temp != null ? `${r.night_temp}°C night` : null,
-  ].filter(Boolean).join(" / ");
-
   const flags = [
-    r.pest_consent ? "Pest management consent given" : null,
-    r.invertebrate_welfare_ack ? "Invertebrate Welfare Policy read and understood" : null,
-    r.dimming_required ? "Corridor dimming required" : null,
-    r.safety_compliance ? "Safety compliance confirmed" : null,
-  ].filter(Boolean) as string[];
+    r.pest_consent ? ["pest_consent", "Pest management consent given"] : null,
+    r.invertebrate_welfare_ack ? ["invertebrate_welfare_ack", "Invertebrate Welfare Policy read and understood"] : null,
+    r.dimming_required ? ["dimming_required", "Corridor dimming required"] : null,
+    r.safety_compliance ? ["safety_compliance", "Safety compliance confirmed"] : null,
+  ].filter(Boolean) as [string, string][];
 
   const detailRows = [
-    detailRow("Requested dates", esc(dateRange)),
-    detailRow("Preferred floor", r.preferred_floor && r.preferred_floor !== "any" ? esc(r.preferred_floor) : "No preference"),
-    detailRow("Containment level", esc(r.containment_level)),
-    detailRow("Day / night temp", esc(tempParts)),
-    detailRow("Humidity", r.set_humidity != null ? esc(`${r.set_humidity}% RH`) : ""),
-    detailRow("Light cycle", esc(r.light_cycle)),
-    detailRow("Dawn / dusk", esc([r.dawn_time ? `Dawn ${String(r.dawn_time).slice(0, 5)}` : null, r.dusk_time ? `Dusk ${String(r.dusk_time).slice(0, 5)}` : null].filter(Boolean).join(" / "))),
+    detailRow("Requested dates", esc(fmtDates(r)), was(["start_date", "end_date"], fmtDates)),
+    detailRow("Preferred floor", esc(fmtFloor(r)), was(["preferred_floor"], fmtFloor)),
+    detailRow("Containment level", esc(r.containment_level), was(["containment_level"], (x) => x.containment_level || "")),
+    detailRow("Day / night temp", esc(fmtTemps(r)), was(["set_temp", "night_temp"], fmtTemps)),
+    detailRow("Humidity", esc(fmtHumidity(r)), was(["set_humidity"], fmtHumidity)),
+    detailRow("Light cycle", esc(r.light_cycle), was(["light_cycle"], (x) => x.light_cycle || "")),
+    detailRow("Dawn / dusk", esc(fmtDawnDusk(r)), was(["dawn_time", "dusk_time"], fmtDawnDusk)),
   ].join("");
 
+  const label = (text: string, cols: string[], gap = 4) =>
+    `<div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${changed(...cols) ? COLOR.changed : COLOR.inkFaint};margin-bottom:${gap}px;">${esc(text)}</div>`;
+  const wasLine = (cols: string[], fmt: (x: Record<string, any>) => string) =>
+    changed(...cols) ? `<div style="font-size:12px;color:${COLOR.inkFaint};margin-top:4px;">was ${esc(fmt(amendment!.before)) || "not specified"}</div>` : "";
+  const textSection = (text: string, col: string, bg?: string) => (r[col] || changed(col)) ? `
+    <div style="margin-top:16px;${bg ? `padding:12px 14px;border-radius:10px;background:${bg};` : ""}">
+      ${label(text, [col])}
+      <div style="font-size:13.5px;color:${changed(col) ? COLOR.changed : COLOR.ink};line-height:1.5;">${esc(r[col] || "Not specified")}</div>
+      ${wasLine([col], (x) => x[col] || "")}
+    </div>` : "";
+
+  const summary = amendment && amendment.fields.length ? `
+    <div style="margin-bottom:16px;padding:10px 14px;border-radius:10px;background:${COLOR.changedSoft};font-size:13px;color:${COLOR.changed};font-weight:600;">
+      Changed: ${esc([...new Set(amendment.fields.map((f) => FIELD_LABEL[f] || f))].join(", "))}
+    </div>` : "";
+
   const bodyHtml = `
+    ${summary}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">${detailRows}</table>
 
     <div style="margin-top:14px;">
-      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR.inkFaint};margin-bottom:6px;">Species</div>
+      ${label("Species", ["species"], 6)}
       ${speciesHtml}
+      ${wasLine(["species"], fmtSpecies)}
     </div>
 
-    ${r.space_description ? `
-    <div style="margin-top:16px;">
-      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR.inkFaint};margin-bottom:4px;">Space requirements</div>
-      <div style="font-size:13.5px;color:${COLOR.ink};line-height:1.5;">${esc(r.space_description)}</div>
-    </div>` : ""}
+    ${textSection("Space requirements", "space_description")}
 
     ${flags.length ? `
     <div style="margin-top:16px;">
-      ${flags.map((f) => `<div style="font-size:13.5px;color:${COLOR.ink};padding:2px 0;">✓&nbsp;&nbsp;${esc(f)}</div>`).join("")}
+      ${flags.map(([col, f]) => `<div style="font-size:13.5px;color:${changed(col) ? COLOR.changed : COLOR.ink};padding:2px 0;">✓&nbsp;&nbsp;${esc(f)}</div>`).join("")}
     </div>` : ""}
 
-    ${r.hazard_notes ? `
-    <div style="margin-top:16px;padding:12px 14px;border-radius:10px;background:${COLOR.warningSoft};">
-      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR.warning};margin-bottom:4px;">Hazard notes</div>
-      <div style="font-size:13.5px;color:${COLOR.ink};line-height:1.5;">${esc(r.hazard_notes)}</div>
-    </div>` : ""}
+    ${textSection("Hazard notes", "hazard_notes", COLOR.warningSoft)}
 
-    ${r.notes ? `
-    <div style="margin-top:16px;">
-      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR.inkFaint};margin-bottom:4px;">Notes</div>
-      <div style="font-size:13.5px;color:${COLOR.ink};line-height:1.5;">${esc(r.notes)}</div>
-    </div>` : ""}
+    ${textSection("Notes", "notes")}
 
     ${ctaButton()}`;
 
   return emailCard({
-    topBarColor: COLOR.accent,
-    eyebrowText: "New requisition", eyebrowBg: COLOR.accentSoft, eyebrowColor: COLOR.accentInk,
+    topBarColor: amendment ? COLOR.changed : COLOR.accent,
+    eyebrowText: amendment ? "Amended requisition" : "New requisition",
+    eyebrowBg: amendment ? COLOR.changedSoft : COLOR.accentSoft,
+    eyebrowColor: amendment ? COLOR.changed : COLOR.accentInk,
     title: r.project_title, code: r.code,
     metaHtml: `${esc(r.researcher_name)}${r.pi_name ? ` &middot; PI: ${esc(r.pi_name)}` : ""}${r.role ? ` &middot; ${esc(r.role)}` : ""}`,
     badgesHtml: `${pill(unitTypeLabel, COLOR.surfaceSoft, COLOR.ink)}${pill(disciplineLabel, COLOR.surfaceSoft, COLOR.ink)}`,
@@ -319,11 +362,12 @@ Deno.serve(async (req) => {
   const unit = req_.unit as { id: string; floor: string; room: string; type: string } | null;
   const assignedUnitTypeLabel = unit ? (UNIT_TYPE_LABEL[unit.type] || unit.type) : unitTypeLabel;
 
-  if (type === "new_requisition" || type === "end_date_reminder") {
+  if (type === "new_requisition" || type === "requisition_amended" || type === "end_date_reminder") {
     let emails: string[];
     try {
+      // Amendments go to whoever gets new-requisition emails.
       emails = await adminRecipients(
-        type === "new_requisition" ? "notify_new_requisition" : "notify_end_date_reminder",
+        type === "end_date_reminder" ? "notify_end_date_reminder" : "notify_new_requisition",
         req_.discipline,
       );
     } catch (adminErr) {
@@ -335,7 +379,16 @@ Deno.serve(async (req) => {
       await sendEmail(
         emails,
         `New requisition: ${req_.project_title}`,
-        renderRequisitionPreview(req_, unitTypeLabel, dateRange),
+        renderRequisitionPreview(req_, unitTypeLabel),
+      );
+    } else if (type === "requisition_amended") {
+      // amended_previous holds the reviewed version's values for just the
+      // changed columns - overlay them on the current row for "before".
+      const amendment: Amendment = { fields: req_.amended_fields || [], before: { ...req_, ...(req_.amended_previous || {}) } };
+      await sendEmail(
+        emails,
+        `Amended requisition: ${req_.project_title}`,
+        renderRequisitionPreview(req_, unitTypeLabel, amendment),
       );
     } else {
       await sendEmail(

@@ -124,7 +124,8 @@ public request form needs them without a session.
 
 **Email notifications**: `supabase/functions/notify-requisition` (Deno Edge Function, called via
 `pg_net` from triggers on `requisitions`, not from the frontend) sends Resend emails — admins get
-a full requisition preview when one comes in; the requester gets a slimmer "approved and
+a full requisition preview when one comes in (and an "amended requisition" version, changed
+fields in red, when a researcher amends one - see schema.sql section 24); the requester gets a slimmer "approved and
 assigned" email once a unit is assigned, re-sent if an admin later edits the dates or unit; and
 admins get an "ending soon" email ~2 weeks before an approved requisition's end date (daily
 `pg_cron` job `send-end-date-reminders`, re-armed if the end date moves). Admin emails respect

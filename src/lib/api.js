@@ -337,6 +337,15 @@ function mapRequisitionRow(r) {
     submittedAt: r.submitted_date || null,
     decidedAt: r.decided_date || null,
     completedAt: r.completed_date || null,
+    // Researcher amendments (see 20261010150000_requisition_amendments.sql):
+    // amendedFields lists the DB columns changed since the last reviewed
+    // version; amendedPrevious is that reviewed version, mapped like any
+    // requisition (its stored values overlaid on this row's).
+    amendedAt: r.amended_at || null,
+    amendedFields: r.amended_fields || [],
+    amendedPrevious: r.amended_previous
+      ? mapRequisitionRow({ ...r, ...r.amended_previous, amended_previous: null })
+      : null,
   };
 }
 
@@ -352,7 +361,10 @@ export async function fetchAdminData() {
 
   const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes, roomsRes, manufacturersRes] = await Promise.all([
     supabase.from("units").select("*"),
-    supabase.from("bookings").select("*, requisitions!inner(status, admin_notes)").eq("requisitions.status", "approved"),
+    // "pending" too: an approved requisition that's been amended keeps its
+    // booking (and its unit stays occupied) while the amendment is reviewed.
+    // Nothing else pending has a booking.
+    supabase.from("bookings").select("*, requisitions!inner(status, admin_notes)").in("requisitions.status", ["approved", "pending"]),
     supabase.from("service_log").select("*, maintenance_categories(name)"),
     supabase.from("requisitions").select("*").order("submitted_date", { ascending: true }),
     fetchMaintenanceCategories(),
@@ -792,13 +804,23 @@ export async function amendRequisition(reqId, payload) {
   if (error) throw error;
 }
 
+/* An amended, previously approved requisition still has its booking -
+   approving the amendment updates that booking (unit and details) rather
+   than adding a second one, and declining it restores the original
+   approved version via decline_amendment(). */
 export async function decideRequisition(req, decision, unitId, decidedByUserId) {
+  if (decision === "declined" && req.amendedPrevious?.status === "approved") {
+    const { error } = await supabase.rpc("decline_amendment", { p_requisition_id: req.id });
+    if (error) throw error;
+    return;
+  }
   if (decision === "approved" && unitId) {
-    const { error: bookingError } = await supabase.from("bookings").insert({
-      unit_id: unitId,
-      requisition_id: req.id,
-      ...bookingFieldsFromRequisition(req),
-    });
+    const { data: existing, error: findError } = await supabase.from("bookings").select("id").eq("requisition_id", req.id);
+    if (findError) throw findError;
+    const bookingRow = { unit_id: unitId, ...bookingFieldsFromRequisition(req) };
+    const { error: bookingError } = existing.length
+      ? await supabase.from("bookings").update(bookingRow).eq("requisition_id", req.id)
+      : await supabase.from("bookings").insert({ ...bookingRow, requisition_id: req.id });
     if (bookingError) throw bookingError;
 
     const { error } = await supabase

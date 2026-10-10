@@ -256,10 +256,13 @@ function rangesOverlap(aStart, aEnd, bStart, bEnd) {
    UnitDetailContent, which never restrict or flag reftech on overlap) - so
    an existing overlapping booking never makes one unavailable, only being
    out of service does. Cabinets are single-occupancy: any overlap blocks. */
-function unitAvailableForWindow(unit, startDate, endDate) {
+// ownRequisitionId: an amended, already-approved requisition still holds
+// its own booking - that booking mustn't count against its own unit.
+function unitAvailableForWindow(unit, startDate, endDate, ownRequisitionId = null) {
   if (unit.status === "service") return false;
   if (unit.type === "reftech") return true;
   if (!unit.occupant) return true;
+  if (ownRequisitionId && unit.occupant.requisitionId === ownRequisitionId) return true;
   return !rangesOverlap(unit.occupant.startDate, unit.occupant.endDate, startDate, endDate);
 }
 /* Find the requisition index matching a booking/occupant record, so timeline & drawer bookings can link back */
@@ -277,6 +280,33 @@ function findRequisitionIndex(requests, o) {
   const idx = requests.findIndex((r) => r.researcher === o.researcher && r.startDate === o.startDate && r.endDate === o.endDate);
   return idx === -1 ? null : idx;
 }
+/* A researcher's amendment awaiting review, as opposed to a brand-new
+   requisition (see 20261010150000_requisition_amendments.sql). */
+function isPendingAmendment(r) {
+  return r.status === "pending" && !!r.amendedAt && !!r.amendedPrevious;
+}
+/* "New" / "Amended <date>" tag for a requisition awaiting review. */
+function ReviewKindTag({ req }) {
+  if (req.status !== "pending") return null;
+  const amended = isPendingAmendment(req);
+  return (
+    <span className="text-[10.5px] font-bold uppercase tracking-wide rounded px-1.5 py-0.5 flex-shrink-0" style={amended ? { background: "var(--overdue-soft)", color: "var(--overdue)" } : { background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
+      {amended ? `Amended ${fmtGB(req.amendedAt.slice(0, 10))}` : "New"}
+    </span>
+  );
+}
+
+/* Shown above Approve/Decline for an amendment to an already-approved
+   requisition, whose original booking stays in place during review. */
+function AmendedApprovalNote({ req }) {
+  if (!(req.status === "pending" && req.amendedPrevious?.status === "approved")) return null;
+  return (
+    <p className="text-[11.5px]" style={{ color: "var(--ink-soft)" }}>
+      Already approved{req.assignedUnitId ? ` on ${req.assignedUnitId}` : ""} - approving updates that booking; declining keeps the original approved version.
+    </p>
+  );
+}
+
 /* Which Requisitions-page tab a given requisition belongs on. "Active" covers anything not yet
    closed out - still awaiting review, or approved and ongoing. "Completed" is anything closed:
    declined outright, or manually confirmed finished by an admin. */
@@ -835,6 +865,8 @@ const OKABE_ITO = [
 // Text colour for each swatch above when used as a solid badge fill - everything is white-on-colour
 // except the yellows (both light and dark), which need dark text to stay readable (WCAG contrast
 // checked directly: yellow-dark clears only 2.6:1 with white text vs >=4.5:1 needed).
+// Outline for requisitions awaiting review - the space usage graph's orange.
+const PENDING_ORANGE = OKABE_ITO[0];
 // Humidity sliders on the request form use the same blue as the space
 // usage graph (OKABE_ITO's "blue" slot).
 const HUMIDITY_BLUE = OKABE_ITO[4];
@@ -2235,11 +2267,17 @@ function BoxLabel({ children }) {
 }
 /* Definition-list style field row - label left, value right, a hairline divider between rows.
    Arranged two-up by the caller (FieldGrid) so it stays compact without feeling like a spreadsheet. */
-function FieldPair({ label, value }) {
+// `was` marks the row as changed by an amendment awaiting review: label and
+// value in red, with the previous value underneath.
+function FieldPair({ label, value, was }) {
+  const changed = was !== undefined;
   return (
     <div className="grid items-baseline gap-3 py-2.5 min-w-0" style={{ gridTemplateColumns: "auto 1fr", borderTop: "1px solid rgba(22,33,29,0.07)" }}>
-      <span className="text-[12.5px]" style={{ color: "var(--ink-faint)" }}>{label}</span>
-      <span className="text-[13px] font-medium text-right min-w-0" style={{ color: "var(--ink)", overflowWrap: "break-word", wordBreak: "break-word" }}>{value}</span>
+      <span className="text-[12.5px]" style={{ color: changed ? "var(--overdue)" : "var(--ink-faint)", fontWeight: changed ? 600 : 400 }}>{label}</span>
+      <span className="text-[13px] font-medium text-right min-w-0" style={{ color: changed ? "var(--overdue)" : "var(--ink)", overflowWrap: "break-word", wordBreak: "break-word" }}>
+        {value}
+        {changed && <span className="block text-[11.5px] font-normal mt-0.5" style={{ color: "var(--ink-faint)" }}>was {was}</span>}
+      </span>
     </div>
   );
 }
@@ -3048,18 +3086,42 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
 /* ---------------------------------------------------------------------- */
 /* Every field a researcher can submit on the Request Space form - shown in full to admins,
    reused by both the Requisitions page cards and the timeline's requisition preview panel. */
+/* Free-text section of RequisitionDetailFields; `was` as for FieldPair. */
+function TextField({ label, value, was }) {
+  const changed = was !== undefined;
+  return (
+    <div>
+      <SectionLabel><span style={changed ? { color: "var(--overdue)" } : undefined}>{label}</span></SectionLabel>
+      <p className="text-sm mt-2" style={{ color: changed ? "var(--overdue)" : "var(--ink-soft)" }}>{value || "-"}</p>
+      {changed && <p className="text-[11.5px] mt-1" style={{ color: "var(--ink-faint)" }}>was {was || "-"}</p>}
+    </div>
+  );
+}
 function RequisitionDetailFields({ req }) {
   const isPlant = req.discipline === "plant";
+  // While an amendment awaits review, fields it changed show in red with
+  // their previously reviewed value. `amend(cols, fmt)` gives FieldPair its
+  // `was` prop when any of those DB columns changed, formatting the
+  // previous version (req.amendedPrevious) the same way as the current one.
+  const prev = isPendingAmendment(req) ? req.amendedPrevious : null;
+  const isChanged = (...cols) => !!prev && cols.some((c) => req.amendedFields.includes(c));
+  const amend = (cols, fmt) => (isChanged(...cols) ? { was: fmt(prev) } : {});
+  const field = (label, cols, fmt) => <FieldPair label={label} value={fmt(req)} {...amend(cols, fmt)} />;
+
+  const fmtSpecies = (x) => (x.species && x.species.length ? x.species.join(", ") : "-");
+  const fmtHumidity = (x) => (isSet(x.setHumidity) ? `${x.setHumidity}% RH` : "Not specified");
+  const fmtFloor = (x) => (x.preferredFloor === "any" ? "No preference" : FLOOR_LABEL[x.preferredFloor]);
   return (
     <div className="space-y-4">
       <InfoBox>
         <BoxLabel>Requester</BoxLabel>
         <FieldGrid>
-          <FieldPair label="Name" value={req.researcher} />
-          <FieldPair label="Role" value={req.role || "-"} />
-          <FieldPair label="Email" value={req.email} />
-          <FieldPair label="Emergency number" value={req.emergencyNumber || "-"} />
-          <FieldPair label="PI/Supervisor" value={req.pi || "-"} />
+          {field("Name", ["researcher_name"], (x) => x.researcher)}
+          {field("Role", ["role"], (x) => x.role || "-")}
+          {field("Email", ["email"], (x) => x.email)}
+          {field("Emergency number", ["emergency_number"], (x) => x.emergencyNumber || "-")}
+          {field("PI/Supervisor", ["pi_name", "lab_group_id"], (x) => x.pi || "-")}
+          {isChanged("project_title") && field("Project title", ["project_title"], (x) => x.projectTitle)}
         </FieldGrid>
       </InfoBox>
 
@@ -3068,51 +3130,47 @@ function RequisitionDetailFields({ req }) {
         <FieldGrid>
           <FieldPair label="Space type" value={req.unitType === "reftech" ? "Reftech Room" : "Growth cabinet"} />
           <FieldPair label="Research area" value={DISCIPLINE_META[req.discipline].label} />
-          <FieldPair label="Species" value={req.species && req.species.length ? req.species.join(", ") : "-"} />
-          {isPlant && <FieldPair label="Containment level" value={req.containmentLevel || "-"} />}
-          <FieldPair label="Day / night temp" value={fmtTemps(req.setTemp, req.nightTemp)} />
-          <FieldPair label="Humidity" value={isSet(req.setHumidity) ? `${req.setHumidity}% RH` : "Not specified"} />
-          <FieldPair label="Light cycle" value={req.lightCycle || "Not specified"} />
-          <FieldPair label="Photoperiod (dawn / dusk)" value={fmtDawnDusk(req.dawnTime, req.duskTime)} />
+          {field("Species", ["species"], fmtSpecies)}
+          {isPlant && field("Containment level", ["containment_level"], (x) => x.containmentLevel || "-")}
+          {field("Day / night temp", ["set_temp", "night_temp"], (x) => fmtTemps(x.setTemp, x.nightTemp))}
+          {field("Humidity", ["set_humidity"], fmtHumidity)}
+          {field("Light cycle", ["light_cycle"], (x) => x.lightCycle || "Not specified")}
+          {field("Photoperiod (dawn / dusk)", ["dawn_time", "dusk_time"], (x) => fmtDawnDusk(x.dawnTime, x.duskTime))}
           {isPlant ? (
-            <FieldPair label="Pest outbreak consent" value={req.pestConsent ? "Consented" : "Not given"} />
+            field("Pest outbreak consent", ["pest_consent"], (x) => (x.pestConsent ? "Consented" : "Not given"))
           ) : (
             <>
-              <FieldPair label="Invertebrate Welfare Policy" value={req.invertebrateWelfareAck ? "Read and understood" : "Not confirmed"} />
-              <FieldPair label="Dimming required" value={req.dimmingRequired ? "Yes" : "No"} />
+              {field("Invertebrate Welfare Policy", ["invertebrate_welfare_ack"], (x) => (x.invertebrateWelfareAck ? "Read and understood" : "Not confirmed"))}
+              {field("Dimming required", ["dimming_required"], (x) => (x.dimmingRequired ? "Yes" : "No"))}
             </>
           )}
-          <FieldPair label="Safety compliance" value={req.safetyCompliance ? "Confirmed" : "Not confirmed"} />
+          {field("Safety compliance", ["safety_compliance"], (x) => (x.safetyCompliance ? "Confirmed" : "Not confirmed"))}
         </FieldGrid>
       </InfoBox>
 
       <InfoBox>
         <BoxLabel>Schedule</BoxLabel>
         <FieldGrid>
-          <FieldPair label="Dates requested" value={`${fmtGB(req.startDate)} → ${fmtGB(req.endDate)}`} />
-          <FieldPair label="Preferred floor" value={req.preferredFloor === "any" ? "No preference" : FLOOR_LABEL[req.preferredFloor]} />
-          <FieldPair label="Submitted" value={fmtGB(req.submittedDate) || "-"} />
+          {field("Dates requested", ["start_date", "end_date"], (x) => `${fmtGB(x.startDate)} → ${fmtGB(x.endDate)}`)}
+          {field("Preferred floor", ["preferred_floor"], fmtFloor)}
+          {/* An amendment resets submittedDate to when it was amended - the
+              original submission date lives on the previous version. */}
+          <FieldPair label="Submitted" value={fmtGB((prev || req).submittedDate) || "-"} />
+          {prev && <FieldPair label="Amended" value={fmtGB(req.amendedAt.slice(0, 10))} />}
           {req.decidedDate && <FieldPair label="Decided" value={fmtGB(req.decidedDate)} />}
           {req.assignedUnitId && <FieldPair label="Assigned unit" value={req.assignedUnitId} />}
         </FieldGrid>
       </InfoBox>
 
       <div className="space-y-4">
-        <div>
-          <SectionLabel>Space required</SectionLabel>
-          <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>{req.spaceDescription || "-"}</p>
-        </div>
-        <div>
-          <SectionLabel>Purpose of project</SectionLabel>
-          <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>{req.projectDesc || "-"}</p>
-        </div>
-        {req.notes && (
-          <div>
-            <SectionLabel>Additional notes</SectionLabel>
-            <p className="text-sm mt-2" style={{ color: "var(--ink-soft)" }}>{req.notes}</p>
-          </div>
+        <TextField label="Space required" value={req.spaceDescription} {...amend(["space_description"], (x) => x.spaceDescription)} />
+        <TextField label="Purpose of project" value={req.projectDesc} {...amend(["project_desc"], (x) => x.projectDesc)} />
+        {(req.notes || isChanged("notes")) && (
+          <TextField label="Additional notes" value={req.notes} {...amend(["notes"], (x) => x.notes)} />
         )}
-        {req.hazardNotes && (
+        {isChanged("hazard_notes") ? (
+          <TextField label="Hazard notes" value={req.hazardNotes} was={prev.hazardNotes} />
+        ) : req.hazardNotes && (
           <div className="flex items-start gap-2 rounded-lg p-3" style={{ background: "var(--warning-soft)" }}>
             <ShieldAlert size={14} className="mt-0.5 flex-shrink-0" style={{ color: "var(--warning)" }} />
             <p className="text-xs" style={{ color: "var(--ink)" }}>{req.hazardNotes}</p>
@@ -3263,7 +3321,9 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
 function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, onDelete, startExpanded = false }) {
   const [expanded, setExpanded] = useState(startExpanded);
   const [editing, setEditing] = useState(false);
-  const [chosenUnit, setChosenUnit] = useState("");
+  // An amended, already-approved requisition keeps its unit unless changed.
+  const amendsApproval = req.status === "pending" && req.amendedPrevious?.status === "approved";
+  const [chosenUnit, setChosenUnit] = useState(amendsApproval ? req.assignedUnitId || "" : "");
   const [reassigning, setReassigning] = useState(false);
   const [reassignUnit, setReassignUnit] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -3273,7 +3333,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   // regardless of what discipline the requisition is for.
   const windowCandidates = units.filter((u) =>
     u.type === req.unitType
-    && unitAvailableForWindow(u, req.startDate, req.endDate)
+    && unitAvailableForWindow(u, req.startDate, req.endDate, req.id)
   );
   const STATUS_STYLE = {
     pending: { label: "Pending review", color: "var(--warning)", soft: "var(--warning-soft)" },
@@ -3294,7 +3354,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   return (
     <div
       className="rounded-2xl overflow-hidden"
-      style={{ border: req.status === "pending" ? "1.5px solid var(--warning)" : "1px solid var(--border)", background: "var(--surface)" }}
+      style={{ border: req.status === "pending" ? `2.5px solid ${PENDING_ORANGE}` : "1px solid var(--border)", background: "var(--surface)" }}
     >
       <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-3.5 p-4 text-left">
         <span className="w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-extrabold flex-shrink-0" style={{ background: avatarColor, color: avatarText }}>
@@ -3304,6 +3364,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
           <div className="flex items-center gap-2">
             <div className="text-sm font-bold truncate">{req.researcher}</div>
             {req.code && <span className="gc-mono text-[10.5px] font-bold px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "var(--surface-soft)", color: "var(--ink-faint)" }}>{req.code}</span>}
+            <ReviewKindTag req={req} />
           </div>
           <div className="text-xs mt-0.5 truncate" style={{ color: "var(--ink-faint)" }}>{req.projectTitle} · {piDisplay(req.labGroup)}</div>
         </div>
@@ -3349,17 +3410,18 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                     <option value="">Select an available unit…</option>
                     {windowCandidates.map((u) => (
                       <option key={u.id} value={u.id}>
-                        {u.id} - {FLOOR_LABEL[u.floor]}, {u.room}{displayStatus(u).key !== "free" ? " (free by requested start date)" : ""}
+                        {u.id} - {FLOOR_LABEL[u.floor]}, {u.room}{u.id === req.assignedUnitId && amendsApproval ? " (current unit)" : displayStatus(u).key !== "free" ? " (free by requested start date)" : ""}
                       </option>
                     ))}
                   </select>
                   {windowCandidates.length === 0 && <p className="text-xs" style={{ color: "var(--overdue)" }}>No units match this request's type & discipline for the requested dates.</p>}
+                  <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
                     <button disabled={!chosenUnit} onClick={() => onDecide(index, "approved", chosenUnit)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--free)" }}>
                       <CheckCircle2 size={14} /> Approve & assign
                     </button>
                     <button onClick={() => onDecide(index, "declined")} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: "var(--overdue)", color: "var(--overdue)" }}>
-                      <XCircle size={14} /> Decline
+                      <XCircle size={14} /> {amendsApproval ? "Decline amendment" : "Decline"}
                     </button>
                   </div>
                 </div>
@@ -3436,7 +3498,9 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
    overlays on top; that view stays visible behind it), with an option to
    jump to the full Requisitions page. */
 function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComplete, onRevert, onReassign, onDelete, onClose, onOpenFull, backToUnitId }) {
-  const [chosenUnit, setChosenUnit] = useState("");
+  // An amended, already-approved requisition keeps its unit unless changed.
+  const amendsApproval = req.status === "pending" && req.amendedPrevious?.status === "approved";
+  const [chosenUnit, setChosenUnit] = useState(amendsApproval ? req.assignedUnitId || "" : "");
   const [editing, setEditing] = useState(false);
   const [reassigning, setReassigning] = useState(false);
   const [reassignUnit, setReassignUnit] = useState("");
@@ -3451,7 +3515,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   const statusColor = STATUS_STYLE[req.status].color;
   const statusSoft = STATUS_STYLE[req.status].soft;
   const windowCandidates = units.filter((u) =>
-    u.type === req.unitType && unitAvailableForWindow(u, req.startDate, req.endDate)
+    u.type === req.unitType && unitAvailableForWindow(u, req.startDate, req.endDate, req.id)
   );
   const saveEdit = (updated) => { onEdit(index, updated); setEditing(false); };
 
@@ -3471,6 +3535,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
             <div className="flex items-center gap-2 mb-1">
               <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-faint)" }}>Requisition</div>
               {req.code && <span className="gc-mono text-[10.5px] font-bold px-1.5 py-0.5 rounded" style={{ background: "var(--surface-soft)", color: "var(--ink-faint)" }}>{req.code}</span>}
+              <ReviewKindTag req={req} />
             </div>
             <h1 className="gc-display text-2xl font-extrabold leading-none truncate">{req.researcher}</h1>
             <p className="text-[13px] mt-1 truncate" style={{ color: "var(--ink-soft)" }}>{req.projectTitle}</p>
@@ -3512,12 +3577,13 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                     <option value="">Select an available unit…</option>
                     {windowCandidates.map((u) => <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room}</option>)}
                   </select>
+                  <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
                     <button disabled={!chosenUnit} onClick={() => { onDecide(index, "approved", chosenUnit); onClose(); }} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--free)" }}>
                       <CheckCircle2 size={14} /> Approve & assign
                     </button>
                     <button onClick={() => { onDecide(index, "declined"); onClose(); }} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: "var(--overdue)", color: "var(--overdue)" }}>
-                      <XCircle size={14} /> Decline
+                      <XCircle size={14} /> {amendsApproval ? "Decline amendment" : "Decline"}
                     </button>
                   </div>
                 </div>
@@ -3697,12 +3763,20 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
         <div className="space-y-6">
           <section>
             <SectionLabel>Pending review ({awaitingReview.length})</SectionLabel>
-            <div className="space-y-3 mt-3">
-              {awaitingReview.map(({ r, i }) => (
-                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
-              ))}
-              {awaitingReview.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>Nothing waiting on a decision right now.</p>}
-            </div>
+            {awaitingReview.length === 0 && <p className="text-sm mt-3" style={{ color: "var(--ink-faint)" }}>Nothing waiting on a decision right now.</p>}
+            {[
+              { key: "new", title: "New requisitions", items: awaitingReview.filter(({ r }) => !isPendingAmendment(r)) },
+              { key: "amended", title: "Amended requisitions", items: awaitingReview.filter(({ r }) => isPendingAmendment(r)) },
+            ].filter((g) => g.items.length > 0).map((g) => (
+              <div key={g.key} className="mt-3">
+                <div className="text-xs font-bold mb-2" style={{ color: g.key === "amended" ? "var(--overdue)" : "var(--ink-soft)" }}>{g.title} ({g.items.length})</div>
+                <div className="space-y-3">
+                  {g.items.map(({ r, i }) => (
+                    <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
+                  ))}
+                </div>
+              </div>
+            ))}
           </section>
 
           <section>
