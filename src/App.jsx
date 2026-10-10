@@ -146,22 +146,23 @@ const TOKENS = `
   }
   /* Modern slider: thin two-tone track (filled portion painted by
      --gc-slider-fill, set inline per-instance) with a larger bordered
-     thumb, in place of the browser's default thin grey scrubber. */
+     thumb, in place of the browser's default thin grey scrubber.
+     --gc-slider-color overrides the accent green per instance. */
   .gc-slider {
     -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 999px;
-    background: linear-gradient(to right, var(--accent) 0%, var(--accent) var(--gc-slider-fill, 0%), var(--border) var(--gc-slider-fill, 0%), var(--border) 100%);
+    background: linear-gradient(to right, var(--gc-slider-color, var(--accent)) 0%, var(--gc-slider-color, var(--accent)) var(--gc-slider-fill, 0%), var(--border) var(--gc-slider-fill, 0%), var(--border) 100%);
     outline: none; cursor: pointer;
   }
   .gc-slider::-webkit-slider-thumb {
     -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
-    background: var(--surface); border: 3px solid var(--accent); box-shadow: 0 2px 6px rgba(22,33,29,0.25);
+    background: var(--surface); border: 3px solid var(--gc-slider-color, var(--accent)); box-shadow: 0 2px 6px rgba(22,33,29,0.25);
     cursor: pointer; transition: transform 0.12s;
   }
   .gc-slider::-webkit-slider-thumb:hover { transform: scale(1.12); }
   .gc-slider::-moz-range-track { height: 6px; border-radius: 999px; background: var(--border); }
-  .gc-slider::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--accent); }
+  .gc-slider::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--gc-slider-color, var(--accent)); }
   .gc-slider::-moz-range-thumb {
-    width: 20px; height: 20px; border-radius: 50%; background: var(--surface); border: 3px solid var(--accent);
+    width: 20px; height: 20px; border-radius: 50%; background: var(--surface); border: 3px solid var(--gc-slider-color, var(--accent));
     box-shadow: 0 2px 6px rgba(22,33,29,0.25); cursor: pointer; transition: transform 0.12s;
   }
   .gc-slider::-moz-range-thumb:hover { transform: scale(1.12); }
@@ -833,6 +834,9 @@ const OKABE_ITO = [
 // Text colour for each swatch above when used as a solid badge fill - everything is white-on-colour
 // except the yellows (both light and dark), which need dark text to stay readable (WCAG contrast
 // checked directly: yellow-dark clears only 2.6:1 with white text vs >=4.5:1 needed).
+// Humidity sliders on the request form use the same blue as the space
+// usage graph (OKABE_ITO's "blue" slot).
+const HUMIDITY_BLUE = OKABE_ITO[4];
 const OKABE_ITO_TEXT = [
   "#fff", "#fff", "#fff", "#16211D", "#fff", "#fff", "#fff", "#fff",
   "#16211D", "#fff", "#fff", "#fff", "#fff", "#fff", "#fff", "#fff",
@@ -3787,20 +3791,22 @@ const WIZARD_STEPS_NEW = ["mode", "spaceType", "discipline", "form"];
 const WIZARD_STEPS_AMEND = ["mode", "spaceType", "discipline", "pickExisting", "form"];
 
 /* Small components used only by the discipline-specific request forms */
-function SliderField({ label, value, onChange, min, max, unit, icon: Icon }) {
+/* `color` (a hex) recolours the track, thumb, icon and value badge -
+   omit it for the default accent green. */
+function SliderField({ label, value, onChange, min, max, unit, icon: Icon, color }) {
   const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--ink-soft)" }}>
-          {Icon && <Icon size={13} style={{ color: "var(--accent-dark)" }} />}
+          {Icon && <Icon size={13} style={{ color: color || "var(--accent-dark)" }} />}
           {label}
         </span>
-        <span className="text-sm font-extrabold gc-mono px-2 py-0.5 rounded-lg" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>{value}{unit}</span>
+        <span className="text-sm font-extrabold gc-mono px-2 py-0.5 rounded-lg" style={color ? { background: `${color}1A`, color } : { background: "var(--accent-soft)", color: "var(--accent-ink)" }}>{value}{unit}</span>
       </div>
       <input
         type="range" min={min} max={max} value={value} onChange={onChange}
-        className="w-full gc-slider" style={{ "--gc-slider-fill": `${pct}%` }}
+        className="w-full gc-slider" style={{ "--gc-slider-fill": `${pct}%`, ...(color ? { "--gc-slider-color": color } : {}) }}
       />
     </div>
   );
@@ -3808,13 +3814,13 @@ function SliderField({ label, value, onChange, min, max, unit, icon: Icon }) {
 /* SliderField for a value that may be left blank (reftech conditions).
    A slider always has *some* value, so blank is its own state here: shows
    "Not specified" plus an Add button, and a Clear link once it's set. */
-function OptionalSliderField({ label, value, onChange, onClear, defaultValue, min, max, unit, icon: Icon }) {
+function OptionalSliderField({ label, value, onChange, onClear, defaultValue, min, max, unit, icon: Icon, color }) {
   if (!isSet(value)) {
     return (
       <div>
         <div className="flex items-center justify-between mb-2">
           <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--ink-soft)" }}>
-            {Icon && <Icon size={13} style={{ color: "var(--accent-dark)" }} />}
+            {Icon && <Icon size={13} style={{ color: color || "var(--accent-dark)" }} />}
             {label}
           </span>
           <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>Not specified</span>
@@ -3827,7 +3833,7 @@ function OptionalSliderField({ label, value, onChange, onClear, defaultValue, mi
   }
   return (
     <div>
-      <SliderField label={label} value={value} onChange={onChange} min={min} max={max} unit={unit} icon={Icon} />
+      <SliderField label={label} value={value} onChange={onChange} min={min} max={max} unit={unit} icon={Icon} color={color} />
       <button type="button" onClick={onClear} className="text-xs font-semibold underline mt-1" style={{ color: "var(--ink-faint)" }}>Clear</button>
     </div>
   );
@@ -4448,13 +4454,13 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
               <>
                 <OptionalSliderField label="Day temperature (optional)" value={form.setTemp} onChange={setNum("setTemp")} onClear={() => setForm((f) => ({ ...f, setTemp: null }))} defaultValue={isPlant ? 22 : 25} min={0} max={60} unit="°C" icon={Sun} />
                 <OptionalSliderField label="Night temperature (optional)" value={form.nightTemp} onChange={setNum("nightTemp")} onClear={() => setForm((f) => ({ ...f, nightTemp: null }))} defaultValue={isPlant ? 22 : 25} min={0} max={60} unit="°C" icon={Moon} />
-                <OptionalSliderField label="Humidity (optional)" value={form.setHumidity} onChange={setNum("setHumidity")} onClear={() => setForm((f) => ({ ...f, setHumidity: null }))} defaultValue={isPlant ? 60 : 65} min={0} max={100} unit="%" icon={Droplets} />
+                <OptionalSliderField label="Humidity (optional)" value={form.setHumidity} onChange={setNum("setHumidity")} onClear={() => setForm((f) => ({ ...f, setHumidity: null }))} defaultValue={isPlant ? 60 : 65} min={0} max={100} unit="%" icon={Droplets} color={HUMIDITY_BLUE} />
               </>
             ) : (
               <>
                 <SliderField label="Day temperature" value={form.setTemp} onChange={setNum("setTemp")} min={0} max={60} unit="°C" icon={Sun} />
                 <SliderField label="Night temperature" value={form.nightTemp} onChange={setNum("nightTemp")} min={0} max={60} unit="°C" icon={Moon} />
-                <SliderField label="Humidity" value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" icon={Droplets} />
+                <SliderField label="Humidity" value={form.setHumidity} onChange={setNum("setHumidity")} min={0} max={100} unit="%" icon={Droplets} color={HUMIDITY_BLUE} />
               </>
             )}
           </div>
