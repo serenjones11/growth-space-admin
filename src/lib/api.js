@@ -638,6 +638,26 @@ export async function removeRoom(id) {
   if (error) throw error;
 }
 
+/* Renames carry through to units: units.room / units.manufacturer are free
+   text (not foreign keys), so units using the old name are updated too -
+   for rooms, only units on the same floor and of the same type. The list
+   row is renamed first, so a duplicate-name error stops before any unit
+   is touched. */
+export async function renameRoom(id, floor, type, oldName, newName) {
+  const { error } = await supabase.from("rooms").update({ name: newName }).eq("id", id);
+  if (error) throw error;
+  const { error: unitsError } = await supabase.from("units").update({ room: newName })
+    .eq("floor", floor).eq("type", type).eq("room", oldName);
+  if (unitsError) throw unitsError;
+}
+
+export async function renameManufacturer(id, oldName, newName) {
+  const { error } = await supabase.from("manufacturers").update({ name: newName }).eq("id", id);
+  if (error) throw error;
+  const { error: unitsError } = await supabase.from("units").update({ manufacturer: newName }).eq("manufacturer", oldName);
+  if (unitsError) throw unitsError;
+}
+
 export async function addManufacturer(name) {
   const { error } = await supabase.from("manufacturers").insert({ name });
   if (error) throw error;

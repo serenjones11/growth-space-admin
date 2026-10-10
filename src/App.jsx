@@ -8,6 +8,7 @@ import {
   Search,
   PlusCircle,
   Pencil,
+  Check,
   Moon,
   Droplets,
   Wrench,
@@ -2887,7 +2888,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
 /* ---------------------------------------------------------------------- */
 /* Add / edit unit modal                                                  */
 /* ---------------------------------------------------------------------- */
-function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoom, manufacturers, onAddManufacturer, onDeleteManufacturer }) {
+function AddEditUnitModal({ unit, units, onClose, onSave, rooms, onAddRoom, onRenameRoom, onDeleteRoom, manufacturers, onAddManufacturer, onRenameManufacturer, onDeleteManufacturer }) {
   const isEdit = !!unit;
   const [form, setForm] = useState(
     unit
@@ -2961,23 +2962,29 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onDeleteRoo
                 {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
               </select>
             </Field>
-            <Field label="Room">
-              <RoomField
-                floor={form.floor} type={form.type} room={form.room} rooms={rooms}
+            {/* Rooms belong to one floor and unit type, so the list is scoped to
+                both and the scope is shown on the field itself. */}
+            <div className="sm:col-span-2">
+              <ManagedSelectField
+                label="Room" noun="room" addTo={FLOOR_LABEL[form.floor]}
+                scope={`${FLOOR_LABEL[form.floor]} · ${form.type === "reftech" ? "Reftech rooms" : "Growth cabinets"}`}
+                value={form.room} options={rooms.filter((r) => r.floor === form.floor && r.type === form.type)}
                 onChange={(v) => setForm((f) => ({ ...f, room: v }))}
                 onAdd={(name) => onAddRoom(form.floor, form.type, name)}
+                onRename={(row, name) => onRenameRoom(row, name)}
                 onDelete={onDeleteRoom}
+                unitCountFor={(name) => units.filter((u) => u.floor === form.floor && u.type === form.type && u.room === name).length}
               />
-            </Field>
+            </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Manufacturer">
-              <ManagedSelectField
-                value={form.manufacturer} options={manufacturers}
-                onChange={(v) => setForm((f) => ({ ...f, manufacturer: v }))}
-                onAdd={onAddManufacturer} onDelete={onDeleteManufacturer} noun="manufacturer"
-              />
-            </Field>
+            <ManagedSelectField
+              label="Manufacturer" noun="manufacturer"
+              value={form.manufacturer} options={manufacturers}
+              onChange={(v) => setForm((f) => ({ ...f, manufacturer: v }))}
+              onAdd={onAddManufacturer} onRename={onRenameManufacturer} onDelete={onDeleteManufacturer}
+              unitCountFor={(name) => units.filter((u) => u.manufacturer === name).length}
+            />
             <Field label="Model"><input value={form.model} onChange={set("model")} className="gc-input" placeholder="e.g. E-15" /></Field>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -3877,78 +3884,140 @@ function SelectWithCustom({ value, onChange, options, label, allowEmpty = false 
   );
 }
 
-/* Admin-managed dropdown for the add/edit unit form - like SelectWithCustom,
-   but a new entry persists to its table (so it stays offered next time,
-   not just for this session) and an existing one can be deleted, behind a
-   confirm dialog since it's a destructive, if reversible-by-re-adding,
-   admin action. Used for rooms and manufacturers. `options` are table rows
-   ({ id, name }); `value` is the unit's own free-text field, so it can
-   hold a name that's since been removed from the list. */
-function ManagedSelectField({ value, options, onChange, onAdd, onDelete, noun }) {
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customValue, setCustomValue] = useState("");
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+/* Admin-managed dropdown for the add/edit unit form (rooms, manufacturers):
+   a plain select plus a "Manage" link that opens an inline list where each
+   entry can be renamed or deleted in place, with an add row at the bottom.
+   `options` are table rows ({ id, name }); `value` is the unit's own
+   free-text field, so it can hold a name that's no longer on the list.
+   Renders its own label row rather than sitting inside <Field> - Field is a
+   <label>, which would forward clicks on the panel to the select.
+   onAdd/onRename/onDelete may be async; the panel waits for them. */
+function ManagedSelectField({ label, scope, addTo = scope, value, options, onChange, onAdd, onRename, onDelete, noun, unitCountFor }) {
+  const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);   // row being renamed, or "new" for the add row
+  const [draft, setDraft] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const names = options.map((o) => o.name);
   const allNames = value && !names.includes(value) ? [...names, value] : names;
-  const selected = options.find((o) => o.name === value);
-  return (
-    <div>
-      <div className="flex gap-2">
-        <select value={value} onChange={(e) => onChange(e.target.value)} className="gc-input flex-1">
-          {allNames.map((n) => <option key={n}>{n}</option>)}
-        </select>
-        <button type="button" onClick={() => setCustomOpen((v) => !v)} className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0" style={{ borderColor: "var(--border)", background: "var(--surface)" }} title={`Add a new ${noun}`}>
-          <PlusCircle size={16} style={{ color: "var(--accent-ink)" }} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setConfirmingDelete(true)}
-          disabled={!selected}
-          className="w-11 h-11 rounded-xl border flex items-center justify-center flex-shrink-0 disabled:opacity-30"
-          style={{ borderColor: "var(--border)", background: "var(--surface)" }}
-          title={selected ? `Delete this ${noun}` : `Pick an existing ${noun} to delete it`}
-        >
-          <Trash2 size={15} style={{ color: "var(--overdue)" }} />
-        </button>
-      </div>
-      {customOpen && (
-        <div className="flex gap-2 mt-2">
-          <input className="gc-input flex-1" placeholder={`New ${noun} name`} value={customValue} onChange={(e) => setCustomValue(e.target.value)} />
-          <button
-            type="button"
-            onClick={() => {
-              if (!customValue.trim()) return;
-              onAdd(customValue.trim());
-              onChange(customValue.trim());
-              setCustomValue("");
-              setCustomOpen(false);
-            }}
-            className="px-3 rounded-xl text-sm font-semibold text-white flex-shrink-0"
-            style={{ background: "var(--gradient)" }}
-          >
-            Add
-          </button>
-        </div>
-      )}
-      {confirmingDelete && selected && (
-        <ConfirmDialog
-          title={`Delete this ${noun}?`}
-          message={`This removes "${selected.name}" from the ${noun} list. Units already using it keep their current ${noun} - this only stops it being offered for new ones.`}
-          onCancel={() => setConfirmingDelete(false)}
-          onConfirm={() => { setConfirmingDelete(false); onDelete(selected.id); }}
+  const where = scope ? ` on ${scope}` : "";
+  const unitsLabel = (n) => `${n} unit${n === 1 ? "" : "s"}`;
+
+  const cancel = () => { setEditingId(null); setDeletingId(null); setDraft(""); setError(""); };
+  const startEdit = (o) => { cancel(); setEditingId(o.id); setDraft(o.name); };
+  const startAdd = () => { cancel(); setEditingId("new"); };
+  const startDelete = (o) => { cancel(); setDeletingId(o.id); };
+
+  const save = async () => {
+    const name = draft.trim();
+    const current = options.find((o) => o.id === editingId);
+    if (!name) { setError("Enter a name."); return; }
+    if (current && name === current.name) { cancel(); return; }
+    if (options.some((o) => o.id !== editingId && o.name.toLowerCase() === name.toLowerCase())) {
+      setError(`"${name}" is already on the list.`); return;
+    }
+    setBusy(true);
+    try {
+      // Handlers resolve to true on success; on failure they've already
+      // shown the error, so leave the row open to try again.
+      if (editingId === "new") {
+        if (!(await onAdd(name))) return;
+        onChange(name);
+      } else {
+        if (!(await onRename(current, name))) return;
+        if (value === current.name) onChange(name);
+      }
+      cancel();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const confirmDelete = async (o) => {
+    setBusy(true);
+    try { if (await onDelete(o.id)) cancel(); } finally { setBusy(false); }
+  };
+  const onKey = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); save(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); }
+  };
+
+  const iconBtn = "w-7 h-7 flex items-center justify-center rounded-lg flex-shrink-0 disabled:opacity-40";
+  const editRow = (
+    <div className="px-2 py-1.5">
+      <div className="flex items-center gap-1.5">
+        <input
+          autoFocus value={draft} onChange={(e) => { setDraft(e.target.value); setError(""); }} onKeyDown={onKey}
+          className="gc-input flex-1 min-w-0" style={{ height: 34, padding: "0 10px", fontSize: 13 }}
+          placeholder={editingId === "new" ? `New ${noun} name` : ""}
         />
-      )}
+        <button type="button" disabled={busy} onClick={save} className={iconBtn} style={{ background: "var(--btn-accent)", color: "white" }} title="Save"><Check size={14} /></button>
+        <button type="button" disabled={busy} onClick={cancel} className={iconBtn} style={{ color: "var(--ink-soft)" }} title="Cancel"><X size={14} /></button>
+      </div>
+      {error ? (
+        <div className="text-[11.5px] mt-1" style={{ color: "var(--overdue)" }}>{error}</div>
+      ) : editingId !== "new" && unitCountFor && (() => {
+        const n = unitCountFor(options.find((o) => o.id === editingId)?.name);
+        return n > 0 ? <div className="text-[11.5px] mt-1" style={{ color: "var(--ink-faint)" }}>Also renames it on {unitsLabel(n)}.</div> : null;
+      })()}
     </div>
   );
-}
 
-/* Rooms are scoped to the unit's floor and type. */
-function RoomField({ floor, type, room, rooms, onChange, onAdd, onDelete }) {
   return (
-    <ManagedSelectField
-      value={room} options={rooms.filter((r) => r.floor === floor && r.type === type)}
-      onChange={onChange} onAdd={onAdd} onDelete={onDelete} noun="room"
-    />
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-medium" style={{ color: "var(--ink-soft)" }}>
+          {label}
+          {scope && <span className="ml-1.5 inline-flex items-center gap-1 rounded-full px-2 py-px text-[10.5px] font-bold align-middle" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}><MapPin size={10} />{scope}</span>}
+        </span>
+        <button type="button" onClick={() => { setOpen((v) => !v); cancel(); }} className="flex items-center gap-1 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
+          {open ? "Done" : "Manage"}
+          <ChevronDown size={12} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+        </button>
+      </div>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="gc-input w-full">
+        {allNames.length === 0 && <option value="">No {noun}s{where} yet</option>}
+        {allNames.map((n) => <option key={n}>{n}</option>)}
+      </select>
+
+      {open && (
+        <div className="mt-2 rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)", background: "var(--surface)" }}>
+          <div className="px-3 py-2 text-[10.5px] font-bold uppercase tracking-wider" style={{ background: "var(--surface-soft)", color: "var(--ink-faint)" }}>
+            {noun}s{where}
+          </div>
+          {options.length === 0 && editingId !== "new" && (
+            <div className="px-3 py-2.5 text-[13px]" style={{ color: "var(--ink-faint)" }}>No {noun}s{where} yet.</div>
+          )}
+          {options.map((o) => (
+            <div key={o.id} style={{ borderTop: "1px solid var(--border)" }}>
+              {editingId === o.id ? editRow : deletingId === o.id ? (
+                <div className="flex items-center gap-2 px-3 py-2 text-[13px]" style={{ background: "var(--overdue-soft)" }}>
+                  <span className="flex-1 min-w-0" style={{ color: "var(--overdue)" }}>
+                    Delete <strong>{o.name}</strong>?
+                    {unitCountFor && unitCountFor(o.name) > 0 && <span className="block text-[11.5px]" style={{ color: "var(--ink-soft)" }}>{unitsLabel(unitCountFor(o.name))} keep this name.</span>}
+                  </span>
+                  <button type="button" disabled={busy} onClick={() => confirmDelete(o)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--overdue)" }}>Delete</button>
+                  <button type="button" disabled={busy} onClick={cancel} className="text-xs font-semibold px-1.5" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+                </div>
+              ) : (
+                <div className="group flex items-center gap-1 pl-3 pr-1.5 py-1 text-[13px]">
+                  <span className="flex-1 min-w-0 truncate" style={{ color: "var(--ink)" }}>{o.name}</span>
+                  <button type="button" onClick={() => startEdit(o)} className={iconBtn} style={{ color: "var(--ink-soft)" }} title={`Rename ${o.name}`}><Pencil size={13} /></button>
+                  <button type="button" onClick={() => startDelete(o)} className={iconBtn} style={{ color: "var(--overdue)" }} title={`Delete ${o.name}`}><Trash2 size={13} /></button>
+                </div>
+              )}
+            </div>
+          ))}
+          <div style={{ borderTop: "1px solid var(--border)" }}>
+            {editingId === "new" ? editRow : (
+              <button type="button" onClick={startAdd} className="w-full flex items-center gap-1.5 px-3 py-2 text-[13px] font-bold text-left" style={{ color: "var(--accent-dark)" }}>
+                <PlusCircle size={14} /> Add {noun}{addTo ? ` to ${addTo}` : ""}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -4651,9 +4720,11 @@ export default function GrowthCabinetApp() {
   // Wraps a mutation so a failed Supabase call (RLS denial, constraint
   // violation, network error) surfaces to the admin instead of failing
   // silently - the old mock handlers never had a failure path to handle.
+  // Resolves to the handler's own return value, or undefined if it threw -
+  // handlers that return true let callers tell success from failure.
   const withErrorAlert = (fn) => async (...args) => {
     try {
-      await fn(...args);
+      return await fn(...args);
     } catch (err) {
       console.error(err);
       window.alert(err.message || "Something went wrong saving that - see the console for details.");
@@ -4676,18 +4747,32 @@ export default function GrowthCabinetApp() {
   const handleAddRoom = withErrorAlert(async (floor, type, name) => {
     await api.addRoom(floor, type, name);
     await reload();
+    return true;
   });
   const handleDeleteRoom = withErrorAlert(async (id) => {
     await api.removeRoom(id);
     await reload();
+    return true;
+  });
+  const handleRenameRoom = withErrorAlert(async (row, name) => {
+    await api.renameRoom(row.id, row.floor, row.type, row.name, name);
+    await reload();
+    return true;
+  });
+  const handleRenameManufacturer = withErrorAlert(async (row, name) => {
+    await api.renameManufacturer(row.id, row.name, name);
+    await reload();
+    return true;
   });
   const handleAddManufacturer = withErrorAlert(async (name) => {
     await api.addManufacturer(name);
     await reload();
+    return true;
   });
   const handleDeleteManufacturer = withErrorAlert(async (id) => {
     await api.removeManufacturer(id);
     await reload();
+    return true;
   });
 
   const handleUpdateServiceLog = withErrorAlert(async (unitId, log) => {
@@ -4960,7 +5045,7 @@ export default function GrowthCabinetApp() {
         />
       )}
       {editingUnit !== undefined && (
-        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onDeleteRoom={handleDeleteRoom} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onDeleteManufacturer={handleDeleteManufacturer} />
+        <AddEditUnitModal unit={editingUnit} units={units} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onRenameRoom={handleRenameRoom} onDeleteRoom={handleDeleteRoom} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onRenameManufacturer={handleRenameManufacturer} onDeleteManufacturer={handleDeleteManufacturer} />
       )}
       {previewReqIndex !== null && (
         <RequisitionPreviewPanel
