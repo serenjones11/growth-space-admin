@@ -113,7 +113,7 @@ the repo doesn't have to reconstruct current-state by replaying 30+ migration fi
 
 **Tables**: `lab_groups`, `profiles` (extends `auth.users`, `role` = `admin`/researcher),
 `maintenance_categories`, `units`, `rooms`, `requisitions`, `bookings`, `service_log`,
-`documents`, `activity_log`, `species_options`, `requisition_code_counters`, `manufacturers`,
+`documents`, `activity_log`, `species_options`, `light_cycle_options`, `requisition_code_counters`, `manufacturers`,
 `notification_preferences`.
 
 **RLS shape**: admins (`profiles.role = 'admin'`, checked via `is_admin()`) can read/write

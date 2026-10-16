@@ -225,6 +225,14 @@ function mapUnitRow(u) {
     isOutOfService: u.is_out_of_service,
     notes: u.notes || "",
     acknowledgedClashBookingIds: u.acknowledged_clash_booking_ids || [],
+    // What the unit is currently set to (all optional) - shown on its tile.
+    settings: {
+      dayTemp: u.set_day_temp,
+      nightTemp: u.set_night_temp,
+      humidity: u.set_humidity,
+      lightCycle: u.set_light_cycle || "",
+      lightIntensity: u.set_light_intensity,
+    },
     addedRecently: false,
   };
 }
@@ -361,7 +369,7 @@ export async function fetchAdminData() {
   // labGroupCache that this call populates.
   const labGroups = await fetchLabGroups();
 
-  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes, roomsRes, manufacturersRes] = await Promise.all([
+  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes, roomsRes, manufacturersRes, lightCycles] = await Promise.all([
     supabase.from("units").select("*"),
     // "pending" too: an approved requisition that's been amended keeps its
     // booking (and its unit stays occupied) while the amendment is reviewed.
@@ -375,6 +383,7 @@ export async function fetchAdminData() {
     supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(200),
     supabase.from("rooms").select("*").order("name"),
     supabase.from("manufacturers").select("*").order("name"),
+    listLightCycleOptions(),
   ]);
   for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes, activityLogRes, roomsRes, manufacturersRes]) {
     if (res.error) throw res.error;
@@ -471,7 +480,7 @@ export async function fetchAdminData() {
   const rooms = roomsRes.data.map((r) => ({ id: r.id, floor: r.floor, type: r.type, name: r.name }));
   const manufacturers = manufacturersRes.data.map((m) => ({ id: m.id, name: m.name }));
 
-  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog, rooms, manufacturers };
+  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog, rooms, manufacturers, lightCycles };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -548,6 +557,11 @@ export async function saveUnit(data) {
     temp_max: data.tempRange[1],
     humidity_min: data.humidityRange[0],
     humidity_max: data.humidityRange[1],
+    set_day_temp: numOrNull(data.settings?.dayTemp),
+    set_night_temp: numOrNull(data.settings?.nightTemp),
+    set_humidity: numOrNull(data.settings?.humidity),
+    set_light_cycle: nullIfEmpty(data.settings?.lightCycle),
+    set_light_intensity: numOrNull(data.settings?.lightIntensity),
   };
   if (data.status !== undefined) row.is_out_of_service = data.status === "service";
   const { error } = await supabase.from("units").upsert(row);
@@ -698,6 +712,37 @@ export async function addSpeciesOption(discipline, name) {
 
 export async function removeSpeciesOption(id) {
   const { error } = await supabase.from("species_options").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/* Renames carry through to requisitions/bookings of that discipline already
+   listing the old name (see rename_species_option()). */
+export async function renameSpeciesOption(id, name) {
+  const { error } = await supabase.rpc("rename_species_option", { p_id: id, p_name: name });
+  if (error) throw error;
+}
+
+/* Public read, like species_options - the request form offers this list. */
+export async function listLightCycleOptions() {
+  const { data, error } = await supabase.from("light_cycle_options").select("*").order("name");
+  if (error) throw error;
+  return data.map((r) => ({ id: r.id, name: r.name }));
+}
+
+export async function addLightCycleOption(name) {
+  const { error } = await supabase.from("light_cycle_options").insert({ name });
+  if (error) throw error;
+}
+
+/* Carries through to units, requisitions and bookings using the old name
+   (see rename_light_cycle_option()). */
+export async function renameLightCycleOption(id, name) {
+  const { error } = await supabase.rpc("rename_light_cycle_option", { p_id: id, p_name: name });
+  if (error) throw error;
+}
+
+export async function removeLightCycleOption(id) {
+  const { error } = await supabase.from("light_cycle_options").delete().eq("id", id);
   if (error) throw error;
 }
 

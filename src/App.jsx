@@ -198,6 +198,10 @@ const DISCIPLINE_META = {
 
 const MODELS = ["E-15", "AR-66", "MLR-352H", "GC-8", "TC-30"];
 const LIGHT_CYCLES = ["8/16 h (L/D)", "12/12 h (L/D)", "16/8 h (L/D)", "24 h dark", "Continuous light"];
+// The admin-managed light cycle list (light_cycle_options), refreshed with
+// the admin data on every reload; LIGHT_CYCLES is only the fallback until
+// it loads. The public request form fetches its own copy.
+let LIGHT_CYCLE_NAMES = LIGHT_CYCLES;
 const isSet = (v) => v !== null && v !== undefined && v !== "";
 // Day temp (stored as set_temp), night temp and humidity are each optional
 // (always for reftech rooms), so any can be null. Shows only what was
@@ -206,11 +210,12 @@ function fmtTemps(dayTemp, nightTemp) {
   const parts = [isSet(dayTemp) ? `${dayTemp}°C day` : null, isSet(nightTemp) ? `${nightTemp}°C night` : null].filter(Boolean);
   return parts.length ? parts.join(" / ") : "Not specified";
 }
-// Unit tile TEMP readout: "20°C / 18°C" (day / night), or just the day
-// temp when no night temp was given.
+// Unit tile TEMP readout: "20°C / 18°C" (day / night), or whichever one
+// was given.
 function fmtTileTemp(dayTemp, nightTemp) {
-  const day = isSet(dayTemp) ? `${dayTemp}°C` : "-";
-  return isSet(nightTemp) ? `${day} / ${nightTemp}°C` : day;
+  if (isSet(dayTemp) && isSet(nightTemp)) return `${dayTemp}°C / ${nightTemp}°C`;
+  if (isSet(dayTemp)) return `${dayTemp}°C`;
+  return isSet(nightTemp) ? `${nightTemp}°C night` : "-";
 }
 function fmtEnv(dayTemp, nightTemp, humidity) {
   const temps = fmtTemps(dayTemp, nightTemp);
@@ -401,16 +406,16 @@ function bookingStatus(booking) {
 }
 
 /* Strong status colours for the inventory tiles, unit view and status
-   tags - the space usage graph's (colour-blind safe) palette. `ink` is the
-   readable text colour on a solid `color` fill. */
+   tags - based on the space usage graph's palette, deepened where needed so
+   white text stays readable. `ink` is the text colour on a solid fill. */
 const STATUS_STRONG = {
-  current: { label: "Current", color: "#0072B2", ink: "#fff" },
+  current: { label: "Current", color: "#2E8BC9", ink: "#fff" },
   upcoming: { label: "Upcoming", color: "#009E73", ink: "#fff" },
-  warning: { label: "Ending soon", color: "#E69F00", ink: "#16211D" },
-  overdue: { label: "Overdue", color: "#D55E00", ink: "#fff" },
-  pending: { label: "Pending review", color: "#CC79A7", ink: "#fff" },
+  warning: { label: "Ending soon", color: "#C77700", ink: "#fff" },
+  overdue: { label: "Overdue", color: "#D7263D", ink: "#fff" },
+  pending: { label: "Pending review", color: "#B85A94", ink: "#fff" },
   service: { label: "Out of service", color: "#4D4D4D", ink: "#fff" },
-  free: { label: "Free", color: "#56B4E9", ink: "#16211D" },
+  free: { label: "Free", color: "#E3E8E5", ink: "#16211D" },
 };
 // displayStatus()/bookingStatus() keys -> STATUS_STRONG keys.
 const STRONG_KEY = { occupied: "current", upcoming: "upcoming", warning: "warning", overdue: "overdue", service: "service", free: "free" };
@@ -1912,7 +1917,6 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
 function UnitCard({ unit, onClick }) {
   const s = displayStatus(unit);
   const isReftech = unit.type === "reftech";
-  const occupant = unitOccupant(unit);
   const upcoming = upcomingBookings(unit);
   // Cabinets are meant to only hold one booking at a time - more than one
   // active means an admin edit created an overlap. Surfaced here too (not
@@ -1924,6 +1928,13 @@ function UnitCard({ unit, onClick }) {
   // discipline isn't a fixed unit property.
   const disciplines = Object.keys(DISCIPLINE_META).filter((k) => currentForClash.some((b) => b.discipline === k));
   const hasClash = !isReftech && currentForClash.length > 1 && !isClashAcknowledged(unit, currentForClash);
+  const us = unit.settings || {};
+  const settingReadouts = [
+    (isSet(us.dayTemp) || isSet(us.nightTemp)) && { lbl: "TEMP", val: fmtTileTemp(us.dayTemp, us.nightTemp), small: isSet(us.dayTemp) && isSet(us.nightTemp) },
+    isSet(us.humidity) && { lbl: "RH", val: `${us.humidity}%` },
+    us.lightCycle && { lbl: "CYCLE", val: us.lightCycle, small: true },
+    isSet(us.lightIntensity) && { lbl: "LIGHT", val: `${us.lightIntensity} µmol`, small: true },
+  ].filter(Boolean);
   // Current requisitions (most urgent first), then upcoming ones by start.
   const allRows = [...currentForClash.slice().sort((a, b) => new Date(a.endDate) - new Date(b.endDate)), ...upcoming];
   const tileRows = allRows.slice(0, 3);
@@ -1954,12 +1965,13 @@ function UnitCard({ unit, onClick }) {
       {/* room - the most-checked field, given its own prominent chip */}
       <div className="mb-3"><RoomChip unit={unit} /></div>
 
-      {/* live readouts if occupied, otherwise the operating range */}
-      {occupant ? (
-        <div className="grid grid-cols-3 gap-1.5 mb-3">
-          <div className="gc-readout"><div className="lbl">TEMP</div><div className="val" style={{ color: "var(--chip-temp)", ...(isSet(occupant.nightTemp) ? { fontSize: 13 } : {}) }}>{fmtTileTemp(occupant.setTemp, occupant.nightTemp)}</div></div>
-          <div className="gc-readout"><div className="lbl">RH</div><div className="val" style={{ color: "var(--chip-rh)" }}>{isSet(occupant.setHumidity) ? `${occupant.setHumidity}%` : "-"}</div></div>
-          <div className="gc-readout"><div className="lbl">CYCLE</div><div className="val" style={{ color: "var(--chip-cycle)", fontSize: 12.5 }}>{occupant.lightCycle || "-"}</div></div>
+      {/* The unit's current settings (set on the add/edit unit form), showing
+          only the ones filled in; with none set, its operating ranges. */}
+      {settingReadouts.length > 0 ? (
+        <div className="grid gap-1.5 mb-3" style={{ gridTemplateColumns: `repeat(${settingReadouts.length}, minmax(0, 1fr))` }}>
+          {settingReadouts.map((r) => (
+            <div key={r.lbl} className="gc-readout"><div className="lbl">{r.lbl}</div><div className="val text-white" style={r.small ? { fontSize: settingReadouts.length >= 4 ? 11 : 12, overflowWrap: "anywhere", ...(r.lbl === "TEMP" ? { whiteSpace: "nowrap" } : {}) } : undefined}>{r.val}</div></div>
+          ))}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-1.5 mb-3">
@@ -1973,13 +1985,13 @@ function UnitCard({ unit, onClick }) {
         {disciplines.map((k) => {
           const dm = DISCIPLINE_META[k];
           return (
-            <span key={k} className="gc-tag" style={{ background: `var(--tag-${k}-bg)`, color: `var(--tag-${k}-ink)`, borderColor: `var(--tag-${k}-border)` }}>
+            <span key={k} className="gc-tag" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border }}>
               <dm.icon size={11} /> {dm.label}
             </span>
           );
         })}
-        {unit.co2Control && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>CO₂</span>}
-        {unit.dimmingControl && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>Dimming</span>}
+        {unit.co2Control && <span className="gc-tag" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border }}>CO₂</span>}
+        {unit.dimmingControl && <span className="gc-tag" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border }}>Dimming</span>}
       </div>
 
       {/* Requisitions on this unit as status-stripe rows (name, species, PI,
@@ -2274,6 +2286,7 @@ function AssetInfoCard({ unit }) {
 }
 function EnvironmentControlsCard({ unit }) {
   const isReftech = unit.type === "reftech";
+  const us = unit.settings || {};
   return (
     <InfoBox>
       <BoxLabel>Environment &amp; Controls</BoxLabel>
@@ -2285,6 +2298,11 @@ function EnvironmentControlsCard({ unit }) {
         <FieldPair label="Ballasts" value={unit.ballasts} />
         <FieldPair label="CO₂ control" value={unit.co2Control ? "Yes" : "No"} />
         <FieldPair label="Dimming control" value={unit.dimmingControl ? "Yes" : "No"} />
+        {/* Current settings - only the ones that have been filled in. */}
+        {(isSet(us.dayTemp) || isSet(us.nightTemp)) && <FieldPair label="Set temp (day / night)" value={fmtTileTemp(us.dayTemp, us.nightTemp)} />}
+        {isSet(us.humidity) && <FieldPair label="Set RH" value={`${us.humidity}%`} />}
+        {us.lightCycle && <FieldPair label="Set light cycle" value={us.lightCycle} />}
+        {isSet(us.lightIntensity) && <FieldPair label="Set light intensity" value={`${us.lightIntensity} µmol/m²/s`} />}
       </FieldGrid>
     </InfoBox>
   );
@@ -2622,7 +2640,7 @@ function TileBookingRow({ booking }) {
     <TileStripe color={st.color}>
       <div className="flex items-center justify-between gap-2">
         <div className="text-[13px] font-extrabold truncate" style={{ color: "var(--ink)" }}>{booking.researcher}</div>
-        <span className="text-[10.5px] font-bold rounded px-1.5 py-0.5 flex-shrink-0" style={{ background: st.color, color: st.ink }}>{st.label.toLowerCase()}</span>
+        <span className="text-[10.5px] font-bold rounded px-1.5 py-0.5 flex-shrink-0" style={{ background: st.color, color: st.ink }}>{st.label}</span>
       </div>
       {species && <div className="text-[11.5px] italic truncate" style={{ color: "var(--ink)" }}>{species}</div>}
       <div className="text-[11px] truncate" style={{ color: "var(--ink-soft)" }}>{piDisplay(booking.labGroup)}</div>
@@ -2658,7 +2676,7 @@ function BookingCard({ booking, onOpenRequisition }) {
       <div className="flex items-center justify-between gap-3">
         <div className="font-extrabold text-[15px] truncate" style={{ color: "var(--ink)" }}>{booking.researcher}</div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="text-[11px] font-bold rounded px-2 py-0.5" style={{ background: st.color, color: st.ink }}>{st.label.toLowerCase()}</span>
+          <span className="text-[11px] font-bold rounded px-2 py-0.5" style={{ background: st.color, color: st.ink }}>{st.label}</span>
           {clickable && <ChevronRight size={16} style={{ color: "var(--ink-faint)" }} />}
         </div>
       </div>
@@ -2671,7 +2689,7 @@ function BookingCard({ booking, onOpenRequisition }) {
       </div>
       <div className="flex justify-between items-center text-[11.5px] font-bold mt-1.5">
         <span style={{ color: "var(--ink)" }}>{fmtGB(booking.startDate)}</span>
-        <span style={{ color: st.color === STATUS_STRONG.warning.color ? "#A66F00" : st.color }}>{progressText}</span>
+        <span style={{ color: st.color }}>{progressText}</span>
         <span style={{ color: "var(--ink)" }}>{fmtGB(booking.endDate)}</span>
       </div>
     </Wrapper>
@@ -2932,7 +2950,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
 /* ---------------------------------------------------------------------- */
 /* Add / edit unit modal                                                  */
 /* ---------------------------------------------------------------------- */
-function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoom, onDeleteRoom, manufacturers, onAddManufacturer, onRenameManufacturer, onDeleteManufacturer }) {
+function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoom, onDeleteRoom, manufacturers, onAddManufacturer, onRenameManufacturer, onDeleteManufacturer, lightCycles, onAddLightCycle, onRenameLightCycle, onDeleteLightCycle }) {
   const isEdit = !!unit;
   const [form, setForm] = useState(
     unit
@@ -2943,10 +2961,13 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
           shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: "",
           co2Control: false, dimmingControl: false,
           installDate: "", tempMin: 4, tempMax: 30, humMin: 30, humMax: 85, status: "free",
+          settings: { dayTemp: "", nightTemp: "", humidity: "", lightCycle: "", lightIntensity: "" },
         }
   );
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setBool = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
+  const setSetting = (k) => (v) => setForm((f) => ({ ...f, settings: { ...(f.settings || {}), [k]: v } }));
+  const settingInput = (k) => ({ type: "number", value: form.settings?.[k] ?? "", onChange: (e) => setSetting(k)(e.target.value), className: "gc-input", placeholder: "Not set" });
   const firstRoomFor = (floor, type) => (rooms.find((r) => r.floor === floor && r.type === type) || {}).name || "";
 
   return (
@@ -3053,6 +3074,28 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
                 <input type="number" min={0} max={100} value={form.humMax} onChange={set("humMax")} className="gc-input" />
               </div>
             </Field>
+          </div>
+
+          {/* What the unit is set to right now - shown on its inventory tile
+              (only the ones filled in; none set shows the ranges above). */}
+          <div className="rounded-xl p-3.5 space-y-3" style={{ background: "var(--surface-soft)", border: "1px solid var(--border)" }}>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-soft)" }}>Current settings</span>
+              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Field label="Day temp (°C)"><input {...settingInput("dayTemp")} /></Field>
+              <Field label="Night temp (°C)"><input {...settingInput("nightTemp")} /></Field>
+              <Field label="RH (%)"><input {...settingInput("humidity")} /></Field>
+              <Field label="Light (µmol)"><input {...settingInput("lightIntensity")} /></Field>
+            </div>
+            <ManagedSelectField
+              label="Light cycle" noun="light cycle" emptyLabel="Not set"
+              value={form.settings?.lightCycle || ""} options={lightCycles}
+              onChange={setSetting("lightCycle")}
+              onAdd={onAddLightCycle} onRename={onRenameLightCycle} onDelete={onDeleteLightCycle}
+            />
+            <p className="text-[11.5px]" style={{ color: "var(--ink-faint)" }}>Leave blank if not set - the tile shows the unit's ranges instead.</p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3261,7 +3304,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
             <select value={form.lightCycle || ""} onChange={set("lightCycle")} className="gc-input">
               <option value="">Not specified</option>
               {/* Includes the current value even if it's a custom one entered via the request form's picker, so this never silently shows the wrong option. */}
-              {(form.lightCycle && !LIGHT_CYCLES.includes(form.lightCycle) ? [...LIGHT_CYCLES, form.lightCycle] : LIGHT_CYCLES).map((l) => <option key={l}>{l}</option>)}
+              {(form.lightCycle && !LIGHT_CYCLE_NAMES.includes(form.lightCycle) ? [...LIGHT_CYCLE_NAMES, form.lightCycle] : LIGHT_CYCLE_NAMES).map((l) => <option key={l}>{l}</option>)}
             </select>
           </Field>
           <div className="grid grid-cols-2 gap-3.5">
@@ -3959,23 +4002,19 @@ function SelectWithCustom({ value, onChange, options, label, allowEmpty = false 
   );
 }
 
-/* Admin-managed dropdown for the add/edit unit form (rooms, manufacturers):
-   a plain select plus a "Manage" link that opens an inline list where each
-   entry can be renamed or deleted in place, with an add row at the bottom.
-   `options` are table rows ({ id, name }); `value` is the unit's own
-   free-text field, so it can hold a name that's no longer on the list.
-   Renders its own label row rather than sitting inside <Field> - Field is a
-   <label>, which would forward clicks on the panel to the select.
-   onAdd/onRename/onDelete may be async; the panel waits for them. */
-function ManagedSelectField({ label, addTo, value, options, onChange, onAdd, onRename, onDelete, noun }) {
-  const [open, setOpen] = useState(false);
+/* Inline "Manage" list for an admin-managed option list (rooms,
+   manufacturers, light cycles, species): each entry can be renamed or
+   deleted in place, with an add row at the bottom. `options` are table rows
+   ({ id, name }). onAdd/onRename/onDelete may be async and resolve to true
+   on success (on failure they've already shown the error, so the row stays
+   open to try again); onAdded/onRenamed let the owner react, e.g. select the
+   new name. */
+function ManageListPanel({ options, onAdd, onRename, onDelete, onAdded, onRenamed, noun, plural = `${noun}s`, addTo }) {
   const [editingId, setEditingId] = useState(null);   // row being renamed, or "new" for the add row
   const [draft, setDraft] = useState("");
   const [deletingId, setDeletingId] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const names = options.map((o) => o.name);
-  const allNames = value && !names.includes(value) ? [...names, value] : names;
   const where = addTo ? ` on ${addTo}` : "";
 
   const cancel = () => { setEditingId(null); setDeletingId(null); setDraft(""); setError(""); };
@@ -3993,14 +4032,12 @@ function ManagedSelectField({ label, addTo, value, options, onChange, onAdd, onR
     }
     setBusy(true);
     try {
-      // Handlers resolve to true on success; on failure they've already
-      // shown the error, so leave the row open to try again.
       if (editingId === "new") {
         if (!(await onAdd(name))) return;
-        onChange(name);
+        onAdded && onAdded(name);
       } else {
         if (!(await onRename(current, name))) return;
-        if (value === current.name) onChange(name);
+        onRenamed && onRenamed(current.name, name);
       }
       cancel();
     } finally {
@@ -4033,53 +4070,79 @@ function ManagedSelectField({ label, addTo, value, options, onChange, onAdd, onR
   );
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs font-medium" style={{ color: "var(--ink-soft)" }}>
-          {label}
-        </span>
-        <button type="button" onClick={() => { setOpen((v) => !v); cancel(); }} className="flex items-center gap-1 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
+    <div className="mt-2 rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)", background: "var(--surface)" }}>
+      {options.length === 0 && editingId !== "new" && (
+        <div className="px-3 py-2.5 text-[13px]" style={{ color: "var(--ink-faint)" }}>No {plural}{where} yet.</div>
+      )}
+      {options.map((o, i) => (
+        <div key={o.id} style={i > 0 ? { borderTop: "1px solid var(--border)" } : undefined}>
+          {editingId === o.id ? editRow : deletingId === o.id ? (
+            <div className="flex items-center gap-2 px-3 py-2 text-[13px]" style={{ background: "var(--overdue-soft)" }}>
+              <span className="flex-1 min-w-0" style={{ color: "var(--overdue)" }}>
+                Delete <strong>{o.name}</strong>?
+              </span>
+              <button type="button" disabled={busy} onClick={() => confirmDelete(o)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--overdue)" }}>Delete</button>
+              <button type="button" disabled={busy} onClick={cancel} className="text-xs font-semibold px-1.5" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+            </div>
+          ) : (
+            <div className="group flex items-center gap-1 pl-3 pr-1.5 py-1 text-[13px]">
+              <span className="flex-1 min-w-0 truncate" style={{ color: "var(--ink)" }}>{o.name}</span>
+              <button type="button" onClick={() => startEdit(o)} className={iconBtn} style={{ color: "var(--ink-soft)" }} title={`Rename ${o.name}`}><Pencil size={13} /></button>
+              <button type="button" onClick={() => startDelete(o)} className={iconBtn} style={{ color: "var(--overdue)" }} title={`Delete ${o.name}`}><Trash2 size={13} /></button>
+            </div>
+          )}
+        </div>
+      ))}
+      <div style={options.length > 0 || editingId === "new" ? { borderTop: "1px solid var(--border)" } : undefined}>
+        {editingId === "new" ? editRow : (
+          <button type="button" onClick={startAdd} className="w-full flex items-center gap-1.5 px-3 py-2 text-[13px] font-bold text-left" style={{ color: "var(--accent-dark)" }}>
+            <PlusCircle size={14} /> Add {noun}{addTo ? ` to ${addTo}` : ""}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Field label row with the "Manage" / "Done" toggle on the right (omitted
+   when onToggle isn't given). A plain div, not <Field> - Field is a
+   <label>, which would forward clicks on the panel below to the control. */
+function ManageLabelRow({ label, open, onToggle }) {
+  return (
+    <div className="flex items-center justify-between mb-1">
+      <span className="text-xs font-medium" style={{ color: "var(--ink-soft)" }}>{label}</span>
+      {onToggle && (
+        <button type="button" onClick={onToggle} className="flex items-center gap-1 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
           {open ? "Done" : "Manage"}
           <ChevronDown size={12} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
         </button>
-      </div>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="gc-input w-full">
-        {allNames.length === 0 && <option value="">No {noun}s{where} yet</option>}
+      )}
+    </div>
+  );
+}
+
+/* Admin-managed dropdown for the add/edit unit form (rooms, manufacturers,
+   light cycles): a plain select plus the Manage panel. `value` is the
+   unit's own free-text field, so it can hold a name that's no longer on
+   the list; `emptyLabel` adds a blank choice for an optional field. */
+function ManagedSelectField({ label, addTo, value, options, onChange, onAdd, onRename, onDelete, noun, emptyLabel }) {
+  const [open, setOpen] = useState(false);
+  const names = options.map((o) => o.name);
+  const allNames = value && !names.includes(value) ? [...names, value] : names;
+  const where = addTo ? ` on ${addTo}` : "";
+  return (
+    <div>
+      <ManageLabelRow label={label} open={open} onToggle={() => setOpen((v) => !v)} />
+      <select value={value || ""} onChange={(e) => onChange(e.target.value)} className="gc-input w-full">
+        {emptyLabel ? <option value="">{emptyLabel}</option> : allNames.length === 0 && <option value="">No {noun}s{where} yet</option>}
         {allNames.map((n) => <option key={n}>{n}</option>)}
       </select>
-
       {open && (
-        <div className="mt-2 rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)", background: "var(--surface)" }}>
-          {options.length === 0 && editingId !== "new" && (
-            <div className="px-3 py-2.5 text-[13px]" style={{ color: "var(--ink-faint)" }}>No {noun}s{where} yet.</div>
-          )}
-          {options.map((o, i) => (
-            <div key={o.id} style={i > 0 ? { borderTop: "1px solid var(--border)" } : undefined}>
-              {editingId === o.id ? editRow : deletingId === o.id ? (
-                <div className="flex items-center gap-2 px-3 py-2 text-[13px]" style={{ background: "var(--overdue-soft)" }}>
-                  <span className="flex-1 min-w-0" style={{ color: "var(--overdue)" }}>
-                    Delete <strong>{o.name}</strong>?
-                  </span>
-                  <button type="button" disabled={busy} onClick={() => confirmDelete(o)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--overdue)" }}>Delete</button>
-                  <button type="button" disabled={busy} onClick={cancel} className="text-xs font-semibold px-1.5" style={{ color: "var(--ink-soft)" }}>Cancel</button>
-                </div>
-              ) : (
-                <div className="group flex items-center gap-1 pl-3 pr-1.5 py-1 text-[13px]">
-                  <span className="flex-1 min-w-0 truncate" style={{ color: "var(--ink)" }}>{o.name}</span>
-                  <button type="button" onClick={() => startEdit(o)} className={iconBtn} style={{ color: "var(--ink-soft)" }} title={`Rename ${o.name}`}><Pencil size={13} /></button>
-                  <button type="button" onClick={() => startDelete(o)} className={iconBtn} style={{ color: "var(--overdue)" }} title={`Delete ${o.name}`}><Trash2 size={13} /></button>
-                </div>
-              )}
-            </div>
-          ))}
-          <div style={options.length > 0 || editingId === "new" ? { borderTop: "1px solid var(--border)" } : undefined}>
-            {editingId === "new" ? editRow : (
-              <button type="button" onClick={startAdd} className="w-full flex items-center gap-1.5 px-3 py-2 text-[13px] font-bold text-left" style={{ color: "var(--accent-dark)" }}>
-                <PlusCircle size={14} /> Add {noun}{addTo ? ` to ${addTo}` : ""}
-              </button>
-            )}
-          </div>
-        </div>
+        <ManageListPanel
+          options={options} noun={noun} addTo={addTo}
+          onAdd={onAdd} onRename={onRename} onDelete={onDelete}
+          onAdded={onChange} onRenamed={(oldName, newName) => { if (value === oldName) onChange(newName); }}
+        />
       )}
     </div>
   );
@@ -4089,13 +4152,11 @@ function ManagedSelectField({ label, addTo, value, options, onChange, onAdd, onR
    the old "pick one from a select, it gets added and the select resets,
    repeat" flow, which only supported multiple species one re-open at a
    time. */
-function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOption, onDeleteOption }) {
+function SpeciesPicker({ label, species, onChange, options, isAdmin = false, onAddOption, onRenameOption, onDeleteOption }) {
   const [open, setOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customValue, setCustomValue] = useState("");
   const [manageOpen, setManageOpen] = useState(false);
-  const [newOptionValue, setNewOptionValue] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(null); // option row being deleted
   const triggerRef = useRef(null);
   const [panelRect, setPanelRect] = useState(null);
   const toggleSpecies = (val) => onChange(species.includes(val) ? species.filter((s) => s !== val) : [...species, val]);
@@ -4130,6 +4191,7 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
 
   return (
     <div className="space-y-2">
+      {label && <ManageLabelRow label={label} open={manageOpen} onToggle={isAdmin ? () => setManageOpen((v) => !v) : undefined} />}
       <div className="flex gap-2">
         <div className="relative flex-1">
           <button
@@ -4155,41 +4217,6 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
                     {o.name}
                   </div>
                 ))}
-                {isAdmin && (
-                  <div className="border-t mt-1.5 pt-1.5" style={{ borderColor: "var(--border)" }}>
-                    <div
-                      onClick={() => setManageOpen((v) => !v)}
-                      className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold cursor-pointer"
-                      style={{ color: "var(--accent-ink)" }}
-                    >
-                      <Settings size={12} /> Manage species list
-                    </div>
-                    {manageOpen && (
-                      <div className="px-1 pb-1 space-y-1">
-                        {options.map((o) => (
-                          <div key={o.id} className="flex items-center justify-between gap-2 pl-2.5 pr-1.5 py-1 rounded-lg text-xs" style={{ background: "var(--surface-soft)" }}>
-                            <span className="truncate">{o.name}</span>
-                            <button type="button" onClick={() => setConfirmDelete(o)} className="p-1 rounded flex-shrink-0"><Trash2 size={12} style={{ color: "var(--overdue)" }} /></button>
-                          </div>
-                        ))}
-                        <div className="flex gap-1.5 pt-1">
-                          <input
-                            className="gc-input flex-1 text-xs" style={{ padding: "6px 10px" }}
-                            placeholder="New species name" value={newOptionValue}
-                            onChange={(e) => setNewOptionValue(e.target.value)}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => { const v = newOptionValue.trim(); if (v) { onAddOption(v); setNewOptionValue(""); } }}
-                            className="px-2.5 rounded-lg text-xs font-bold text-white flex-shrink-0" style={{ background: "var(--gradient)" }}
-                          >
-                            Add
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             </>,
             document.body
@@ -4215,12 +4242,13 @@ function SpeciesPicker({ species, onChange, options, isAdmin = false, onAddOptio
           ))}
         </div>
       )}
-      {confirmDelete && (
-        <ConfirmDialog
-          title="Remove this species?"
-          message={`This removes "${confirmDelete.name}" from the picker list for future requests. Existing requisitions that already used it are unaffected.`}
-          onCancel={() => setConfirmDelete(null)}
-          onConfirm={() => { onDeleteOption(confirmDelete.id); setConfirmDelete(null); }}
+      {/* Admin-only: the same Manage panel as rooms and manufacturers. A
+          rename also updates requisitions already listing the old name. */}
+      {isAdmin && manageOpen && (
+        <ManageListPanel
+          options={options} noun="species" plural="species"
+          onAdd={onAddOption} onRename={onRenameOption} onDelete={onDeleteOption}
+          onRenamed={(oldName, newName) => { if (species.includes(oldName)) onChange(species.map((x) => (x === oldName ? newName : x))); }}
         />
       )}
     </div>
@@ -4270,12 +4298,18 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
   const [speciesOptions, setSpeciesOptions] = useState([]);
   const reloadSpeciesOptions = () => api.listSpeciesOptions().then(setSpeciesOptions).catch((err) => console.error(err));
   useEffect(() => { reloadSpeciesOptions(); }, []);
-  const handleAddSpeciesOption = (name) => {
-    api.addSpeciesOption(discipline, name).then(reloadSpeciesOptions).catch((err) => window.alert(err.message || "Couldn't add that species."));
+  const [lightCycleNames, setLightCycleNames] = useState(LIGHT_CYCLES);
+  useEffect(() => {
+    api.listLightCycleOptions().then((rows) => { if (rows.length) setLightCycleNames(rows.map((r) => r.name)); }).catch((err) => console.error(err));
+  }, []);
+  // Resolve to true on success, as ManageListPanel expects.
+  const speciesAction = (fn, failMsg) => async (...args) => {
+    try { await fn(...args); await reloadSpeciesOptions(); return true; }
+    catch (err) { window.alert(err.message || failMsg); return false; }
   };
-  const handleDeleteSpeciesOption = (id) => {
-    api.removeSpeciesOption(id).then(reloadSpeciesOptions).catch((err) => window.alert(err.message || "Couldn't remove that species."));
-  };
+  const handleAddSpeciesOption = speciesAction((name) => api.addSpeciesOption(discipline, name), "Couldn't add that species.");
+  const handleRenameSpeciesOption = speciesAction((row, name) => api.renameSpeciesOption(row.id, name), "Couldn't rename that species.");
+  const handleDeleteSpeciesOption = speciesAction((id) => api.removeSpeciesOption(id), "Couldn't remove that species.");
 
   const steps = mode === "amend" ? WIZARD_STEPS_AMEND : WIZARD_STEPS_NEW;
   const stepName = steps[stepIndex];
@@ -4301,7 +4335,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
   // defaults got submitted and showed up as if the researcher had asked for them.
   const defaultConditions = (disc) => spaceType === "reftech"
     ? { setTemp: null, nightTemp: null, setHumidity: null, lightCycle: "" }
-    : { setTemp: disc === "insect" ? 25 : 22, nightTemp: disc === "insect" ? 25 : 22, setHumidity: disc === "insect" ? 65 : 60, lightCycle: LIGHT_CYCLES[0] };
+    : { setTemp: disc === "insect" ? 25 : 22, nightTemp: disc === "insect" ? 25 : 22, setHumidity: disc === "insect" ? 65 : 60, lightCycle: lightCycleNames[0] || "" };
 
   const goBack = () => setStepIndex((i) => Math.max(0, i - 1));
   const goNext = () => setStepIndex((i) => Math.min(steps.length - 1, i + 1));
@@ -4537,13 +4571,12 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
         <section className="space-y-4">
           <FormSectionTitle>Experiment Details</FormSectionTitle>
           <Field label="Project title *"><input required value={form.projectTitle} onChange={set("projectTitle")} className="gc-input" placeholder="Arabidopsis salt-stress trial" /></Field>
-          <Field label="Species *">
-            <SpeciesPicker
-              species={form.species} onChange={(sp) => setForm((f) => ({ ...f, species: sp }))}
-              options={speciesOptions.filter((o) => o.discipline === (isPlant ? "plant" : "insect"))}
-              isAdmin={isAdmin} onAddOption={handleAddSpeciesOption} onDeleteOption={handleDeleteSpeciesOption}
-            />
-          </Field>
+          <SpeciesPicker
+            label="Species *"
+            species={form.species} onChange={(sp) => setForm((f) => ({ ...f, species: sp }))}
+            options={speciesOptions.filter((o) => o.discipline === (isPlant ? "plant" : "insect"))}
+            isAdmin={isAdmin} onAddOption={handleAddSpeciesOption} onRenameOption={handleRenameSpeciesOption} onDeleteOption={handleDeleteSpeciesOption}
+          />
 
           {isPlant && (
             <Field label="Containment Level">
@@ -4607,7 +4640,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:items-end">
             <Field label={`Light Cycle${isReftech ? " (optional)" : ""}`}>
-              <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={LIGHT_CYCLES} label="light cycle" allowEmpty={isReftech} />
+              <SelectWithCustom value={form.lightCycle} onChange={(v) => setForm((f) => ({ ...f, lightCycle: v }))} options={lightCycleNames} label="light cycle" allowEmpty={isReftech} />
             </Field>
             {isPlant ? (
               <div className="rounded-xl p-3" style={{ background: "var(--surface-soft)" }}>
@@ -4729,6 +4762,7 @@ export default function GrowthCabinetApp() {
     try {
       const data = await api.fetchAdminData();
       applyLabGroups(data.labGroups); // must run before setAppData - see LAB_GROUPS/PI_BY_LAB comment
+      if (data.lightCycles.length) LIGHT_CYCLE_NAMES = data.lightCycles.map((c) => c.name);
       setAppData(data);
       setLoadError(null);
     } catch (err) {
@@ -4780,6 +4814,7 @@ export default function GrowthCabinetApp() {
   const activityLog = appData ? appData.activityLog : [];
   const rooms = appData ? appData.rooms : [];
   const manufacturers = appData ? appData.manufacturers : [];
+  const lightCycles = appData ? appData.lightCycles : [];
 
   // Wraps a mutation so a failed Supabase call (RLS denial, constraint
   // violation, network error) surfaces to the admin instead of failing
@@ -4825,6 +4860,21 @@ export default function GrowthCabinetApp() {
   });
   const handleRenameManufacturer = withErrorAlert(async (row, name) => {
     await api.renameManufacturer(row.id, row.name, name);
+    await reload();
+    return true;
+  });
+  const handleAddLightCycle = withErrorAlert(async (name) => {
+    await api.addLightCycleOption(name);
+    await reload();
+    return true;
+  });
+  const handleRenameLightCycle = withErrorAlert(async (row, name) => {
+    await api.renameLightCycleOption(row.id, name);
+    await reload();
+    return true;
+  });
+  const handleDeleteLightCycle = withErrorAlert(async (id) => {
+    await api.removeLightCycleOption(id);
     await reload();
     return true;
   });
@@ -5109,7 +5159,7 @@ export default function GrowthCabinetApp() {
         />
       )}
       {editingUnit !== undefined && (
-        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onRenameRoom={handleRenameRoom} onDeleteRoom={handleDeleteRoom} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onRenameManufacturer={handleRenameManufacturer} onDeleteManufacturer={handleDeleteManufacturer} />
+        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onRenameRoom={handleRenameRoom} onDeleteRoom={handleDeleteRoom} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onRenameManufacturer={handleRenameManufacturer} onDeleteManufacturer={handleDeleteManufacturer} lightCycles={lightCycles} onAddLightCycle={handleAddLightCycle} onRenameLightCycle={handleRenameLightCycle} onDeleteLightCycle={handleDeleteLightCycle} />
       )}
       {previewReqIndex !== null && (
         <RequisitionPreviewPanel
