@@ -262,6 +262,7 @@ function mapBookingRow(b) {
     adminNotes: b.requisitions?.admin_notes || "",
     // "pending" when an approved requisition's amendment is under review.
     requisitionStatus: b.requisitions?.status || null,
+    requisitionCode: b.requisitions?.code || "",
     startDate: b.start_date,
     endDate: b.end_date,
     // When this booking row was actually created (i.e. when the
@@ -374,7 +375,7 @@ export async function fetchAdminData() {
     // "pending" too: an approved requisition that's been amended keeps its
     // booking (and its unit stays occupied) while the amendment is reviewed.
     // Nothing else pending has a booking.
-    supabase.from("bookings").select("*, requisitions!inner(status, admin_notes)").in("requisitions.status", ["approved", "pending"]),
+    supabase.from("bookings").select("*, requisitions!inner(status, admin_notes, code)").in("requisitions.status", ["approved", "pending"]),
     supabase.from("service_log").select("*, maintenance_categories(name)"),
     supabase.from("requisitions").select("*").order("submitted_date", { ascending: true }),
     fetchMaintenanceCategories(),

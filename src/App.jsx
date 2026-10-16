@@ -90,15 +90,16 @@ const TOKENS = `
     --btn-accent: #52A070;
     --accent-soft: #E1F7F0;
     --accent-ink: #053D2C;
-    --gradient: linear-gradient(135deg, #5EEDC7 0%, #009E73 100%);
+    /* Was a green gradient - now the one solid button green everywhere. */
+    --gradient: var(--btn-accent);
 
     --free: #2F8F5B;
     --free-soft: #E7F2EA;
-    --occupied: #3B6EA5;
+    --occupied: #2E8BC9;
     --occupied-soft: #E4EDF6;
-    --warning: #C97A2B;
+    --warning: #C77700;
     --warning-soft: #FBEDDD;
-    --overdue: #B23A34;
+    --overdue: #D7263D;
     --overdue-soft: #FAE4E2;
     --service: #75786F;
     --service-soft: #ECEAE4;
@@ -398,7 +399,7 @@ function displayStatus(unit) {
    dashboard timeline, which (unlike displayStatus) needs to plot upcoming
    bookings too, not just whichever one is current right now. */
 function bookingStatus(booking) {
-  if (new Date(booking.startDate) > TODAY) return { key: "upcoming", label: "Upcoming", color: "var(--accent-dark)", soft: "var(--accent-soft)" };
+  if (new Date(booking.startDate) > TODAY) return { key: "upcoming", label: "Upcoming", color: "#009E73", soft: "var(--accent-soft)" };
   const left = daysUntil(booking.endDate);
   if (left < 0) return { key: "overdue", label: "Overdue", color: "var(--overdue)", soft: "var(--overdue-soft)" };
   if (left <= 2) return { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" };
@@ -416,9 +417,18 @@ const STATUS_STRONG = {
   pending: { label: "Pending review", color: "#B85A94", ink: "#fff" },
   service: { label: "Out of service", color: "#4D4D4D", ink: "#fff" },
   free: { label: "Free", color: "#E3E8E5", ink: "#16211D" },
+  completed: { label: "Completed", color: "#5C6D65", ink: "#fff" },
+  declined: { label: "Declined", color: "#8B1E2F", ink: "#fff" },
 };
 // displayStatus()/bookingStatus() keys -> STATUS_STRONG keys.
 const STRONG_KEY = { occupied: "current", upcoming: "upcoming", warning: "warning", overdue: "overdue", service: "service", free: "free" };
+/* A requisition's status in the same colours as its booking on the
+   inventory: pending / declined / completed by status, and an approved one
+   by its dates (upcoming, current, ending soon, overdue). */
+function requisitionStrongStatus(r) {
+  if (r.status === "pending" || r.status === "declined" || r.status === "completed") return STATUS_STRONG[r.status];
+  return STATUS_STRONG[STRONG_KEY[bookingStatus({ startDate: r.startDate, endDate: r.endDate }).key]];
+}
 /* A booking's strong status - "pending" while its requisition's amendment
    is under review, otherwise from its dates. */
 function bookingStrongStatus(b) {
@@ -473,6 +483,17 @@ function StatusTag({ unit, big = false }) {
       }}
     >
       {s.key === "free" ? "Free to book" : s.label}
+    </span>
+  );
+}
+/* Grey pill with just the discipline's icon (leaf / bug); the name is the
+   tooltip and screen-reader label. */
+function DisciplineIconPill({ discipline }) {
+  const d = DISCIPLINE_META[discipline];
+  if (!d) return null;
+  return (
+    <span className="gc-tag flex-shrink-0" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border, padding: "3px 6px" }} title={d.label} aria-label={d.label}>
+      <d.icon size={11} />
     </span>
   );
 }
@@ -887,8 +908,6 @@ const OKABE_ITO = [
 // Text colour for each swatch above when used as a solid badge fill - everything is white-on-colour
 // except the yellows (both light and dark), which need dark text to stay readable (WCAG contrast
 // checked directly: yellow-dark clears only 2.6:1 with white text vs >=4.5:1 needed).
-// Outline for requisitions awaiting review - the space usage graph's orange.
-const PENDING_ORANGE = OKABE_ITO[0];
 // Humidity sliders on the request form use the same blue as the space
 // usage graph (OKABE_ITO's "blue" slot).
 const HUMIDITY_BLUE = OKABE_ITO[4];
@@ -1508,18 +1527,18 @@ function PIManagementModal({ labGroups, onAdd, onUpdate, onDelete, onClose }) {
    timelineRowStatus() hand back per row, so a filter pill always matches
    the bars it filters - see those functions below. */
 const TIMELINE_STATUS_OPTIONS = [
-  { key: "occupied", label: "Occupied", color: "var(--occupied)", soft: "var(--occupied-soft)" },
+  { key: "occupied", label: "Current", color: "var(--occupied)", soft: "var(--occupied-soft)" },
   { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" },
   { key: "overdue", label: "Overdue", color: "var(--overdue)", soft: "var(--overdue-soft)" },
-  { key: "upcoming", label: "Upcoming", color: "var(--accent-dark)", soft: "var(--accent-soft)" },
-  { key: "completed", label: "Completed", color: "var(--service)", soft: "var(--service-soft)" },
+  { key: "upcoming", label: "Upcoming", color: "#009E73", soft: "var(--accent-soft)" },
+  { key: "completed", label: "Completed", color: "#5C6D65", soft: "var(--service-soft)" },
 ];
 
 /* Same colour language as bookingStatus(), plus a distinct grey for
    completed requisitions (which bookingStatus never sees - completed
    bookings are excluded from unit.bookings upstream, see api.js). */
 function timelineRowStatus(req) {
-  if (req.status === "completed") return { key: "completed", label: "Completed", color: "var(--service)", soft: "var(--service-soft)" };
+  if (req.status === "completed") return { key: "completed", label: "Completed", color: "#5C6D65", soft: "var(--service-soft)" };
   return bookingStatus({ startDate: req.startDate, endDate: req.endDate });
 }
 
@@ -1669,9 +1688,9 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
   // reads as free time and a lane stack reads as a clash. The unit label
   // opens that unit's detail modal (over the timeline, not navigating away).
   const renderUnitRow = ({ u, items }) => {
-    const dm = items[0]
-      ? DISCIPLINE_META[items[0].o.discipline] || DISCIPLINE_META.plant
-      : { icon: u.type === "reftech" ? DoorOpen : Leaf, color: "var(--ink-faint)" };
+    // One icon per discipline among the row's requisitions - a reftech room
+    // can hold plant and insect ones at once.
+    const rowDisciplines = Object.keys(DISCIPLINE_META).filter((k) => items.some((it) => it.o.discipline === k));
     const laneCount = Math.max(0, ...items.map((it) => it.lane)) + 1;
     const rowH = laneCount * TIMELINE_LANE_H + (laneCount - 1) * TIMELINE_LANE_GAP;
     return (
@@ -1682,7 +1701,8 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
           className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold text-left gc-clickable overflow-hidden"
           style={{ height: TIMELINE_LANE_H, color: "var(--ink-soft)" }}
         >
-          <dm.icon size={11} className="flex-shrink-0" style={{ color: dm.color }} /><span className="truncate">{u.id}</span>
+          <span className="truncate">{u.id}</span>
+          {rowDisciplines.map((k) => <DisciplineIconPill key={k} discipline={k} />)}
         </button>
         <div className="relative flex-1 rounded-lg" style={{ height: rowH, background: "var(--surface-soft)" }}>
           {items.map(({ o, s, reqIndex, start, end, lane }) => {
@@ -1704,10 +1724,10 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                   className="absolute rounded-lg flex items-center px-2.5"
                   style={{
                     left: `${left}%`, width: `${width}%`, top, height: TIMELINE_LANE_H,
-                    background: s.soft, border: `1px solid ${s.color}`, cursor: "pointer",
+                    background: s.color, cursor: "pointer",
                   }}
                 >
-                  <span className="text-[11.5px] font-bold truncate" style={{ color: s.color }}>{o.researcher}</span>
+                  <span className="text-[11.5px] font-bold truncate" style={{ color: "#fff" }}>{o.researcher}</span>
                 </button>
                 {/* hover detail card - visibility driven by React state (not a CSS-only hover selector) */}
                 {isHovered && (
@@ -1811,7 +1831,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
             that window, before they've been assigned to one. */}
         {pendingLanes.length > 0 && (
           <div className="flex items-start gap-2 text-xs mb-4 pb-4" style={{ borderBottom: "1px dashed var(--border)" }}>
-            <span className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold" style={{ height: TIMELINE_LANE_H, color: "var(--warning)" }}>
+            <span className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold" style={{ height: TIMELINE_LANE_H, color: STATUS_STRONG.pending.color }}>
               <Clock size={11} className="flex-shrink-0" /> <span className="truncate">Pending</span>
             </span>
             <div
@@ -1822,7 +1842,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                 // wrapper would create its own stacking context and trap
                 // the hover card's z-index inside it, rendering the card
                 // behind the unit rows below instead of above them.
-                background: "var(--warning-soft)",
+                background: "#F6E9F1",
               }}
             >
               {pendingLanes.map((p) => {
@@ -1843,10 +1863,10 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                       className="absolute rounded-lg flex items-center px-2.5"
                       style={{
                         left: `${left}%`, width: `${width}%`, top, height: TIMELINE_LANE_H,
-                        background: "var(--surface)", border: "1.5px dashed var(--warning)", cursor: "pointer",
+                        background: "var(--surface)", border: `1.5px dashed ${STATUS_STRONG.pending.color}`, cursor: "pointer",
                       }}
                     >
-                      <span className="text-[11.5px] font-bold truncate" style={{ color: "var(--warning)" }}>{p.researcher}</span>
+                      <span className="text-[11.5px] font-bold truncate" style={{ color: STATUS_STRONG.pending.color }}>{p.researcher}</span>
                     </button>
                     {isHovered && (
                       <div
@@ -1856,10 +1876,10 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                         <div className="text-[13px] font-extrabold mb-0.5">{p.researcher}</div>
                         <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>{piDisplay(p.labGroup)}</div>
                         <div className="text-[12px] mb-1" style={{ color: "var(--ink-soft)" }}>{p.project}</div>
-                        <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--warning)" }}>
+                        <div className="text-[12px] font-semibold mb-1.5" style={{ color: STATUS_STRONG.pending.color }}>
                           {p.unitType === "reftech" ? "Reftech Room" : "Growth Cabinet"} requested
                         </div>
-                        <div className="text-[12px] font-bold" style={{ color: "var(--warning)" }}>{fmtGB(p.startDate)} → {fmtGB(p.endDate)}</div>
+                        <div className="text-[12px] font-bold" style={{ color: STATUS_STRONG.pending.color }}>{fmtGB(p.startDate)} → {fmtGB(p.endDate)}</div>
                         <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click to review this requisition →</div>
                       </div>
                     )}
@@ -1985,9 +2005,7 @@ function UnitCard({ unit, onClick }) {
         {disciplines.map((k) => {
           const dm = DISCIPLINE_META[k];
           return (
-            <span key={k} className="gc-tag" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border }}>
-              <dm.icon size={11} /> {dm.label}
-            </span>
+            <DisciplineIconPill key={k} discipline={k} />
           );
         })}
         {unit.co2Control && <span className="gc-tag" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border }}>CO₂</span>}
@@ -2053,7 +2071,7 @@ function exportUnitsCSV(units) {
   downloadCSV(headers, rows, `inventory-${fmt(TODAY)}.csv`);
 }
 
-const REQUISITION_STATUS_LABEL = { pending: "Pending review", approved: "Ongoing", completed: "Completed", declined: "Declined" };
+const REQUISITION_STATUS_LABEL = { pending: "Pending review", approved: "Current", completed: "Completed", declined: "Declined" };
 function exportRequisitionsCSV(requests) {
   const headers = [
     "Code", "Researcher", "Email", "Role", "PI", "Lab Group", "Unit Type", "Discipline", "Species", "Containment Level",
@@ -2639,7 +2657,10 @@ function TileBookingRow({ booking }) {
   return (
     <TileStripe color={st.color}>
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[13px] font-extrabold truncate" style={{ color: "var(--ink)" }}>{booking.researcher}</div>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[13px] font-extrabold truncate" style={{ color: "var(--ink)" }}>{booking.researcher}</span>
+          {booking.requisitionCode && <span className="gc-mono text-[10px] font-bold px-1 py-px rounded flex-shrink-0" style={{ background: "var(--surface)", color: "var(--ink-faint)" }}>{booking.requisitionCode}</span>}
+        </div>
         <span className="text-[10.5px] font-bold rounded px-1.5 py-0.5 flex-shrink-0" style={{ background: st.color, color: st.ink }}>{st.label}</span>
       </div>
       {species && <div className="text-[11.5px] italic truncate" style={{ color: "var(--ink)" }}>{species}</div>}
@@ -2805,7 +2826,7 @@ function UnitDetailContent({
                   disabled={chosenReqIndex === ""}
                   onClick={() => { onAssignRequisition(Number(chosenReqIndex), unit.id); setAssigning(false); setChosenReqIndex(""); }}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
-                  style={{ background: "var(--free)" }}
+                  style={{ background: "var(--btn-accent)" }}
                 >
                   <CheckCircle2 size={14} /> Assign
                 </button>
@@ -3076,27 +3097,6 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
             </Field>
           </div>
 
-          {/* What the unit is set to right now - shown on its inventory tile
-              (only the ones filled in; none set shows the ranges above). */}
-          <div className="rounded-xl p-3.5 space-y-3" style={{ background: "var(--surface-soft)", border: "1px solid var(--border)" }}>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-soft)" }}>Current settings</span>
-              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Field label="Day temp (°C)"><input {...settingInput("dayTemp")} /></Field>
-              <Field label="Night temp (°C)"><input {...settingInput("nightTemp")} /></Field>
-              <Field label="RH (%)"><input {...settingInput("humidity")} /></Field>
-              <Field label="Light (µmol)"><input {...settingInput("lightIntensity")} /></Field>
-            </div>
-            <ManagedSelectField
-              label="Light cycle" noun="light cycle" emptyLabel="Not set"
-              value={form.settings?.lightCycle || ""} options={lightCycles}
-              onChange={setSetting("lightCycle")}
-              onAdd={onAddLightCycle} onRename={onRenameLightCycle} onDelete={onDeleteLightCycle}
-            />
-            <p className="text-[11.5px]" style={{ color: "var(--ink-faint)" }}>Leave blank if not set - the tile shows the unit's ranges instead.</p>
-          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Lighting type">
@@ -3119,6 +3119,26 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
               Mark as out of service
             </label>
           )}
+          {/* What the unit is set to right now - shown on its inventory tile
+              (only the ones filled in; none set shows the ranges above). */}
+          <div className="rounded-xl p-3.5 space-y-3" style={{ background: "var(--surface-soft)", border: "1px solid var(--border)" }}>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-soft)" }}>Current settings</span>
+              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Field label="Day temp (°C)"><input {...settingInput("dayTemp")} /></Field>
+              <Field label="Night temp (°C)"><input {...settingInput("nightTemp")} /></Field>
+              <Field label="RH (%)"><input {...settingInput("humidity")} /></Field>
+              <Field label="Light (µmol)"><input {...settingInput("lightIntensity")} /></Field>
+            </div>
+            <ManagedSelectField
+              label="Light cycle" noun="light cycle" emptyLabel="Not set"
+              value={form.settings?.lightCycle || ""} options={lightCycles}
+              onChange={setSetting("lightCycle")}
+              onAdd={onAddLightCycle} onRename={onRenameLightCycle} onDelete={onDeleteLightCycle}
+            />
+          </div>
           <button type="submit" className="w-full py-2.5 rounded-xl font-medium text-white" style={{ background: "var(--gradient)" }}>
             {isEdit ? "Save changes" : "Add unit"}
           </button>
@@ -3382,14 +3402,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
     u.type === req.unitType
     && unitAvailableForWindow(u, req.startDate, req.endDate, req.id)
   );
-  const STATUS_STYLE = {
-    pending: { label: "Pending review", color: "var(--warning)", soft: "var(--warning-soft)" },
-    approved: { label: "Ongoing", color: "var(--occupied)", soft: "var(--occupied-soft)" },
-    completed: { label: "Completed", color: "var(--free)", soft: "var(--free-soft)" },
-    declined: { label: "Declined", color: "var(--overdue)", soft: "var(--overdue-soft)" },
-  };
-  const statusColor = STATUS_STYLE[req.status].color;
-  const statusSoft = STATUS_STYLE[req.status].soft;
+  const strongStatus = requisitionStrongStatus(req);
   const labIdx = LAB_GROUPS.indexOf(req.labGroup);
   const avatarColor = labIdx !== -1 ? OKABE_ITO[labIdx % OKABE_ITO.length] : "var(--ink-faint)";
   const avatarText = labIdx !== -1 ? OKABE_ITO_TEXT[labIdx % OKABE_ITO_TEXT.length] : "#fff";
@@ -3401,7 +3414,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   return (
     <div
       className="rounded-2xl overflow-hidden"
-      style={{ border: req.status === "pending" ? `2.5px solid ${PENDING_ORANGE}` : "1px solid var(--border)", background: "var(--surface)" }}
+      style={{ border: req.status === "pending" ? `2.5px solid ${STATUS_STRONG.pending.color}` : "1px solid var(--border)", background: "var(--surface)" }}
     >
       <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-3.5 p-4 text-left">
         <span className="w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-extrabold flex-shrink-0" style={{ background: avatarColor, color: avatarText }}>
@@ -3418,8 +3431,8 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
         <div className="hidden sm:block text-xs font-semibold text-right flex-shrink-0" style={{ color: "var(--ink-faint)" }}>
           {fmtGB(req.startDate)} → {fmtGB(req.endDate)}
         </div>
-        <span className="text-xs font-bold rounded-full px-2.5 py-1 flex-shrink-0" style={{ background: statusSoft, color: statusColor }}>
-          {STATUS_STYLE[req.status].label}{overdueForCompletion ? " · past end date" : ""}
+        <span className="text-xs font-bold rounded-full px-2.5 py-1 flex-shrink-0" style={{ background: strongStatus.color, color: strongStatus.ink }}>
+          {strongStatus.label}
         </span>
         <ChevronDown size={16} style={{ color: "var(--ink-faint)", transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
       </button>
@@ -3464,7 +3477,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                   {windowCandidates.length === 0 && <p className="text-xs" style={{ color: "var(--overdue)" }}>No units match this request's type & discipline for the requested dates.</p>}
                   <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
-                    <button disabled={!chosenUnit} onClick={() => onDecide(index, "approved", chosenUnit)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--free)" }}>
+                    <button disabled={!chosenUnit} onClick={() => onDecide(index, "approved", chosenUnit)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}>
                       <CheckCircle2 size={14} /> Approve & assign
                     </button>
                     <button onClick={() => onDecide(index, "declined")} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: "var(--overdue)", color: "var(--overdue)" }}>
@@ -3478,7 +3491,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                 <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>
-                      {overdueForCompletion ? "Past its end date - still shown as active until you confirm it's finished." : "Still ongoing, assigned to " + (req.assignedUnitId || "a unit") + "."}
+                      {overdueForCompletion ? "Past its end date - still shown as active until you confirm it's finished." : "Current, assigned to " + (req.assignedUnitId || "a unit") + "."}
                     </div>
                     <div className="flex gap-2 flex-shrink-0">
                       <button onClick={() => setReassigning((v) => !v)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
@@ -3504,7 +3517,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                         disabled={!reassignUnit}
                         onClick={() => { onReassign(index, reassignUnit); setReassigning(false); setReassignUnit(""); }}
                         className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
-                        style={{ background: "var(--free)" }}
+                        style={{ background: "var(--btn-accent)" }}
                       >
                         <MapPin size={14} /> Move to selected unit
                       </button>
@@ -3553,14 +3566,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   const [reassignUnit, setReassignUnit] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!req) return null;
-  const STATUS_STYLE = {
-    pending: { label: "Pending review", color: "var(--warning)", soft: "var(--warning-soft)" },
-    approved: { label: "Ongoing", color: "var(--occupied)", soft: "var(--occupied-soft)" },
-    completed: { label: "Completed", color: "var(--free)", soft: "var(--free-soft)" },
-    declined: { label: "Declined", color: "var(--overdue)", soft: "var(--overdue-soft)" },
-  };
-  const statusColor = STATUS_STYLE[req.status].color;
-  const statusSoft = STATUS_STYLE[req.status].soft;
+  const strongStatus = requisitionStrongStatus(req);
   const windowCandidates = units.filter((u) =>
     u.type === req.unitType && unitAvailableForWindow(u, req.startDate, req.endDate, req.id)
   );
@@ -3586,8 +3592,8 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
             </div>
             <h1 className="gc-display text-2xl font-extrabold leading-none truncate">{req.researcher}</h1>
             <p className="text-[13px] mt-1 truncate" style={{ color: "var(--ink-soft)" }}>{req.projectTitle}</p>
-            <span className="inline-block mt-2 text-xs font-bold rounded-full px-2.5 py-1" style={{ background: statusSoft, color: statusColor }}>
-              {STATUS_STYLE[req.status].label}
+            <span className="inline-block mt-2 text-xs font-bold rounded-full px-2.5 py-1" style={{ background: strongStatus.color, color: strongStatus.ink }}>
+              {strongStatus.label}
             </span>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -3626,7 +3632,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                   </select>
                   <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
-                    <button disabled={!chosenUnit} onClick={() => { onDecide(index, "approved", chosenUnit); onClose(); }} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--free)" }}>
+                    <button disabled={!chosenUnit} onClick={() => { onDecide(index, "approved", chosenUnit); onClose(); }} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}>
                       <CheckCircle2 size={14} /> Approve & assign
                     </button>
                     <button onClick={() => { onDecide(index, "declined"); onClose(); }} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: "var(--overdue)", color: "var(--overdue)" }}>
@@ -3639,7 +3645,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
               {req.status === "approved" && (
                 <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
                   <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Still ongoing, assigned to {req.assignedUnitId || "a unit"}.</div>
+                    <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Current, assigned to {req.assignedUnitId || "a unit"}.</div>
                     <div className="flex gap-2 flex-shrink-0">
                       <button onClick={() => setReassigning((v) => !v)} className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
                         <MapPin size={13} /> Change unit
@@ -3664,7 +3670,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                         disabled={!reassignUnit}
                         onClick={() => { onReassign(index, reassignUnit); setReassigning(false); setReassignUnit(""); }}
                         className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
-                        style={{ background: "var(--free)" }}
+                        style={{ background: "var(--btn-accent)" }}
                       >
                         <MapPin size={14} /> Move to selected unit
                       </button>
@@ -3827,7 +3833,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           </section>
 
           <section>
-            <SectionLabel>Ongoing ({ongoing.length})</SectionLabel>
+            <SectionLabel>Current ({ongoing.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {ongoing.map(({ r, i }) => (
                 <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
@@ -4474,7 +4480,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
   // stepName === "form"
   const isPlant = discipline === "plant";
   const isReftech = spaceType === "reftech";
-  const submitColor = isPlant ? "var(--free)" : "var(--gradient)";
+  const submitColor = "var(--btn-accent)";
 
   return (
     <div className="max-w-2xl mx-auto">
