@@ -252,6 +252,8 @@ function mapBookingRow(b) {
     // separate lookup. Never written back from here - admin_notes is only
     // ever set via updateAdminNotes() directly on requisitions.
     adminNotes: b.requisitions?.admin_notes || "",
+    // "pending" when an approved requisition's amendment is under review.
+    requisitionStatus: b.requisitions?.status || null,
     startDate: b.start_date,
     endDate: b.end_date,
     // When this booking row was actually created (i.e. when the

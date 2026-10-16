@@ -404,6 +404,27 @@ function bookingStatus(booking) {
   return { key: "occupied", ...STATUS_META.occupied };
 }
 
+/* Strong status colours for the inventory tiles, unit view and status
+   tags - the space usage graph's (colour-blind safe) palette. `ink` is the
+   readable text colour on a solid `color` fill. */
+const STATUS_STRONG = {
+  current: { label: "Current", color: "#0072B2", ink: "#fff" },
+  upcoming: { label: "Upcoming", color: "#009E73", ink: "#fff" },
+  warning: { label: "Ending soon", color: "#E69F00", ink: "#16211D" },
+  overdue: { label: "Overdue", color: "#D55E00", ink: "#fff" },
+  pending: { label: "Pending review", color: "#CC79A7", ink: "#fff" },
+  service: { label: "Out of service", color: "#4D4D4D", ink: "#fff" },
+  free: { label: "Free", color: "#56B4E9", ink: "#16211D" },
+};
+// displayStatus()/bookingStatus() keys -> STATUS_STRONG keys.
+const STRONG_KEY = { occupied: "current", upcoming: "upcoming", warning: "warning", overdue: "overdue", service: "service", free: "free" };
+/* A booking's strong status - "pending" while its requisition's amendment
+   is under review, otherwise from its dates. */
+function bookingStrongStatus(b) {
+  if (b.requisitionStatus === "pending") return STATUS_STRONG.pending;
+  return STATUS_STRONG[STRONG_KEY[bookingStatus(b).key]];
+}
+
 /* ---------------------------------------------------------------------- */
 /* Shared bits                                                            */
 /* ---------------------------------------------------------------------- */
@@ -440,16 +461,16 @@ function DisciplineFilterPills({ value, onChange }) {
 
 function StatusTag({ unit, big = false }) {
   const s = displayStatus(unit);
+  const strong = STATUS_STRONG[STRONG_KEY[s.key]] || STATUS_STRONG.current;
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full font-semibold"
+      className="inline-flex items-center gap-1.5 rounded-full font-bold"
       style={{
-        background: s.soft, color: s.color,
+        background: strong.color, color: strong.ink,
         padding: big ? "5px 11px" : "3px 9px",
         fontSize: big ? 13 : 11,
       }}
     >
-      <span className="rounded-full flex-shrink-0" style={{ width: 6, height: 6, background: s.color }} />
       {s.label}
     </span>
   );
@@ -1907,14 +1928,11 @@ function UnitCard({ unit, onClick }) {
   // discipline isn't a fixed unit property.
   const disciplines = Object.keys(DISCIPLINE_META).filter((k) => currentForClash.some((b) => b.discipline === k));
   const hasClash = !isReftech && currentForClash.length > 1 && !isClashAcknowledged(unit, currentForClash);
+  // Current requisitions (most urgent first), then upcoming ones by start.
+  const allRows = [...currentForClash.slice().sort((a, b) => new Date(a.endDate) - new Date(b.endDate)), ...upcoming];
+  const tileRows = allRows.slice(0, 3);
+  const hiddenCount = allRows.length - tileRows.length;
 
-  // occupant / availability box colour follows the same status language used everywhere else
-  const boxStyle =
-    s.key === "overdue" ? { background: "var(--overdue-soft)", ink: "var(--overdue)" } :
-    s.key === "warning" ? { background: "var(--warning-soft)", ink: "var(--warning)" } :
-    s.key === "occupied" ? { background: "var(--occupied-soft)", ink: "var(--occupied)" } :
-    s.key === "service" ? { background: "var(--service-soft)", ink: "var(--service)" } :
-    { background: "var(--surface-soft)", ink: "var(--ink-soft)" };
 
   return (
     <button
@@ -1967,72 +1985,22 @@ function UnitCard({ unit, onClick }) {
         {unit.co2Control && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>CO₂</span>}
       </div>
 
-      {/* occupant / availability - a reftech room can genuinely hold several
-          ongoing requisitions at once (unlike a cabinet's single occupant),
-          so it gets a compact list instead of one occupant block: no
-          per-row dates (the room-level status badge above already conveys
-          urgency), species instead, capped so the tile can't grow unbounded.
-          minHeight + centering keeps this box the same size across every
-          tile in the deck regardless of how much (or little) it has to
-          show - a free cabinet's one-liner and a busy reftech room's list
-          both read as the same footprint, not a ragged grid. */}
-      <div
-        className="mt-auto rounded-xl px-3.5 py-3"
-        style={{ background: boxStyle.background, minHeight: 88, display: "flex", flexDirection: "column", justifyContent: "center" }}
-      >
-        {isReftech && currentForClash.length > 0 ? (
-          <div className="space-y-2">
-            {currentForClash.slice(0, 2).map((b) => (
-              <div key={b.id} className="flex items-center gap-2.5">
-                <span className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-extrabold flex-shrink-0" style={{ background: "rgba(255,255,255,0.65)", color: boxStyle.ink }}>
-                  {b.researcher.split(" ").map((p) => p[0]).join("").slice(0, 2)}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12.5px] font-extrabold truncate" style={{ color: boxStyle.ink }}>{b.researcher}</div>
-                  <div className="text-[10.5px] font-semibold truncate" style={{ color: boxStyle.ink, opacity: 0.85 }}>
-                    {piDisplay(b.labGroup)}{b.species && b.species.length ? ` · ${b.species.join(", ")}` : ""}
-                  </div>
-                </div>
-              </div>
-            ))}
-            {currentForClash.length > 2 && (
-              <div className="text-[10.5px] font-bold" style={{ color: boxStyle.ink, opacity: 0.75 }}>+{currentForClash.length - 2} more</div>
-            )}
-            {upcoming.length > 0 && (
-              <div className="text-[11px] font-bold pt-0.5" style={{ color: "var(--accent-dark)" }}>+{upcoming.length} more requisition{upcoming.length !== 1 ? "s" : ""} ahead →</div>
-            )}
-          </div>
-        ) : occupant ? (
-          <>
-            <div className="flex items-center gap-2.5">
-              <span className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-extrabold flex-shrink-0" style={{ background: "rgba(255,255,255,0.65)", color: boxStyle.ink }}>
-                {occupant.researcher.split(" ").map((p) => p[0]).join("").slice(0, 2)}
-              </span>
-              <div className="min-w-0">
-                <div className="text-[13px] font-extrabold truncate" style={{ color: boxStyle.ink }}>{occupant.researcher}</div>
-                <div className="text-[11px] font-semibold truncate" style={{ color: boxStyle.ink, opacity: 0.85 }}>{occupant.role ? `${occupant.role} · ` : ""}{piDisplay(occupant.labGroup)}</div>
-              </div>
+      {/* Requisitions on this unit as status-stripe rows (name, species, PI,
+          dates): what's in it now, then the next one booked. Capped at
+          three rows so tiles stay a similar size. */}
+      <div className="mt-auto space-y-1.5" style={{ minHeight: 88 }}>
+        {tileRows.map((b) => <TileBookingRow key={b.id} booking={b} />)}
+        {hiddenCount > 0 && (
+          <div className="text-[11px] font-bold px-1" style={{ color: "var(--ink-soft)" }}>+{hiddenCount} more requisition{hiddenCount !== 1 ? "s" : ""}</div>
+        )}
+        {tileRows.length === 0 && (
+          <TileStripe color={unit.status === "service" ? STATUS_STRONG.service.color : STATUS_STRONG.free.color}>
+            <div className="text-[12.5px] font-bold py-2" style={{ color: "var(--ink)" }}>
+              {unit.status === "service"
+                ? `Out of service${unit.serviceLog[0] ? ` · serviced ${fmtGB(unit.serviceLog[0].date)} by ${unit.serviceLog[0].engineer}` : ""}`
+                : "Free and ready to book"}
             </div>
-            <div className="text-[11px] font-bold mt-2" style={{ color: boxStyle.ink, opacity: 0.9 }}>
-              {s.key === "overdue" ? `Was due back ${fmtGB(occupant.endDate)}` : `Until ${fmtGB(occupant.endDate)}`}
-            </div>
-            {occupant.adminNotes && (
-              <div className="text-[10px] italic truncate mt-1" style={{ color: boxStyle.ink, opacity: 0.55 }} title={occupant.adminNotes}>
-                {occupant.adminNotes}
-              </div>
-            )}
-            {upcoming.length > 0 && (
-              <div className="text-[11px] font-bold mt-1" style={{ color: "var(--accent-dark)" }}>+{upcoming.length} more requisition{upcoming.length !== 1 ? "s" : ""} ahead →</div>
-            )}
-          </>
-        ) : unit.status === "service" ? (
-          <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>
-            Under maintenance{unit.serviceLog[0] ? ` · serviced ${fmtGB(unit.serviceLog[0].date)} by contractor ${unit.serviceLog[0].engineer}` : ""}
-          </div>
-        ) : upcoming.length > 0 ? (
-          <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>Free now - next requisition {fmtGB(upcoming[0].startDate)}</div>
-        ) : (
-          <div className="text-[12.5px] font-bold text-center" style={{ color: boxStyle.ink }}>Free and ready to book</div>
+          </TileStripe>
         )}
       </div>
     </button>
@@ -2644,30 +2612,74 @@ function PhotoCard({ unit, onUpdate }) {
   );
 }
 
-function BookingCard({ booking, status, onOpenRequisition }) {
+/* Tile A: neutral row with a coloured status stripe. */
+function TileStripe({ color, children }) {
+  return (
+    <div className="flex rounded-xl overflow-hidden" style={{ background: "var(--surface-soft)" }}>
+      <div className="flex-shrink-0" style={{ width: 6, background: color }} />
+      <div className="flex-1 min-w-0 px-3 py-2">{children}</div>
+    </div>
+  );
+}
+function TileBookingRow({ booking }) {
+  const st = bookingStrongStatus(booking);
+  const species = booking.species && booking.species.length ? booking.species.join(", ") : "";
+  return (
+    <TileStripe color={st.color}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[13px] font-extrabold truncate" style={{ color: "var(--ink)" }}>{booking.researcher}</div>
+        <span className="text-[9.5px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 flex-shrink-0" style={{ background: st.color, color: st.ink }}>{st.label}</span>
+      </div>
+      {species && <div className="text-[11.5px] italic truncate" style={{ color: "var(--ink)" }}>{species}</div>}
+      <div className="text-[11px] truncate" style={{ color: "var(--ink-soft)" }}>{piDisplay(booking.labGroup)}</div>
+      <div className="text-[11.5px] font-bold mt-0.5" style={{ color: "var(--ink)" }}>{fmtGB(booking.startDate)} → {fmtGB(booking.endDate)}</div>
+    </TileStripe>
+  );
+}
+
+/* Tile C: a requisition in the unit view - who, species and PI, with a
+   bar that fills as the booking runs. Conditions (temp, humidity, light)
+   are on the unit tile, so they're left off here. */
+function BookingCard({ booking, onOpenRequisition }) {
   const clickable = !!onOpenRequisition;
   const Wrapper = clickable ? "button" : "div";
-  const color = status ? status.color : "var(--occupied)";
-  const soft = status ? status.soft : "var(--occupied-soft)";
-  const initials = booking.researcher.split(" ").map((p) => p[0]).join("").slice(0, 2);
+  const st = bookingStrongStatus(booking);
+  const start = new Date(booking.startDate), end = new Date(booking.endDate);
+  const total = Math.max(1, (end - start) / 86400000);
+  const elapsed = (TODAY - start) / 86400000;
+  const pct = Math.max(0, Math.min(100, (elapsed / total) * 100));
+  const left = daysUntil(booking.endDate);
+  const toStart = daysUntil(booking.startDate);
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const progressText = toStart > 0 ? `starts in ${plural(toStart, "day")}`
+    : left < 0 ? `${plural(-left, "day")} overdue`
+    : left === 0 ? "ends today" : `${plural(left, "day")} left`;
+  const species = booking.species && booking.species.length ? booking.species.join(", ") : "";
   return (
     <Wrapper
       onClick={onOpenRequisition}
-      className={`w-full text-left rounded-2xl p-4 flex items-center gap-4 ${clickable ? "gc-clickable" : ""}`}
-      style={{ background: soft }}
+      className={`w-full text-left rounded-2xl p-4 block ${clickable ? "gc-clickable" : ""}`}
+      style={{ background: "var(--surface-soft)", border: `1.5px solid ${st.color}` }}
     >
-      <span className="w-11 h-11 rounded-full flex items-center justify-center font-extrabold text-sm flex-shrink-0" style={{ background: "rgba(255,255,255,0.65)", color }}>
-        {initials}
-      </span>
-      <div className="flex-1 min-w-0">
-        <div className="font-extrabold text-[15px]" style={{ color }}>{booking.researcher}</div>
-        <div className="italic text-[13px] truncate" style={{ color, opacity: 0.85 }}>{booking.project} · {piDisplay(booking.labGroup)}</div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11.5px] font-semibold mt-1" style={{ color, opacity: 0.75 }}>
-          <span>{fmtGB(booking.startDate)} → {fmtGB(booking.endDate)}</span>
-          <span>{[fmtEnv(booking.setTemp, booking.nightTemp, booking.setHumidity), booking.lightCycle, (booking.dawnTime || booking.duskTime) ? fmtDawnDusk(booking.dawnTime, booking.duskTime) : null].filter(Boolean).join(" · ")}</span>
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-extrabold text-[15px] truncate" style={{ color: "var(--ink)" }}>{booking.researcher}</div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <span className="text-[10.5px] font-extrabold uppercase tracking-wide rounded px-2 py-0.5" style={{ background: st.color, color: st.ink }}>{st.label}</span>
+          {clickable && <ChevronRight size={16} style={{ color: "var(--ink-faint)" }} />}
         </div>
       </div>
-      {clickable && <ChevronRight size={18} style={{ color, opacity: 0.6 }} className="flex-shrink-0" />}
+      <div className="text-[12.5px] mt-0.5 truncate" style={{ color: "var(--ink-soft)" }}>
+        {species && <span className="italic" style={{ color: "var(--ink)" }}>{species}</span>}
+        {species ? " · " : ""}{piDisplay(booking.labGroup)}
+      </div>
+      <div className="h-2 rounded-full mt-3 overflow-hidden" style={{ background: "var(--border)" }}>
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: st.color }} />
+      </div>
+      <div className="flex justify-between items-center text-[11.5px] font-bold mt-1.5">
+        <span style={{ color: "var(--ink)" }}>{fmtGB(booking.startDate)}</span>
+        <span style={{ color: st.color === STATUS_STRONG.warning.color ? "#A66F00" : st.color }}>{progressText}</span>
+        <span style={{ color: "var(--ink)" }}>{fmtGB(booking.endDate)}</span>
+      </div>
     </Wrapper>
   );
 }
@@ -2729,7 +2741,7 @@ function UnitDetailContent({
         )}
         {current.length > 0 && (
           <div className="space-y-2">
-            {current.map((b) => <BookingCard key={b.id} booking={b} status={bookingStatus(b)} onOpenRequisition={linkFor(b)} />)}
+            {current.map((b) => <BookingCard key={b.id} booking={b} onOpenRequisition={linkFor(b)} />)}
           </div>
         )}
         {current.length === 0 && upcoming.length > 0 && (
@@ -2743,7 +2755,7 @@ function UnitDetailContent({
         {upcoming.length > 0 && (
           <div>
             <div className="text-[11px] mt-2 mb-1.5 font-bold uppercase tracking-wide" style={{ color: "var(--ink-faint)" }}>Upcoming ({upcoming.length})</div>
-            <div className="space-y-2">{shownUpcoming.map((b) => <BookingCard key={b.id} booking={b} status={bookingStatus(b)} onOpenRequisition={linkFor(b)} />)}</div>
+            <div className="space-y-2">{shownUpcoming.map((b) => <BookingCard key={b.id} booking={b} onOpenRequisition={linkFor(b)} />)}</div>
             {upcoming.length > 2 && (
               <button onClick={() => setUpcomingExpanded((v) => !v)} className="mt-2 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
                 {upcomingExpanded ? "Show fewer" : `Show ${upcoming.length - 2} more`}
