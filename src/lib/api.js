@@ -928,3 +928,40 @@ export async function deleteRequisition(reqId) {
   const { error } = await supabase.from("requisitions").delete().eq("id", reqId);
   if (error) throw error;
 }
+
+/* ---------------------------------------------------------------------- */
+/* Full backup (Dashboard button) - see src/lib/backup.js                 */
+/* ---------------------------------------------------------------------- */
+
+/* Everything the backup workbook needs, read fresh and unfiltered (not
+   from what's on screen). Raw rows - backup.js turns them into readable
+   columns. */
+export async function fetchBackupData() {
+  const [units, requisitions, bookings, serviceLog, profiles, labGroups] = await Promise.all([
+    supabase.from("units").select("*").order("id"),
+    supabase.from("requisitions").select("*").order("code"),
+    supabase.from("bookings").select("*, requisitions(status, code)"),
+    supabase.from("service_log").select("*, maintenance_categories(name)").order("date", { ascending: false }),
+    supabase.from("profiles").select("id, full_name"),
+    supabase.from("lab_groups").select("id, name, pi_name"),
+  ]);
+  for (const res of [units, requisitions, bookings, serviceLog, profiles, labGroups]) {
+    if (res.error) throw res.error;
+  }
+  return {
+    units: units.data, requisitions: requisitions.data, bookings: bookings.data,
+    serviceLog: serviceLog.data, profiles: profiles.data, labGroups: labGroups.data,
+  };
+}
+
+/* The shared "Last full backup" date - the newest backup_log row. */
+export async function fetchLastBackup() {
+  const { data, error } = await supabase.from("backup_log").select("created_at, created_by").order("created_at", { ascending: false }).limit(1);
+  if (error) throw error;
+  return data[0] ? { at: data[0].created_at } : null;
+}
+
+export async function recordBackup(userId) {
+  const { error } = await supabase.from("backup_log").insert({ created_by: userId });
+  if (error) throw error;
+}

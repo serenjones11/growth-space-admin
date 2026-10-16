@@ -8,6 +8,7 @@ import {
   Search,
   PlusCircle,
   Pencil,
+  Download,
   Check,
   Moon,
   Droplets,
@@ -62,6 +63,7 @@ import {
 import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
 import * as api from "./lib/api";
+import { downloadFullBackup } from "./lib/backup";
 
 /* ---------------------------------------------------------------------- */
 /* Design tokens - dark sidebar / light workspace, warm-green readouts     */
@@ -1194,7 +1196,8 @@ function PendingPIsPanel({ pendingLabGroups, verifiedLabGroups, onApprove, onMer
   );
 }
 
-function DashboardPage({ units, requests, activityLog, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory, labGroups, onApproveLabGroup, onMergeLabGroup, onAddLabGroup, onUpdateLabGroup, onDeleteLabGroup }) {
+function DashboardPage({ units, requests, activityLog, goInventory, goRequisitions, onSelectUnit, onPreviewRequisition, labUsageHistory, labGroups, onApproveLabGroup, onMergeLabGroup, onAddLabGroup, onUpdateLabGroup, onDeleteLabGroup, lastBackup, onFullBackup }) {
+  const [backingUp, setBackingUp] = useState(false);
   const [managingPIs, setManagingPIs] = useState(false);
   const [timelineFull, setTimelineFull] = useState(false);
   const [activityExpanded, setActivityExpanded] = useState(true);
@@ -1236,7 +1239,27 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
 
   return (
     <div className="space-y-5">
-      <h1 className="gc-display text-2xl font-extrabold">Dashboard</h1>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h1 className="gc-display text-2xl font-extrabold">Dashboard</h1>
+        {/* Full backup: one Excel workbook of all units, requisitions and
+            maintenance (src/lib/backup.js). The date is shared by all admins. */}
+        {onFullBackup && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs" style={{ color: "var(--ink-soft)" }}>
+              Last full backup: {lastBackup ? new Date(lastBackup.at).toLocaleDateString("en-GB") : "never"}
+            </span>
+            <button
+              type="button"
+              disabled={backingUp}
+              onClick={async () => { setBackingUp(true); try { await onFullBackup(); } finally { setBackingUp(false); } }}
+              className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl text-white disabled:opacity-60"
+              style={{ background: "var(--btn-accent)" }}
+            >
+              <Download size={15} /> {backingUp ? "Preparing…" : "Full backup"}
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Pending PIs - surfaced right at the top so it's never missed; the
           panel itself renders nothing once there's nothing pending. */}
@@ -4770,7 +4793,10 @@ export default function GrowthCabinetApp() {
   const [appData, setAppData] = useState(null);
   const [loadError, setLoadError] = useState(null);
 
+  const [lastBackup, setLastBackup] = useState(null);
+  const refreshLastBackup = () => api.fetchLastBackup().then(setLastBackup).catch((err) => console.error(err));
   const reload = async () => {
+    refreshLastBackup();
     try {
       const data = await api.fetchAdminData();
       applyLabGroups(data.labGroups); // must run before setAppData - see LAB_GROUPS/PI_BY_LAB comment
@@ -4873,6 +4899,14 @@ export default function GrowthCabinetApp() {
   const handleRenameManufacturer = withErrorAlert(async (row, name) => {
     await api.renameManufacturer(row.id, row.name, name);
     await reload();
+    return true;
+  });
+  // Full backup: build + download the workbook, then record it so every
+  // admin sees the same "Last full backup" date.
+  const handleFullBackup = withErrorAlert(async () => {
+    await downloadFullBackup({ exportedBy: profile?.full_name || session?.user?.email || "" });
+    await api.recordBackup(session.user.id);
+    await refreshLastBackup();
     return true;
   });
   const handleAddLightCycle = withErrorAlert(async (name) => {
@@ -5119,6 +5153,7 @@ export default function GrowthCabinetApp() {
               onSelectUnit={setSelected} onPreviewRequisition={setPreviewReqIndex} labUsageHistory={labUsageHistory}
               labGroups={labGroups} onApproveLabGroup={handleApproveLabGroup} onMergeLabGroup={handleMergeLabGroup}
               onAddLabGroup={handleAddLabGroup} onUpdateLabGroup={handleUpdateLabGroup} onDeleteLabGroup={handleDeleteLabGroup}
+              lastBackup={lastBackup} onFullBackup={handleFullBackup}
             />
           )}
           {page === "inventory" && (
