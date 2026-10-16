@@ -206,11 +206,11 @@ function fmtTemps(dayTemp, nightTemp) {
   const parts = [isSet(dayTemp) ? `${dayTemp}°C day` : null, isSet(nightTemp) ? `${nightTemp}°C night` : null].filter(Boolean);
   return parts.length ? parts.join(" / ") : "Not specified";
 }
-// Compact form for the unit tile readout: "22°C", or "22/18°C" when the
-// night temp differs from the day temp.
+// Unit tile TEMP readout: "20°C / 18°C" (day / night), or just the day
+// temp when no night temp was given.
 function fmtTileTemp(dayTemp, nightTemp) {
-  if (!isSet(dayTemp)) return isSet(nightTemp) ? `-/${nightTemp}°C` : "-";
-  return isSet(nightTemp) && nightTemp !== dayTemp ? `${dayTemp}/${nightTemp}°C` : `${dayTemp}°C`;
+  const day = isSet(dayTemp) ? `${dayTemp}°C` : "-";
+  return isSet(nightTemp) ? `${day} / ${nightTemp}°C` : day;
 }
 function fmtEnv(dayTemp, nightTemp, humidity) {
   const temps = fmtTemps(dayTemp, nightTemp);
@@ -222,7 +222,6 @@ function fmtDawnDusk(dawn, dusk) {
   return parts.length ? parts.join(" · ") : "Not specified";
 }
 const LIGHTING_TYPES = ["LED", "Fluorescent", "LED + Fluorescent"];
-const BALLAST_TYPES = ["Electronic", "Magnetic"];
 const ROLES = ["PhD Student", "Postdoc", "Technician", "Masters Student", "PI / Academic Staff"];
 const CONTAINMENT_LEVELS = ["Wild-Type", "GMO", "DEFRA"];
 
@@ -314,11 +313,8 @@ function requisitionTab(status) {
   return status === "pending" || status === "approved" ? "pending" : "completed";
 }
 
-/* A single shared fallback swatch for a service-log category that's no
-   longer in the categories list (e.g. deleted after entries were logged
-   against it) - replaces the old hardcoded MAINTENANCE_CATEGORIES map now
-   that categories are real, admin-managed rows from the database. */
-const FALLBACK_CATEGORY_COLOR = { bg: "#EFF6FF", ink: "#1D4ED8", border: "#C7DDFB" };
+/* Maintenance category pills are all the same neutral grey. */
+const CATEGORY_GREY = { bg: "#F1F5F3", ink: "#5C6D65", border: "#E3E8E5" };
 const DOCUMENT_TYPES = ["Manual", "Certificate", "Risk Assessment"];
 
 /* ---------------------------------------------------------------------- */
@@ -471,7 +467,7 @@ function StatusTag({ unit, big = false }) {
         fontSize: big ? 13 : 11,
       }}
     >
-      {s.label}
+      {s.key === "free" ? "Free to book" : s.label}
     </span>
   );
 }
@@ -1952,7 +1948,7 @@ function UnitCard({ unit, onClick }) {
         </div>
       </div>
       <div className="text-[12px] mb-2.5" style={{ color: "var(--ink-soft)" }}>
-        {isReftech ? "Reftech Room · " : ""}{unit.manufacturer} {unit.model}
+        {unit.manufacturer} {unit.model}
       </div>
 
       {/* room - the most-checked field, given its own prominent chip */}
@@ -1961,7 +1957,7 @@ function UnitCard({ unit, onClick }) {
       {/* live readouts if occupied, otherwise the operating range */}
       {occupant ? (
         <div className="grid grid-cols-3 gap-1.5 mb-3">
-          <div className="gc-readout"><div className="lbl">{isSet(occupant.nightTemp) && occupant.nightTemp !== occupant.setTemp ? "DAY/NIGHT" : "TEMP"}</div><div className="val" style={{ color: "var(--chip-temp)" }}>{fmtTileTemp(occupant.setTemp, occupant.nightTemp)}</div></div>
+          <div className="gc-readout"><div className="lbl">TEMP</div><div className="val" style={{ color: "var(--chip-temp)", ...(isSet(occupant.nightTemp) ? { fontSize: 13 } : {}) }}>{fmtTileTemp(occupant.setTemp, occupant.nightTemp)}</div></div>
           <div className="gc-readout"><div className="lbl">RH</div><div className="val" style={{ color: "var(--chip-rh)" }}>{isSet(occupant.setHumidity) ? `${occupant.setHumidity}%` : "-"}</div></div>
           <div className="gc-readout"><div className="lbl">CYCLE</div><div className="val" style={{ color: "var(--chip-cycle)", fontSize: 12.5 }}>{occupant.lightCycle || "-"}</div></div>
         </div>
@@ -1983,6 +1979,7 @@ function UnitCard({ unit, onClick }) {
           );
         })}
         {unit.co2Control && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>CO₂</span>}
+        {unit.dimmingControl && <span className="gc-tag" style={{ background: "var(--tag-co2-bg)", color: "var(--tag-co2-ink)", borderColor: "var(--tag-co2-border)" }}>Dimming</span>}
       </div>
 
       {/* Requisitions on this unit as status-stripe rows (name, species, PI,
@@ -1993,12 +1990,10 @@ function UnitCard({ unit, onClick }) {
         {hiddenCount > 0 && (
           <div className="text-[11px] font-bold px-1" style={{ color: "var(--ink-soft)" }}>+{hiddenCount} more requisition{hiddenCount !== 1 ? "s" : ""}</div>
         )}
-        {tileRows.length === 0 && (
-          <TileStripe color={unit.status === "service" ? STATUS_STRONG.service.color : STATUS_STRONG.free.color}>
+        {tileRows.length === 0 && unit.status === "service" && (
+          <TileStripe color={STATUS_STRONG.service.color}>
             <div className="text-[12.5px] font-bold py-2" style={{ color: "var(--ink)" }}>
-              {unit.status === "service"
-                ? `Out of service${unit.serviceLog[0] ? ` · serviced ${fmtGB(unit.serviceLog[0].date)} by ${unit.serviceLog[0].engineer}` : ""}`
-                : "Free and ready to book"}
+              Out of service{unit.serviceLog[0] ? ` · serviced ${fmtGB(unit.serviceLog[0].date)} by ${unit.serviceLog[0].engineer}` : ""}
             </div>
           </TileStripe>
         )}
@@ -2290,7 +2285,6 @@ function EnvironmentControlsCard({ unit }) {
         <FieldPair label="Ballasts" value={unit.ballasts} />
         <FieldPair label="CO₂ control" value={unit.co2Control ? "Yes" : "No"} />
         <FieldPair label="Dimming control" value={unit.dimmingControl ? "Yes" : "No"} />
-        <FieldPair label="Next service due" value={fmtGB(unit.nextServiceDue)} />
       </FieldGrid>
     </InfoBox>
   );
@@ -2378,7 +2372,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
             <div className="rounded-lg p-2.5" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {categories.map((c) => {
-                  const col = categoryColors[c] || FALLBACK_CATEGORY_COLOR;
+                  const col = CATEGORY_GREY;
                   return (
                     <span key={c} className="gc-tag" style={{ background: col.bg, color: col.ink, borderColor: col.border }}>
                       {c}
@@ -2432,7 +2426,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
         </thead>
         <tbody>
           {unit.serviceLog.map((entry) => {
-            const cat = categoryColors[entry.category] || FALLBACK_CATEGORY_COLOR;
+            const cat = CATEGORY_GREY;
             const isScheduled = entry.status === "scheduled";
             return (
               <tr key={entry.id} className="group" style={{ borderTop: "1px solid rgba(22,33,29,0.07)" }}>
@@ -2628,7 +2622,7 @@ function TileBookingRow({ booking }) {
     <TileStripe color={st.color}>
       <div className="flex items-center justify-between gap-2">
         <div className="text-[13px] font-extrabold truncate" style={{ color: "var(--ink)" }}>{booking.researcher}</div>
-        <span className="text-[9.5px] font-extrabold uppercase tracking-wide rounded px-1.5 py-0.5 flex-shrink-0" style={{ background: st.color, color: st.ink }}>{st.label}</span>
+        <span className="text-[10.5px] font-bold rounded px-1.5 py-0.5 flex-shrink-0" style={{ background: st.color, color: st.ink }}>{st.label.toLowerCase()}</span>
       </div>
       {species && <div className="text-[11.5px] italic truncate" style={{ color: "var(--ink)" }}>{species}</div>}
       <div className="text-[11px] truncate" style={{ color: "var(--ink-soft)" }}>{piDisplay(booking.labGroup)}</div>
@@ -2659,12 +2653,12 @@ function BookingCard({ booking, onOpenRequisition }) {
     <Wrapper
       onClick={onOpenRequisition}
       className={`w-full text-left rounded-2xl p-4 block ${clickable ? "gc-clickable" : ""}`}
-      style={{ background: "var(--surface-soft)", border: `1.5px solid ${st.color}` }}
+      style={{ background: "var(--surface-soft)" }}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="font-extrabold text-[15px] truncate" style={{ color: "var(--ink)" }}>{booking.researcher}</div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="text-[10.5px] font-extrabold uppercase tracking-wide rounded px-2 py-0.5" style={{ background: st.color, color: st.ink }}>{st.label}</span>
+          <span className="text-[11px] font-bold rounded px-2 py-0.5" style={{ background: st.color, color: st.ink }}>{st.label.toLowerCase()}</span>
           {clickable && <ChevronRight size={16} style={{ color: "var(--ink-faint)" }} />}
         </div>
       </div>
@@ -2946,7 +2940,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
       : {
           id: "", type: "cabinet", floor: "L1", room: (rooms.find((r) => r.floor === "L1" && r.type === "cabinet") || {}).name || "",
           manufacturer: (manufacturers[0] || {}).name || "", model: "", serialNumber: "", assetNumber: "", tscanId: "",
-          shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: BALLAST_TYPES[0],
+          shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: "",
           co2Control: false, dimmingControl: false,
           installDate: "", tempMin: 4, tempMax: 30, humMin: 30, humMax: 85, status: "free",
         }
@@ -3068,9 +3062,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
               </select>
             </Field>
             <Field label="Ballasts">
-              <select value={form.ballasts} onChange={set("ballasts")} className="gc-input">
-                {BALLAST_TYPES.map((b) => <option key={b}>{b}</option>)}
-              </select>
+              <input value={form.ballasts || ""} onChange={set("ballasts")} className="gc-input" placeholder="e.g. Electronic" />
             </Field>
           </div>
           <div className="flex items-center gap-5">
