@@ -114,7 +114,7 @@ the repo doesn't have to reconstruct current-state by replaying 30+ migration fi
 **Tables**: `lab_groups`, `profiles` (extends `auth.users`, `role` = `admin`/researcher),
 `maintenance_categories`, `units`, `rooms`, `requisitions`, `bookings`, `service_log`,
 `documents`, `activity_log`, `species_options`, `light_cycle_options`, `requisition_code_counters`, `manufacturers`,
-`notification_preferences`, `backup_log` (when the Dashboard "Full backup" Excel export was last
+`notification_preferences`, `backup_log` (when the Dashboard "Full backup" Excel export (GrowSpace-Backup-DD-MM-YYYY.xlsx) was last
 downloaded — `src/lib/backup.js` builds the workbook client-side with a lazily loaded `exceljs`).
 
 **RLS shape**: admins (`profiles.role = 'admin'`, checked via `is_admin()`) can read/write

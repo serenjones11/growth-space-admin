@@ -127,7 +127,7 @@ function buildSheets(data) {
 
   const sheets = [
     {
-      name: "Units", description: "Every growth cabinet and reftech room: specs, ranges, current settings, status and who's in it",
+      name: "Units",
       rows: units,
       columns: [
         ["Unit ID", "id"], ["Type", "type"], ["Floor", "floor"], ["Room", "room"], ["Manufacturer", "manufacturer"], ["Model", "model"],
@@ -140,7 +140,7 @@ function buildSheets(data) {
       ],
     },
     {
-      name: "Requisitions", description: "Every requisition, any status, with all its details, decisions and amendments",
+      name: "Requisitions",
       rows: requisitions,
       columns: [
         ["Code", "code"], ["Status", "status"], ["Booking state", "state"], ["Researcher", "researcher"], ["Email", "email"],
@@ -157,7 +157,7 @@ function buildSheets(data) {
       ],
     },
     {
-      name: "Maintenance", description: "Every maintenance entry, completed and scheduled",
+      name: "Maintenance",
       rows: maintenance,
       columns: [
         ["Unit ID", "unit"], ["Date", "date", true], ["Status", "status"], ["Category", "category"],
@@ -196,18 +196,18 @@ export async function downloadFullBackup({ exportedBy }) {
   wb.created = now;
 
   const summary = wb.addWorksheet("Summary");
-  summary.columns = [{ width: 18 }, { width: 14 }, { width: 90 }];
-  summary.getCell("A1").value = "Growth Space Admin - full backup";
+  summary.columns = [{ width: 18 }, { width: 14 }];
+  summary.getCell("A1").value = "GrowSpace - full backup";
   summary.getCell("A1").font = { bold: true, size: 14 };
   summary.addRow(["Exported", fmtDateTime(now)]);
   summary.addRow(["Exported by", exportedBy || ""]);
   summary.addRow([]);
-  const head = summary.addRow(["Tab", "Rows", "What's in it"]);
+  const head = summary.addRow(["Tab", "Rows"]);
   head.font = { bold: true };
   head.eachCell((c) => { c.fill = HEADER_FILL; c.border = HEADER_BORDER; });
-  sheets.forEach((s) => summary.addRow([s.name, s.rows.length, s.description]));
+  sheets.forEach((s) => summary.addRow([s.name, s.rows.length]));
   summary.addRow([]);
-  const note = summary.addRow(["Note", "", "Contains personal data (names, emails, emergency numbers) - store somewhere access-restricted."]);
+  const note = summary.addRow(["Note", "Contains personal data (names, emails, emergency numbers) - store somewhere access-restricted."]);
   note.font = { italic: true, color: { argb: "FF5C6D65" } };
 
   sheets.forEach((s) => addDataSheet(wb, s));
@@ -215,7 +215,7 @@ export async function downloadFullBackup({ exportedBy }) {
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const pad = (n) => String(n).padStart(2, "0");
-  const filename = `growth-space-backup-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.xlsx`;
+  const filename = `GrowSpace-Backup-${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}.xlsx`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;

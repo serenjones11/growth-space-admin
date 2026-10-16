@@ -1252,8 +1252,8 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
               type="button"
               disabled={backingUp}
               onClick={async () => { setBackingUp(true); try { await onFullBackup(); } finally { setBackingUp(false); } }}
-              className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl text-white disabled:opacity-60"
-              style={{ background: "var(--btn-accent)" }}
+              className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-60"
+              style={{ background: "#fff", color: "#000", border: "1px solid var(--border)" }}
             >
               <Download size={15} /> {backingUp ? "Preparing…" : "Full backup"}
             </button>
@@ -2066,58 +2066,6 @@ const FILTER_CHIPS = [
   { key: "warning", label: "Ending soon" }, { key: "overdue", label: "Overdue" }, { key: "service", label: "Out of Service" },
 ];
 
-function downloadCSV(headers, rows, filename) {
-  const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function exportUnitsCSV(units) {
-  const headers = [
-    "ID", "Type", "Floor", "Room", "Manufacturer", "Model", "Serial Number", "Asset Number", "TSCAN ID",
-    "Install Date", "Next Service Due", "Temp Range (°C)", "Humidity Range (%)", "Status",
-    "Researcher(s)", "PI(s)", "Discipline(s)", "Until", "Notes",
-  ];
-  const rows = units.map((u) => {
-    const s = displayStatus(u);
-    // Every currently-active booking, not just unitOccupant()'s first one
-    // - a reftech room's normal simultaneous occupants, or a cabinet
-    // clash, would otherwise silently drop out of the export.
-    const current = currentBookingsList(u);
-    const disciplines = [...new Set(current.map((b) => DISCIPLINE_META[b.discipline]?.label).filter(Boolean))];
-    return [
-      u.id, u.type === "reftech" ? "Reftech Room" : "Growth Cabinet", FLOOR_LABEL[u.floor], u.room,
-      u.manufacturer, u.model, u.serialNumber, u.assetNumber, u.tscanId,
-      fmtGB(u.installDate), fmtGB(u.nextServiceDue), `${u.tempRange[0]}–${u.tempRange[1]}`, `${u.humidityRange[0]}–${u.humidityRange[1]}`, s.label,
-      current.map((b) => b.researcher).join("; "), current.map((b) => PI_BY_LAB[b.labGroup] || "").join("; "),
-      disciplines.join("; "), current.map((b) => fmtGB(b.endDate)).join("; "), u.notes,
-    ];
-  });
-  downloadCSV(headers, rows, `inventory-${fmt(TODAY)}.csv`);
-}
-
-const REQUISITION_STATUS_LABEL = { pending: "Pending review", approved: "Current", completed: "Completed", declined: "Declined" };
-function exportRequisitionsCSV(requests) {
-  const headers = [
-    "Code", "Researcher", "Email", "Role", "PI", "Lab Group", "Unit Type", "Discipline", "Species", "Containment Level",
-    "Project Title", "Preferred Floor", "Assigned Unit", "Status", "Start Date", "End Date",
-    "Submitted", "Decided", "Completed", "Admin Notes",
-  ];
-  const rows = requests.map((r) => [
-    r.code, r.researcher, r.email, r.role, r.pi, r.labGroup,
-    r.unitType === "reftech" ? "Reftech Room" : "Growth Cabinet", DISCIPLINE_META[r.discipline]?.label || r.discipline,
-    (r.species || []).join("; "), r.containmentLevel, r.projectTitle,
-    r.preferredFloor === "any" ? "Any" : FLOOR_LABEL[r.preferredFloor] || r.preferredFloor, r.assignedUnitId || "",
-    REQUISITION_STATUS_LABEL[r.status] || r.status, fmtGB(r.startDate), fmtGB(r.endDate),
-    fmtGB(r.submittedDate), fmtGB(r.decidedDate), fmtGB(r.completedDate), r.adminNotes,
-  ]);
-  downloadCSV(headers, rows, `requisitions-${fmt(TODAY)}.csv`);
-}
-
 function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChange }) {
   const [query, setQuery] = useState(initialFilter?.query || "");
   const [statusFilter, setStatusFilter] = useState(initialFilter?.status || "all");
@@ -2176,9 +2124,6 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
           <p className="text-[13px] mt-0.5" style={{ color: "var(--ink-soft)" }}>{units.length} growth cabinets &amp; Reftech rooms across {FLOORS.length} floors</p>
         </div>
         <div className="flex items-center gap-2.5 flex-shrink-0">
-          <button onClick={() => exportUnitsCSV(filtered)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--ink)" }}>
-            Export CSV
-          </button>
           <button onClick={onAddNew} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--btn-accent)", color: "white" }}>
             <Refrigerator size={15} /> Add CER
           </button>
@@ -3779,11 +3724,6 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
   const cabinetCount = relevantForCounts.filter((r) => r.unitType === "cabinet").length;
   const reftechCount = relevantForCounts.filter((r) => r.unitType === "reftech").length;
 
-  // Exports whichever set is actually on screen - Active (pending + ongoing)
-  // or the filtered Completed/Declined history - matching the inventory
-  // page's "export what's currently shown" behaviour.
-  const visibleForExport = (tab === "pending" ? [...awaitingReview, ...ongoing] : filteredHistoric).map(({ r }) => r);
-
   return (
     <div>
       {returnUnitId && (
@@ -3801,9 +3741,6 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           <p className="text-[13px] mt-0.5" style={{ color: "var(--ink-soft)" }}>{requests.length} requests submitted via the request-space form</p>
         </div>
         <div className="flex items-center gap-2.5 flex-shrink-0">
-          <button onClick={() => exportRequisitionsCSV(visibleForExport)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--ink)" }}>
-            Export CSV
-          </button>
           <div className="flex items-center rounded-xl border p-1" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
             <button onClick={() => setTab("pending")} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "pending" ? "var(--sidebar-bg)" : "transparent", color: tab === "pending" ? "#fff" : "var(--ink-soft)" }}>
               <Clock size={14} /> Active {activeCount > 0 && <span className="text-[10px] font-bold">({activeCount})</span>}
