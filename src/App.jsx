@@ -414,14 +414,20 @@ const STATUS_STRONG = {
   upcoming: { label: "Upcoming", color: "#009E73", ink: "#fff" },
   warning: { label: "Ending soon", color: "#C77700", ink: "#fff" },
   overdue: { label: "Overdue", color: "#D7263D", ink: "#fff" },
-  pending: { label: "Pending review", color: "#B85A94", ink: "#fff" },
+  pending: { label: "Pending review", color: "#5C6D65", ink: "#fff" },
   service: { label: "Out of service", color: "#4D4D4D", ink: "#fff" },
   free: { label: "Free", color: "#E3E8E5", ink: "#16211D" },
-  completed: { label: "Completed", color: "#5C6D65", ink: "#fff" },
+  completed: { label: "Completed", color: "#3F4A45", ink: "#fff" },
   declined: { label: "Declined", color: "#8B1E2F", ink: "#fff" },
 };
 // displayStatus()/bookingStatus() keys -> STATUS_STRONG keys.
 const STRONG_KEY = { occupied: "current", upcoming: "upcoming", warning: "warning", overdue: "overdue", service: "service", free: "free" };
+// Requisitions page cards awaiting review: grey-tinted with a mid-grey outline.
+const PENDING_TINT = "#EDF0EE";
+const PENDING_OUTLINE = "#8A9590";
+// Dashboard timeline pending bars: white with a dashed dark-grey outline
+// ("not booked yet").
+const PENDING_DASH = "#4D4D4D";
 /* A requisition's status in the same colours as its booking on the
    inventory: pending / declined / completed by status, and an approved one
    by its dates (upcoming, current, ending soon, overdue). */
@@ -1531,14 +1537,14 @@ const TIMELINE_STATUS_OPTIONS = [
   { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" },
   { key: "overdue", label: "Overdue", color: "var(--overdue)", soft: "var(--overdue-soft)" },
   { key: "upcoming", label: "Upcoming", color: "#009E73", soft: "var(--accent-soft)" },
-  { key: "completed", label: "Completed", color: "#5C6D65", soft: "var(--service-soft)" },
+  { key: "completed", label: "Completed", color: "#3F4A45", soft: "var(--service-soft)" },
 ];
 
 /* Same colour language as bookingStatus(), plus a distinct grey for
    completed requisitions (which bookingStatus never sees - completed
    bookings are excluded from unit.bookings upstream, see api.js). */
 function timelineRowStatus(req) {
-  if (req.status === "completed") return { key: "completed", label: "Completed", color: "#5C6D65", soft: "var(--service-soft)" };
+  if (req.status === "completed") return { key: "completed", label: "Completed", color: "#3F4A45", soft: "var(--service-soft)" };
   return bookingStatus({ startDate: req.startDate, endDate: req.endDate });
 }
 
@@ -1831,7 +1837,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
             that window, before they've been assigned to one. */}
         {pendingLanes.length > 0 && (
           <div className="flex items-start gap-2 text-xs mb-4 pb-4" style={{ borderBottom: "1px dashed var(--border)" }}>
-            <span className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold" style={{ height: TIMELINE_LANE_H, color: STATUS_STRONG.pending.color }}>
+            <span className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold" style={{ height: TIMELINE_LANE_H, color: PENDING_DASH }}>
               <Clock size={11} className="flex-shrink-0" /> <span className="truncate">Pending</span>
             </span>
             <div
@@ -1842,7 +1848,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                 // wrapper would create its own stacking context and trap
                 // the hover card's z-index inside it, rendering the card
                 // behind the unit rows below instead of above them.
-                background: "#F6E9F1",
+                background: "var(--surface-soft)",
               }}
             >
               {pendingLanes.map((p) => {
@@ -1863,10 +1869,10 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                       className="absolute rounded-lg flex items-center px-2.5"
                       style={{
                         left: `${left}%`, width: `${width}%`, top, height: TIMELINE_LANE_H,
-                        background: "var(--surface)", border: `1.5px dashed ${STATUS_STRONG.pending.color}`, cursor: "pointer",
+                        background: "var(--surface)", border: `1.5px dashed ${PENDING_DASH}`, cursor: "pointer",
                       }}
                     >
-                      <span className="text-[11.5px] font-bold truncate" style={{ color: STATUS_STRONG.pending.color }}>{p.researcher}</span>
+                      <span className="text-[11.5px] font-bold truncate" style={{ color: "var(--ink)" }}>{p.researcher}</span>
                     </button>
                     {isHovered && (
                       <div
@@ -1876,10 +1882,10 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                         <div className="text-[13px] font-extrabold mb-0.5">{p.researcher}</div>
                         <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>{piDisplay(p.labGroup)}</div>
                         <div className="text-[12px] mb-1" style={{ color: "var(--ink-soft)" }}>{p.project}</div>
-                        <div className="text-[12px] font-semibold mb-1.5" style={{ color: STATUS_STRONG.pending.color }}>
+                        <div className="text-[12px] font-semibold mb-1.5" style={{ color: "var(--ink-soft)" }}>
                           {p.unitType === "reftech" ? "Reftech Room" : "Growth Cabinet"} requested
                         </div>
-                        <div className="text-[12px] font-bold" style={{ color: STATUS_STRONG.pending.color }}>{fmtGB(p.startDate)} → {fmtGB(p.endDate)}</div>
+                        <div className="text-[12px] font-bold" style={{ color: "var(--ink-soft)" }}>{fmtGB(p.startDate)} → {fmtGB(p.endDate)}</div>
                         <div className="text-[11px] font-bold mt-1.5" style={{ color: "var(--accent-dark)" }}>Click to review this requisition →</div>
                       </div>
                     )}
@@ -3414,7 +3420,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   return (
     <div
       className="rounded-2xl overflow-hidden"
-      style={{ border: req.status === "pending" ? `2.5px solid ${STATUS_STRONG.pending.color}` : "1px solid var(--border)", background: "var(--surface)" }}
+      style={req.status === "pending" ? { border: `2.5px solid ${PENDING_OUTLINE}`, background: PENDING_TINT } : { border: "1px solid var(--border)", background: "var(--surface)" }}
     >
       <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-3.5 p-4 text-left">
         <span className="w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-extrabold flex-shrink-0" style={{ background: avatarColor, color: avatarText }}>
