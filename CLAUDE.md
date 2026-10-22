@@ -147,12 +147,6 @@ can only INSERT a new requisition and read/amend their own pending ones; a few r
 (`species_options`, and the `list_lab_groups()` RPC) are deliberately public-read since the
 public request form needs them without a session.
 
-Migration `20261022120100_review_hardening_part2.sql` (ON DELETE SET NULL on the profile
-references, and dropping duplicate SELECT policies) is written but **not yet applied** - the
-Supabase connector holds statements like these for the owner's approval. Until it is, deleting a
-user directly in Supabase fails if they approved/completed requisitions or logged maintenance; the
-Settings page's remove works regardless (manage-users clears those references first).
-
 **Email notifications**: `supabase/functions/notify-requisition` (Deno Edge Function, called via
 `pg_net` from triggers on `requisitions`, not from the frontend) sends Resend emails — admins get
 a full requisition preview when one comes in (and an "amended requisition" version, changed

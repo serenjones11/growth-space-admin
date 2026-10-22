@@ -221,7 +221,7 @@ create table requisitions (
   code              text unique,
 
   -- who's asking
-  researcher_id     uuid references profiles(id),       -- who submitted it, IF logged in.
+  researcher_id     uuid references profiles(id) on delete set null, -- who submitted it, IF logged in.
                                                           -- Null for now — no SSO yet, see
                                                           -- section 11's RLS note.
   researcher_name   text not null,
@@ -277,9 +277,9 @@ create table requisitions (
   assigned_unit_id  text references units(id) on delete set null,
   submitted_date    timestamptz not null default now(),
   decided_date      timestamptz,
-  decided_by        uuid references profiles(id),
+  decided_by        uuid references profiles(id) on delete set null,
   completed_date    timestamptz,
-  completed_by      uuid references profiles(id),
+  completed_by      uuid references profiles(id) on delete set null,
   -- Set once the "ending soon" email has been queued - see section 21.
   end_date_reminder_sent_at timestamptz,
   -- Researcher amendments awaiting review - see section 24.
@@ -411,7 +411,7 @@ create table service_log (
   contractor   text,
   notes        text,
   cost         numeric,
-  created_by   uuid references profiles(id),
+  created_by   uuid references profiles(id) on delete set null,
   created_at   timestamptz not null default now()
 );
 
@@ -427,7 +427,7 @@ create table documents (
   name        text not null,
   type        text not null default 'Manual',   -- Manual / Certificate / Risk Assessment / ...
   storage_path text,                             -- path in the Supabase Storage bucket
-  added_by    uuid references profiles(id),
+  added_by    uuid references profiles(id) on delete set null,
   date        date not null default current_date,
   created_at  timestamptz not null default now()
 );
@@ -523,11 +523,8 @@ grant execute on function is_owner() to authenticated;
 -- (select auth.…()) is evaluated once per query rather than once per row.
 create policy "read lab_groups"             on lab_groups             for select using ((select auth.role()) = 'authenticated');
 create policy "read profiles"               on profiles               for select using (is_admin() or id = (select auth.uid()));
-create policy "read maintenance_categories" on maintenance_categories for select using (is_admin());
-create policy "read units"                  on units                  for select using (is_admin());
-create policy "read bookings"               on bookings               for select using (is_admin());
-create policy "read service_log"            on service_log            for select using (is_admin());
-create policy "read documents"              on documents              for select using (is_admin());
+-- maintenance_categories, units, bookings, service_log and documents are
+-- read through their "admin write" policies below (FOR ALL covers SELECT).
 
 -- --- write access: admins only, for inventory/maintenance data ---
 create policy "admin write lab_groups"             on lab_groups             for all using (is_admin()) with check (is_admin());
@@ -839,7 +836,6 @@ create table rooms (
 );
 
 alter table rooms enable row level security;
-create policy "read rooms" on rooms for select using (is_admin());
 create policy "admin write rooms" on rooms for all using (is_admin()) with check (is_admin());
 
 -- Seeded from the exact set the frontend previously hardcoded.
@@ -1113,7 +1109,6 @@ create table manufacturers (
 );
 
 alter table manufacturers enable row level security;
-create policy "read manufacturers" on manufacturers for select using (is_admin());
 create policy "admin write manufacturers" on manufacturers for all using (is_admin()) with check (is_admin());
 
 insert into manufacturers (name) values

@@ -1,7 +1,5 @@
--- NOT YET APPLIED to the live project: the Supabase connector holds
--- statements like these for the owner to approve. Apply it from the Supabase
--- SQL editor, then mirror it into schema.sql (FKs in their create tables,
--- and remove the seven "read <table>" policies listed below).
+-- Applied by the owner from the Supabase SQL editor (the connector's
+-- approval prompt kept timing out).
 --
 -- Hardening from a full code review (part 2 of 2; see
 -- 20261022120000_review_hardening.sql):

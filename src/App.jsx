@@ -648,7 +648,6 @@ const NAV = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "inventory", label: "Inventory", icon: Boxes },
   { key: "requisitions", label: "Requisitions", icon: ClipboardList },
-  { key: "settings", label: "Settings", icon: Settings },
 ];
 
 // Fixed/off-canvas below `lg` (toggled by GrowthCabinetApp's mobile top bar +
@@ -727,14 +726,24 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
         </div>
       </nav>
 
-      <button
-        onClick={() => supabase.auth.signOut()}
-        className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm mt-4 pt-4"
-        style={{ color: "var(--sidebar-text)", borderTop: "1px solid rgba(255,255,255,0.07)" }}
-      >
-        <LogOut size={17} />
-        Log out
-      </button>
+      <div className="mt-4 pt-4 space-y-1" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+        <button
+          onClick={() => go("settings")}
+          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold"
+          style={{ background: page === "settings" ? "var(--sidebar-active)" : "transparent", color: page === "settings" ? "var(--chip-temp)" : "var(--sidebar-text)" }}
+        >
+          <Settings size={17} />
+          Settings
+        </button>
+        <button
+          onClick={() => supabase.auth.signOut()}
+          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm"
+          style={{ color: "var(--sidebar-text)" }}
+        >
+          <LogOut size={17} />
+          Log out
+        </button>
+      </div>
     </aside>
   );
 }
@@ -4759,7 +4768,7 @@ function AccountSection({ profile, email, onSaveName }) {
             )}
           </div>
         </Field>
-        <Field label="Email (used to sign in)">
+        <Field label="Email">
           <input value={email} disabled className="gc-input" style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }} />
         </Field>
       </div>
@@ -4801,19 +4810,16 @@ function AddUserForm({ onCreate, onCancel }) {
   return (
     <form onSubmit={submit} className="rounded-xl p-4 space-y-3" style={{ border: "1px solid var(--border)", background: "var(--surface-soft)" }}>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Name"><input value={form.fullName} onChange={(e) => set("fullName")(e.target.value)} className="gc-input" placeholder="e.g. Sam Taylor" /></Field>
-        <Field label="Email"><input type="email" value={form.email} onChange={(e) => set("email")(e.target.value)} className="gc-input" placeholder="s.taylor@university.ac.uk" /></Field>
+        <Field label="Name"><input value={form.fullName} onChange={(e) => set("fullName")(e.target.value)} className="gc-input" /></Field>
+        <Field label="Email"><input type="email" value={form.email} onChange={(e) => set("email")(e.target.value)} className="gc-input" /></Field>
         <Field label="Role">
           <select value={form.role} onChange={(e) => set("role")(e.target.value)} className="gc-input">
-            <option value="admin">User - full access, can't manage users</option>
-            <option value="owner">Owner - full access, can manage users</option>
+            <option value="admin">User</option>
+            <option value="owner">Owner</option>
           </select>
         </Field>
         <PasswordField label="Temporary password" value={form.password} onChange={set("password")} onGenerate={() => set("password")(generatePassword())} />
       </div>
-      <p className="text-xs" style={{ color: "var(--ink-faint)" }}>
-        Pass the email and password on to them securely (not in the same message as the app's address). They can change the password under Settings once signed in.
-      </p>
       {error && <p className="text-sm font-semibold" style={{ color: "var(--overdue)" }}>{error}</p>}
       <div className="flex gap-2">
         <button type="submit" disabled={busy} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl text-white disabled:opacity-60" style={{ background: "var(--btn-accent)" }}>
@@ -4861,12 +4867,7 @@ function UsersSection({ currentUserId, isOwner }) {
   return (
     <div className="gc-card p-5 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h3 className="gc-display font-bold text-sm">Users</h3>
-          <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>
-            Owners can add, change and remove users. Users can do everything else in the app.
-          </p>
-        </div>
+        <h3 className="gc-display font-bold text-sm">Users</h3>
         {isOwner && !adding && (
           <button onClick={() => { setAdding(true); setCreated(null); }} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: "var(--btn-accent)" }}>
             <UserPlus size={13} /> Add user
@@ -4874,11 +4875,6 @@ function UsersSection({ currentUserId, isOwner }) {
         )}
       </div>
 
-      {!isOwner && (
-        <p className="text-xs rounded-lg px-3 py-2" style={{ background: "var(--surface-soft)", color: "var(--ink-soft)" }}>
-          Only owners can add or remove users - ask an owner if someone needs access.
-        </p>
-      )}
       {adding && <AddUserForm onCreate={create} onCancel={() => setAdding(false)} />}
       {created && (
         <div className="rounded-xl p-3.5 text-sm" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
