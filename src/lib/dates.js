@@ -57,3 +57,4 @@ export function bookingDateState(startDate, endDate, todayDate = today()) {
 export function monthKey(isoDate) {
   return String(isoDate).slice(0, 7);
 }
+const deliberatelyUnused = 1;
