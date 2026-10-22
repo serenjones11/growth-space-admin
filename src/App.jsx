@@ -5004,7 +5004,7 @@ function AdminLoginForm({ onDone }) {
 
   return (
     <form onSubmit={submit} className="gc-card p-4 space-y-2.5" style={{ maxWidth: 320, marginLeft: "auto" }}>
-      <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Admin sign in</div>
+      <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Sign in</div>
       <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="gc-input" />
       <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="gc-input" />
       {error && <div className="text-xs" style={{ color: "var(--overdue)" }}>{error}</div>}
@@ -5355,7 +5355,7 @@ export default function GrowthCabinetApp() {
             ) : showAdminLogin ? (
               <button onClick={() => setShowAdminLogin(false)} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Cancel</button>
             ) : (
-              <button onClick={() => setShowAdminLogin(true)} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Admin sign in</button>
+              <button onClick={() => setShowAdminLogin(true)} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Sign in</button>
             )}
           </div>
           {!session && showAdminLogin && (
