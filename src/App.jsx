@@ -2945,7 +2945,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
   // Blocks the save with a message rather than letting the database (or a
   // silently swapped-in default) decide. Empty number inputs read as "".
   const validate = () => {
-    if (!isEdit && !form.id.trim()) return "Enter a cabinet / room ID.";
+    if (!form.id.trim()) return "Enter a cabinet / room ID.";
     if (!form.room) return "Choose a room (or add one under Manage).";
     if (!form.manufacturer) return "Choose a manufacturer (or add one under Manage).";
     const nums = [form.tempMin, form.tempMax, form.humMin, form.humMax];
@@ -2985,21 +2985,21 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
             try {
               await onSave({
                 ...form,
-                id: isEdit ? unit.id : form.id.trim(),
+                id: form.id.trim(),
                 shelves: form.type === "reftech" ? null : Number(form.shelves),
                 tempRange: [Number(form.tempMin), Number(form.tempMax)],
                 humidityRange: [Number(form.humMin), Number(form.humMax)],
-              }, { isNew: !isEdit });
+              }, { isNew: !isEdit, originalId: isEdit ? unit.id : null });
             } finally {
               setSaving(false);
             }
           }}
         >
-          {!isEdit && (
-            <Field label="Cabinet / Room ID">
-              <input value={form.id} onChange={set("id")} className="gc-input" placeholder="e.g. GC-081" />
-            </Field>
-          )}
+          {/* Editable on edit too: renaming carries every booking, requisition,
+              maintenance entry and document over (api.saveUnit -> rename_unit). */}
+          <Field label="Cabinet / Room ID">
+            <input value={form.id} onChange={set("id")} className="gc-input" placeholder={isEdit ? undefined : "e.g. GC-081"} />
+          </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Type">
               <select

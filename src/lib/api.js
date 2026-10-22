@@ -551,8 +551,14 @@ export async function removeUnitDocument(docId) {
 /* ---------------------------------------------------------------------- */
 
 /* isNew inserts (so an ID that's already taken fails instead of silently
-   overwriting that unit); otherwise updates the existing row. */
-export async function saveUnit(data, { isNew = false } = {}) {
+   overwriting that unit); otherwise updates the existing row. A changed ID
+   (originalId -> data.id) is renamed first by rename_unit(), which moves the
+   unit's bookings, requisitions, maintenance and documents with it. */
+export async function saveUnit(data, { isNew = false, originalId = null } = {}) {
+  if (!isNew && originalId && originalId !== data.id) {
+    const { error: renameError } = await supabase.rpc("rename_unit", { p_old: originalId, p_new: data.id });
+    if (renameError) throw renameError;
+  }
   const row = {
     id: data.id,
     type: data.type,

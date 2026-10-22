@@ -278,7 +278,7 @@ create table requisitions (
   -- ON DELETE SET NULL: deleting a unit (see units' delete policy) clears
   -- this reference rather than being blocked by, or cascading away, the
   -- requisition's own history (researcher, PI, dates, status).
-  assigned_unit_id  text references units(id) on delete set null,
+  assigned_unit_id  text references units(id) on delete set null deferrable initially immediate,
   submitted_date    timestamptz not null default now(),
   decided_date      timestamptz,
   decided_by        uuid references profiles(id) on delete set null,
@@ -308,7 +308,7 @@ create index idx_requisitions_unit on requisitions(assigned_unit_id);
 -- ----------------------------------------------------------------------------
 create table bookings (
   id              uuid primary key default gen_random_uuid(),
-  unit_id         text not null references units(id) on delete cascade,
+  unit_id         text not null references units(id) on delete cascade deferrable initially immediate,
   -- ON DELETE CASCADE (unlike unit/lab_group references elsewhere): a
   -- booking only exists as a direct consequence of the requisition that
   -- got it approved, so if the requisition itself is deleted there's
@@ -408,7 +408,7 @@ comment on view unit_current_occupancy is
 -- ----------------------------------------------------------------------------
 create table service_log (
   id           uuid primary key default gen_random_uuid(),
-  unit_id      text not null references units(id) on delete cascade,
+  unit_id      text not null references units(id) on delete cascade deferrable initially immediate,
   category_id  uuid references maintenance_categories(id),
   status       maintenance_status not null default 'completed',
   date         date not null,
@@ -427,7 +427,7 @@ create index idx_service_log_unit on service_log(unit_id);
 -- ----------------------------------------------------------------------------
 create table documents (
   id          uuid primary key default gen_random_uuid(),
-  unit_id     text not null references units(id) on delete cascade,
+  unit_id     text not null references units(id) on delete cascade deferrable initially immediate,
   name        text not null,
   type        text not null default 'Manual',   -- Manual / Certificate / Risk Assessment / ...
   storage_path text,                             -- path in the Supabase Storage bucket
@@ -920,8 +920,10 @@ create trigger trg_notify_new_requisition
 create or replace function trg_notify_requisition_assigned_fn()
 returns trigger as $$
 begin
-  -- decline_amendment() (section 24) restoring an approval isn't a new one.
-  if current_setting('app.reverting_amendment', true) = 'on' then
+  -- decline_amendment() (section 24) restoring an approval isn't a new one,
+  -- and rename_unit() (section 28) moving it to the renamed unit isn't either.
+  if current_setting('app.reverting_amendment', true) = 'on'
+     or current_setting('app.renaming_unit', true) = 'on' then
     return new;
   end if;
   if new.status = 'approved' and new.assigned_unit_id is not null and (
@@ -1454,6 +1456,49 @@ revoke execute on function log_requisition_delete() from public, anon, authentic
 revoke execute on function log_unit_delete() from public, anon, authenticated;
 revoke execute on function log_unit_insert() from public, anon, authenticated;
 revoke execute on function set_updated_at() from public, anon, authenticated;
+
+
+-- ============================================================================
+-- 28. RENAMING A UNIT (its ID, from the edit CER form)
+-- ============================================================================
+-- units.id is what bookings, service_log, documents and requisitions point
+-- to; their foreign keys are DEFERRABLE (INITIALLY IMMEDIATE, so normally
+-- unchanged) so this can move the unit and every reference in one
+-- transaction, checked at commit.
+create or replace function rename_unit(p_old text, p_new text)
+returns void as $$
+begin
+  if not is_admin() then
+    raise exception 'Only admins can rename units';
+  end if;
+  p_new := trim(p_new);
+  if p_new is null or p_new = '' then
+    raise exception 'Enter a cabinet / room ID.';
+  end if;
+  if p_new = p_old then
+    return;
+  end if;
+  if exists (select 1 from units where id = p_new) then
+    raise exception 'A unit with the ID "%" already exists.', p_new;
+  end if;
+
+  set constraints bookings_unit_id_fkey, service_log_unit_id_fkey, documents_unit_id_fkey,
+    requisitions_assigned_unit_id_fkey deferred;
+  perform set_config('app.renaming_unit', 'on', true);
+  update units set id = p_new where id = p_old;
+  if not found then
+    raise exception 'That unit wasn''t found.';
+  end if;
+  update bookings set unit_id = p_new where unit_id = p_old;
+  update service_log set unit_id = p_new where unit_id = p_old;
+  update documents set unit_id = p_new where unit_id = p_old;
+  update requisitions set assigned_unit_id = p_new where assigned_unit_id = p_old;
+  update activity_log set unit_id = p_new where unit_id = p_old; -- keeps feed links working
+  perform set_config('app.renaming_unit', 'off', true);
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function rename_unit(text, text) from public, anon;
+grant execute on function rename_unit(text, text) to authenticated;
 
 
 -- ============================================================================
