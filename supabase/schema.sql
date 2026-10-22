@@ -192,11 +192,10 @@ create table units (
 
   photo_url              text,                          -- Supabase Storage path
   notes                  text,                          -- freeform admin notes, shown above Maintenance History
-  -- Which specific set of booking ids an admin has dismissed the
-  -- "overlapping requisitions" warning for on this unit (cabinets only in
-  -- practice). Not a bare boolean: if the overlap changes (a booking's
-  -- dates move, a third one joins), that's a different situation and the
-  -- warning should reappear rather than staying dismissed forever.
+  -- Bookings an admin has approved to overlap on this unit (cabinets only
+  -- in practice): via "Approve clash", or by assigning a requisition to a
+  -- cabinet already booked for its dates, to share it. Not a bare boolean:
+  -- if a booking nobody approved joins the overlap, the warning reappears.
   acknowledged_clash_booking_ids uuid[] default array[]::uuid[],
   -- What the unit is currently set to, shown on its inventory tile (all
   -- optional; none set shows the ranges). Light intensity in µmol/m²/s.

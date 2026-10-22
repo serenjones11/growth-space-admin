@@ -601,12 +601,27 @@ export async function updateUnitNotes(unitId, notes) {
   if (error) throw error;
 }
 
-/* bookingIds: the exact set of currently-overlapping booking ids being
-   dismissed - see the acknowledged_clash_booking_ids column comment for
-   why it's a specific set rather than a bare boolean. */
+/* Marks bookings on a cabinet as approved to overlap - see the
+   acknowledged_clash_booking_ids column comment for why it's specific
+   bookings rather than a bare boolean. Adds to the ones already approved,
+   so a share approved for later dates isn't forgotten. */
 export async function acknowledgeClash(unitId, bookingIds) {
-  const { error } = await supabase.from("units").update({ acknowledged_clash_booking_ids: bookingIds }).eq("id", unitId);
+  const { data, error: readError } = await supabase.from("units").select("acknowledged_clash_booking_ids").eq("id", unitId).single();
+  if (readError) throw readError;
+  const ids = [...new Set([...(data.acknowledged_clash_booking_ids || []), ...bookingIds])];
+  const { error } = await supabase.from("units").update({ acknowledged_clash_booking_ids: ids }).eq("id", unitId);
   if (error) throw error;
+}
+
+/* After a requisition is assigned to a cabinet already booked for its
+   dates (two researchers sharing it): approve the overlap between its
+   booking - made by the sync_booking_from_requisition trigger - and
+   otherBookingIds. */
+export async function markCabinetShared(unitId, requisitionId, otherBookingIds) {
+  const { data, error } = await supabase.from("bookings").select("id")
+    .eq("requisition_id", requisitionId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  await acknowledgeClash(unitId, data ? [data.id, ...otherBookingIds] : otherBookingIds);
 }
 
 /* bookings/service_log/documents cascade-delete with the unit. requisitions

@@ -246,19 +246,56 @@ function refreshToday() {
   TODAY = next;
   return true;
 }
-/* Is a unit available for a given requested date window - even if it's not free "right now".
-   Reftech rooms are multi-occupancy by design (see canAssign/isClash in
-   UnitDetailContent, which never restrict or flag reftech on overlap) - so
-   an existing overlapping booking never makes one unavailable, only being
-   out of service does. Cabinets are single-occupancy: any overlap blocks. */
-// ownRequisitionId: an amended, already-approved requisition still holds
-// its own booking - that booking mustn't count against its own unit.
-function unitAvailableForWindow(unit, startDate, endDate, ownRequisitionId = null) {
-  if (unit.status === "service") return false;
-  if (unit.type === "reftech") return true;
-  if (!unit.occupant) return true;
-  if (ownRequisitionId && unit.occupant.requisitionId === ownRequisitionId) return true;
-  return !rangesOverlap(unit.occupant.startDate, unit.occupant.endDate, startDate, endDate);
+/* The approved bookings a cabinet already has across a date window - who a
+   requisition assigned to it would share it with. Reftech rooms are
+   multi-occupancy by design, so they never have any.
+   ownRequisitionId: an amended, already-approved requisition still holds
+   its own booking - that booking mustn't count against its own unit. */
+function cabinetSharers(unit, startDate, endDate, ownRequisitionId = null) {
+  if (unit.type === "reftech") return [];
+  return (unit.bookings || []).filter((b) =>
+    (!ownRequisitionId || b.requisitionId !== ownRequisitionId) && rangesOverlap(b.startDate, b.endDate, startDate, endDate));
+}
+function sharersText(sharers) {
+  return sharers.map((b) => `${b.researcher} until ${fmtGB(b.endDate)}`).join(", ");
+}
+/* Units a requisition can be assigned to: right type, not out of service.
+   Cabinets already booked for those dates are still offered (two
+   researchers can share one) but listed separately as `shared`. */
+function assignableUnits(units, req, excludeId = null) {
+  const candidates = units.filter((u) => u.type === req.unitType && u.status !== "service" && u.id !== excludeId);
+  const free = [], shared = [];
+  candidates.forEach((u) => {
+    const sharers = cabinetSharers(u, req.startDate, req.endDate, req.id);
+    if (sharers.length) shared.push({ unit: u, sharers }); else free.push(u);
+  });
+  return { free, shared };
+}
+/* <option>s for a unit picker: free units, then cabinets that would be
+   shared. freeSuffix(unit) adds a note to a free unit's label. */
+function UnitOptions({ choices, freeSuffix = () => "" }) {
+  return (
+    <>
+      {choices.free.map((u) => <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room}{freeSuffix(u)}</option>)}
+      {choices.shared.length > 0 && (
+        <optgroup label="Already booked for these dates - would be shared">
+          {choices.shared.map(({ unit: u, sharers }) => (
+            <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room} (with {sharersText(sharers)})</option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
+}
+/* Shown under a unit picker when the chosen cabinet would be shared. */
+function ShareNotice({ choices, unitId }) {
+  const entry = choices.shared.find((s) => s.unit.id === unitId);
+  if (!entry) return null;
+  return (
+    <p className="text-[11.5px] rounded-lg px-2.5 py-2" style={{ background: "var(--warning-soft)", color: "var(--ink)" }}>
+      {unitId} is already booked for these dates by {entry.sharers.map((b) => `${b.researcher} (${fmtGB(b.startDate)} → ${fmtGB(b.endDate)})`).join(" and ")}. Assigning it here means sharing the cabinet.
+    </p>
+  );
 }
 /* Find the requisition index matching a booking/occupant record, so timeline & drawer bookings can link back */
 function findRequisitionIndex(requests, o) {
@@ -348,14 +385,13 @@ function unitOccupant(unit) {
 function currentBookingsList(unit) {
   return (unit.bookings || []).filter((b) => new Date(b.startDate) <= TODAY);
 }
-/* Whether the exact set of currently-overlapping bookings matches what was
-   last explicitly approved as intentional - not a bare boolean, so a
-   materially different overlap (a date moves, a third one joins) makes
-   this false again instead of staying dismissed forever. */
+/* Whether every currently-overlapping booking was explicitly approved as
+   sharing the cabinet ("Approve clash", or assigning a requisition to a
+   cabinet already booked for its dates) - not a bare boolean, so a booking
+   nobody approved joining makes this false again. */
 function isClashAcknowledged(unit, currentList) {
-  const currentIds = currentList.map((b) => b.id).slice().sort();
-  const acknowledgedIds = (unit.acknowledgedClashBookingIds || []).slice().sort();
-  return currentIds.length > 1 && currentIds.length === acknowledgedIds.length && currentIds.every((id, i) => id === acknowledgedIds[i]);
+  const acknowledged = new Set(unit.acknowledgedClashBookingIds || []);
+  return currentList.length > 1 && currentList.every((b) => acknowledged.has(b.id));
 }
 
 const STATUS_META = {
@@ -2671,14 +2707,14 @@ function UnitDetailContent({
   const current = currentBookingsList(unit);
   const upcoming = upcomingBookings(unit);
   const pastBookings = isReftech ? unit.bookings.filter((b) => new Date(b.endDate) < TODAY) : [];
-  // A cabinet can only take a new assignment while free; a reftech room
-  // can always take another, even with requisitions already ongoing.
-  const canAssign = isReftech || current.length === 0;
-  const pendingCandidates = requests
-    .map((r, i) => ({ r, i }))
-    .filter(({ r }) => r.status === "pending" && r.unitType === unit.type && unitAvailableForWindow(unit, r.startDate, r.endDate));
+  // Any unit can take another requisition - a cabinet already booked for
+  // its dates is shared (the option says who with).
+  const pendingCandidates = unit.status === "service" ? [] : requests
+    .map((r, i) => ({ r, i, sharers: cabinetSharers(unit, r.startDate, r.endDate, r.id) }))
+    .filter(({ r }) => r.status === "pending" && r.unitType === unit.type);
   const [assigning, setAssigning] = useState(false);
   const [chosenReqIndex, setChosenReqIndex] = useState("");
+  const chosenSharers = pendingCandidates.find((c) => String(c.i) === chosenReqIndex)?.sharers || [];
   // Cabinets are meant to only ever hold one current booking - more than
   // one means an admin's edit created an overlap that nothing blocked.
   // Acknowledging is per exact booking-id set: if the overlap later
@@ -2743,44 +2779,51 @@ function UnitDetailContent({
         )}
       </div>
 
-      {canAssign && (
-        <div className="mt-4">
-          {!assigning ? (
-            <button
-              onClick={() => setAssigning(true)}
-              className="w-full flex items-center justify-center py-2.5 rounded-xl text-sm font-semibold"
-              style={{ background: "var(--btn-accent)", color: "white" }}
-            >
-              Assign requisition
-            </button>
-          ) : (
-            <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
-              <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Assign a pending requisition to this unit</div>
-              {pendingCandidates.length === 0 ? (
-                <p className="text-xs" style={{ color: "var(--overdue)" }}>No pending requisitions match this unit's type and are available for their requested dates.</p>
-              ) : (
-                <select value={chosenReqIndex} onChange={(e) => setChosenReqIndex(e.target.value)} className="gc-input">
-                  <option value="">Select a pending requisition…</option>
-                  {pendingCandidates.map(({ r, i }) => (
-                    <option key={i} value={i}>{r.researcher} - {r.projectTitle} ({fmtGB(r.startDate)} → {fmtGB(r.endDate)})</option>
-                  ))}
-                </select>
-              )}
-              <div className="flex gap-2 pt-1">
-                <button
-                  disabled={chosenReqIndex === ""}
-                  onClick={() => { onAssignRequisition(Number(chosenReqIndex), unit.id); setAssigning(false); setChosenReqIndex(""); }}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
-                  style={{ background: "var(--btn-accent)" }}
-                >
-                  <CheckCircle2 size={14} /> Assign
-                </button>
-                <button onClick={() => { setAssigning(false); setChosenReqIndex(""); }} className="text-sm font-semibold px-4 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
-              </div>
+      <div className="mt-4">
+        {!assigning ? (
+          <button
+            onClick={() => setAssigning(true)}
+            className="w-full flex items-center justify-center py-2.5 rounded-xl text-sm font-semibold"
+            style={{ background: "var(--btn-accent)", color: "white" }}
+          >
+            Assign requisition
+          </button>
+        ) : (
+          <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
+            <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Assign a pending requisition to this unit</div>
+            {pendingCandidates.length === 0 ? (
+              <p className="text-xs" style={{ color: "var(--overdue)" }}>
+                {unit.status === "service" ? "This unit is marked out of service." : "No pending requisitions are for this type of unit."}
+              </p>
+            ) : (
+              <select value={chosenReqIndex} onChange={(e) => setChosenReqIndex(e.target.value)} className="gc-input">
+                <option value="">Select a pending requisition…</option>
+                {pendingCandidates.map(({ r, i, sharers }) => (
+                  <option key={i} value={i}>
+                    {r.researcher} - {r.projectTitle} ({fmtGB(r.startDate)} → {fmtGB(r.endDate)}){sharers.length ? ` - shared with ${sharersText(sharers)}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+            {chosenSharers.length > 0 && (
+              <p className="text-[11.5px] rounded-lg px-2.5 py-2" style={{ background: "var(--warning-soft)", color: "var(--ink)" }}>
+                {unit.id} is already booked for those dates by {chosenSharers.map((b) => `${b.researcher} (${fmtGB(b.startDate)} → ${fmtGB(b.endDate)})`).join(" and ")}. Assigning means sharing the cabinet.
+              </p>
+            )}
+            <div className="flex gap-2 pt-1">
+              <button
+                disabled={chosenReqIndex === ""}
+                onClick={() => { onAssignRequisition(Number(chosenReqIndex), unit.id); setAssigning(false); setChosenReqIndex(""); }}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
+                style={{ background: "var(--btn-accent)" }}
+              >
+                <CheckCircle2 size={14} /> {chosenSharers.length ? "Assign & share" : "Assign"}
+              </button>
+              <button onClick={() => { setAssigning(false); setChosenReqIndex(""); }} className="text-sm font-semibold px-4 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {pastBookings.length > 0 && (
         <div className="mt-4">
@@ -3382,14 +3425,11 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   const [reassigning, setReassigning] = useState(false);
   const [reassignUnit, setReassignUnit] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // Any unit that matches type and is available across the *requested*
-  // date window - not just units that happen to be free right now.
-  // A unit's research-area label doesn't restrict this: any cabinet can be assigned
-  // regardless of what discipline the requisition is for.
-  const windowCandidates = units.filter((u) =>
-    u.type === req.unitType
-    && unitAvailableForWindow(u, req.startDate, req.endDate, req.id)
-  );
+  // Units of the right type, judged across the *requested* date window -
+  // not just whether they happen to be free right now. A unit's
+  // research-area label doesn't restrict this.
+  const choices = assignableUnits(units, req);
+  const moveChoices = assignableUnits(units, req, req.assignedUnitId);
   const strongStatus = requisitionStrongStatus(req);
   const labIdx = LAB_GROUPS.indexOf(req.labGroup);
   const avatarColor = labIdx !== -1 ? OKABE_ITO[labIdx % OKABE_ITO.length] : "var(--ink-faint)";
@@ -3452,21 +3492,21 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                 <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
                   <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Assign a unit to approve</div>
                   <p className="text-[11px] -mt-1.5" style={{ color: "var(--ink-faint)" }}>
-                    Includes units free for the whole requested window ({fmtGB(req.startDate)} → {fmtGB(req.endDate)}), even if they're occupied by something else today.
+                    Units free for the whole requested window ({fmtGB(req.startDate)} → {fmtGB(req.endDate)}) come first, even if they're occupied by something else today; cabinets already booked for those dates follow, to share.
                   </p>
                   <select value={chosenUnit} onChange={(e) => setChosenUnit(e.target.value)} className="gc-input">
-                    <option value="">Select an available unit…</option>
-                    {windowCandidates.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.id} - {FLOOR_LABEL[u.floor]}, {u.room}{u.id === req.assignedUnitId && amendsApproval ? " (current unit)" : displayStatus(u).key !== "free" ? " (free by requested start date)" : ""}
-                      </option>
-                    ))}
+                    <option value="">Select a unit…</option>
+                    <UnitOptions
+                      choices={choices}
+                      freeSuffix={(u) => u.id === req.assignedUnitId && amendsApproval ? " (current unit)" : displayStatus(u).key !== "free" ? " (free by requested start date)" : ""}
+                    />
                   </select>
-                  {windowCandidates.length === 0 && <p className="text-xs" style={{ color: "var(--overdue)" }}>No units of this type are free for the requested dates.</p>}
+                  {choices.free.length + choices.shared.length === 0 && <p className="text-xs" style={{ color: "var(--overdue)" }}>No units of this type are in service.</p>}
+                  <ShareNotice choices={choices} unitId={chosenUnit} />
                   <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
                     <button disabled={!chosenUnit} onClick={() => onDecide(index, "approved", chosenUnit)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}>
-                      <CheckCircle2 size={14} /> Approve & assign
+                      <CheckCircle2 size={14} /> {choices.shared.some((s) => s.unit.id === chosenUnit) ? "Approve & share" : "Approve & assign"}
                     </button>
                     <button onClick={() => onDecide(index, "declined")} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: "var(--overdue)", color: "var(--overdue)" }}>
                       <XCircle size={14} /> {amendsApproval ? "Decline amendment" : "Decline"}
@@ -3494,13 +3534,12 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                     <div className="space-y-2 pt-1" style={{ borderTop: "1px solid var(--border)" }}>
                       <select value={reassignUnit} onChange={(e) => setReassignUnit(e.target.value)} className="gc-input mt-2">
                         <option value="">Select a different unit…</option>
-                        {windowCandidates.filter((u) => u.id !== req.assignedUnitId).map((u) => (
-                          <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room}</option>
-                        ))}
+                        <UnitOptions choices={moveChoices} />
                       </select>
-                      {windowCandidates.filter((u) => u.id !== req.assignedUnitId).length === 0 && (
-                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units of this type are free for these dates.</p>
+                      {moveChoices.free.length + moveChoices.shared.length === 0 && (
+                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units of this type are in service.</p>
                       )}
+                      <ShareNotice choices={moveChoices} unitId={reassignUnit} />
                       <button
                         disabled={!reassignUnit}
                         onClick={() => { onReassign(index, reassignUnit); setReassigning(false); setReassignUnit(""); }}
@@ -3555,9 +3594,8 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!req) return null;
   const strongStatus = requisitionStrongStatus(req);
-  const windowCandidates = units.filter((u) =>
-    u.type === req.unitType && unitAvailableForWindow(u, req.startDate, req.endDate, req.id)
-  );
+  const choices = assignableUnits(units, req);
+  const moveChoices = assignableUnits(units, req, req.assignedUnitId);
   const saveEdit = (updated) => { onEdit(index, updated); setEditing(false); };
 
   return (
@@ -3615,13 +3653,14 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                 <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
                   <div className="text-xs font-semibold" style={{ color: "var(--ink-soft)" }}>Assign a unit to approve</div>
                   <select value={chosenUnit} onChange={(e) => setChosenUnit(e.target.value)} className="gc-input">
-                    <option value="">Select an available unit…</option>
-                    {windowCandidates.map((u) => <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room}</option>)}
+                    <option value="">Select a unit…</option>
+                    <UnitOptions choices={choices} />
                   </select>
+                  <ShareNotice choices={choices} unitId={chosenUnit} />
                   <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
                     <button disabled={!chosenUnit} onClick={() => { onDecide(index, "approved", chosenUnit); onClose(); }} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}>
-                      <CheckCircle2 size={14} /> Approve & assign
+                      <CheckCircle2 size={14} /> {choices.shared.some((s) => s.unit.id === chosenUnit) ? "Approve & share" : "Approve & assign"}
                     </button>
                     <button onClick={() => { onDecide(index, "declined"); onClose(); }} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold border" style={{ borderColor: "var(--overdue)", color: "var(--overdue)" }}>
                       <XCircle size={14} /> {amendsApproval ? "Decline amendment" : "Decline"}
@@ -3647,13 +3686,12 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                     <div className="space-y-2 pt-1" style={{ borderTop: "1px solid var(--border)" }}>
                       <select value={reassignUnit} onChange={(e) => setReassignUnit(e.target.value)} className="gc-input mt-2">
                         <option value="">Select a different unit…</option>
-                        {windowCandidates.filter((u) => u.id !== req.assignedUnitId).map((u) => (
-                          <option key={u.id} value={u.id}>{u.id} - {FLOOR_LABEL[u.floor]}, {u.room}</option>
-                        ))}
+                        <UnitOptions choices={moveChoices} />
                       </select>
-                      {windowCandidates.filter((u) => u.id !== req.assignedUnitId).length === 0 && (
-                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units of this type are free for these dates.</p>
+                      {moveChoices.free.length + moveChoices.shared.length === 0 && (
+                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units of this type are in service.</p>
                       )}
+                      <ShareNotice choices={moveChoices} unitId={reassignUnit} />
                       <button
                         disabled={!reassignUnit}
                         onClick={() => { onReassign(index, reassignUnit); setReassigning(false); setReassignUnit(""); }}
@@ -5270,8 +5308,18 @@ export default function GrowthCabinetApp() {
     await reload();
   });
 
+  /* Assigning a requisition to a cabinet already booked for its dates is
+     a deliberate share, so the bookings involved are marked as approved
+     overlaps - the "Clash" warnings are for overlaps nobody chose. */
+  const sharersFor = (req, unitId) => {
+    const unit = units.find((u) => u.id === unitId);
+    return unit ? cabinetSharers(unit, req.startDate, req.endDate, req.id) : [];
+  };
   const handleDecideRequisition = withErrorAlert(async (index, decision, unitId) => {
-    await api.decideRequisition(requests[index], decision, unitId, session?.user?.id);
+    const req = requests[index];
+    const sharers = decision === "approved" ? sharersFor(req, unitId) : [];
+    await api.decideRequisition(req, decision, unitId, session?.user?.id);
+    if (sharers.length) await api.markCabinetShared(unitId, req.id, sharers.map((b) => b.id));
     await reload();
   });
 
@@ -5295,7 +5343,10 @@ export default function GrowthCabinetApp() {
   });
 
   const handleReassignRequisition = withErrorAlert(async (index, newUnitId) => {
-    await api.reassignRequisitionUnit(requests[index].id, newUnitId);
+    const req = requests[index];
+    const sharers = sharersFor(req, newUnitId);
+    await api.reassignRequisitionUnit(req.id, newUnitId);
+    if (sharers.length) await api.markCabinetShared(newUnitId, req.id, sharers.map((b) => b.id));
     await reload();
   });
 
