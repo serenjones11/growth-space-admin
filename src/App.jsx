@@ -3011,23 +3011,23 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
                 <option value="reftech">Reftech Room</option>
               </select>
             </Field>
-            <Field label="Floor">
+            <Field label="Research area">
               <select
-                value={form.floor}
-                onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value, room: firstRoomFor(e.target.value, f.type) }))}
+                value={unitAreaValue(form.disciplines)}
+                onChange={(e) => setForm((f) => ({ ...f, disciplines: UNIT_AREA_OPTIONS.find((o) => o.value === e.target.value).disciplines }))}
                 className="gc-input"
               >
-                {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
+                {UNIT_AREA_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </Field>
             <div className="sm:col-span-2">
-              <Field label="Research area">
+              <Field label="Floor">
                 <select
-                  value={unitAreaValue(form.disciplines)}
-                  onChange={(e) => setForm((f) => ({ ...f, disciplines: UNIT_AREA_OPTIONS.find((o) => o.value === e.target.value).disciplines }))}
+                  value={form.floor}
+                  onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value, room: firstRoomFor(e.target.value, f.type) }))}
                   className="gc-input"
                 >
-                  {UNIT_AREA_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
                 </select>
               </Field>
             </div>
