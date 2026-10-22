@@ -53,7 +53,9 @@ create extension if not exists pgcrypto;   -- gives us gen_random_uuid()
 -- ----------------------------------------------------------------------------
 -- 1. ENUMS
 -- ----------------------------------------------------------------------------
-create type user_role        as enum ('admin', 'researcher');
+-- 'owner': everything 'admin' can do, plus managing users (Settings page,
+-- manage-users Edge Function). The app shows 'admin' as "User".
+create type user_role        as enum ('admin', 'researcher', 'owner');
 create type unit_type        as enum ('cabinet', 'reftech');
 create type discipline_type  as enum ('plant', 'insect');
 create type requisition_status as enum ('pending', 'approved', 'declined', 'completed');
@@ -485,7 +487,7 @@ alter table documents              enable row level security;
 create function is_admin()
 returns boolean as $$
   select exists (
-    select 1 from profiles where id = auth.uid() and role = 'admin'
+    select 1 from profiles where id = auth.uid() and role in ('admin', 'owner')
   );
 $$ language sql security definer stable set search_path = public;
 
@@ -497,6 +499,17 @@ $$ language sql security definer stable set search_path = public;
 -- returns a boolean, no row data.)
 revoke execute on function is_admin() from public;
 grant execute on function is_admin() to authenticated;
+
+-- Owners only: may add/change/remove users (checked server-side by the
+-- manage-users Edge Function; owners pass is_admin() too).
+create function is_owner()
+returns boolean as $$
+  select exists (
+    select 1 from profiles where id = auth.uid() and role = 'owner'
+  );
+$$ language sql security definer stable set search_path = public;
+revoke execute on function is_owner() from public, anon;
+grant execute on function is_owner() to authenticated;
 
 -- --- read access ---
 -- lab_groups is readable by any authenticated user — the request form's
@@ -1448,7 +1461,8 @@ revoke execute on function set_updated_at() from public, anon, authenticated;
 -- End of schema. Next steps once this has run cleanly:
 --   1. Supabase → Authentication → add your 4-6 admin users for now (magic
 --      link is easiest); Entra ID SSO for researchers comes later.
---   2. Manually set the admin user(s) to role = 'admin' in the profiles table.
+--   2. Manually set the first user to role = 'owner' in the profiles table;
+--      they can add everyone else from the app's Settings page.
 --   3. Supabase → Storage → create a bucket called "unit-files" for photos/PDFs.
 --   4. Swap the React app's mock generators for real Supabase queries —
 --      remember to read occupancy through unit_current_occupancy /

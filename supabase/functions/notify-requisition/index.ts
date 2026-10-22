@@ -293,14 +293,15 @@ function daysUntil(isoDate: string): number {
   return Math.round((new Date(isoDate).getTime() - today.getTime()) / 86_400_000);
 }
 
-// Admin recipients for an admin-facing email, honouring each admin's
+// Admin recipients (owners and users - roles 'owner' and 'admin') for an
+// admin-facing email, honouring each one's
 // notification_preferences row. A missing row means the defaults (every
 // email, every discipline) - see 20260922145959_notification_preferences.sql.
 async function adminRecipients(pref: "notify_new_requisition" | "notify_end_date_reminder", discipline: string): Promise<string[]> {
   const { data: admins, error } = await supabase
     .from("profiles")
     .select("id, prefs:notification_preferences(notify_new_requisition, notify_end_date_reminder, discipline_scope)")
-    .eq("role", "admin");
+    .in("role", ["admin", "owner"]);
   if (error) throw error;
 
   const emails: string[] = [];

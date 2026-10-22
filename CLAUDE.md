@@ -28,6 +28,7 @@ supabase/schema.sql                ← the full schema, kept in sync with migrat
 supabase/migrations/               ← every migration applied to the live project, in order
 supabase/tests/                    ← SQL regression checks, run in the SQL editor (they roll back)
 supabase/functions/notify-requisition/  ← Edge Function: requisition email notifications (Resend)
+supabase/functions/manage-users/   ← Edge Function: Settings page user management (list/add/role/reset/remove)
 design-prototypes/                 ← old exploratory HTML mockups, NOT part of the app — ignore
 ```
 
@@ -124,7 +125,17 @@ to the hosted project. `supabase/schema.sql` is kept as a standing snapshot of t
 `schema.sql` so it stays a truthful "run this on a fresh project" reference, and so anyone reading
 the repo doesn't have to reconstruct current-state by replaying 30+ migration files by hand.
 
-**Tables**: `lab_groups`, `profiles` (extends `auth.users`, `role` = `admin`/researcher),
+**Roles** (`profiles.role`): `owner` - the whole app plus managing users on the Settings page;
+`admin` - shown as **"User"** in the app: the whole app except managing users; `researcher` -
+no admin access (only the public request form). `is_admin()` is true for owners *and* users, so
+every RLS policy treats them alike; `is_owner()` marks owners. Creating/removing logins needs the
+service-role key, so the Settings page calls the `manage-users` Edge Function (`verify_jwt` on),
+which checks the caller's role itself: any owner/user may list, only owners may change anything,
+nobody may change or remove themselves, and the last owner can't be removed. Accounts are created
+with a password the owner sets and passes on (Supabase's built-in email can't send invites to
+arbitrary addresses without custom SMTP); people change it on the Settings page.
+
+**Tables**: `lab_groups`, `profiles` (extends `auth.users`, `role` = `owner`/`admin`/`researcher`),
 `maintenance_categories`, `units`, `rooms`, `requisitions`, `bookings`, `service_log`,
 `documents`, `activity_log`, `species_options`, `light_cycle_options`, `requisition_code_counters`, `manufacturers`,
 `notification_preferences`, `backup_log` (when the Dashboard "Full backup" Excel export (GrowSpace-Backup-DD-MM-YYYY.xlsx) was last
@@ -139,7 +150,8 @@ public request form needs them without a session.
 Migration `20261022120100_review_hardening_part2.sql` (ON DELETE SET NULL on the profile
 references, and dropping duplicate SELECT policies) is written but **not yet applied** - the
 Supabase connector holds statements like these for the owner's approval. Until it is, deleting a
-user who has approved/completed requisitions or logged maintenance fails on a foreign key.
+user directly in Supabase fails if they approved/completed requisitions or logged maintenance; the
+Settings page's remove works regardless (manage-users clears those references first).
 
 **Email notifications**: `supabase/functions/notify-requisition` (Deno Edge Function, called via
 `pg_net` from triggers on `requisitions`, not from the frontend) sends Resend emails — admins get

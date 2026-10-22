@@ -939,3 +939,42 @@ export async function recordBackup(userId) {
   const { error } = await supabase.from("backup_log").insert({ created_by: userId });
   if (error) throw error;
 }
+
+/* ---------------------------------------------------------------------- */
+/* Users (Settings page)                                                  */
+/* ---------------------------------------------------------------------- */
+
+/* Creating/removing logins needs the service-role key, so it goes through
+   the manage-users Edge Function, which checks the caller is an owner
+   (listing is open to any admin). Each call returns the updated user list. */
+async function manageUsers(body) {
+  const { data, error } = await supabase.functions.invoke("manage-users", { body });
+  if (error) {
+    // The function's own message ("Only owners can...") is in the response body.
+    let message = error.message;
+    try {
+      const payload = await error.context.json();
+      if (payload?.error) message = payload.error;
+    } catch { /* not JSON - keep the generic message */ }
+    throw new Error(message);
+  }
+  return data.users;
+}
+
+export const listUsers = () => manageUsers({ action: "list" });
+export const createUser = ({ fullName, email, role, password }) => manageUsers({ action: "create", fullName, email, role, password });
+export const setUserRole = (userId, role) => manageUsers({ action: "setRole", userId, role });
+export const resetUserPassword = (userId, password) => manageUsers({ action: "resetPassword", userId, password });
+export const removeUser = (userId) => manageUsers({ action: "remove", userId });
+
+/* The signed-in user's own account. full_name is one of the two profile
+   columns users may update themselves (see the profiles grants). */
+export async function updateOwnName(userId, fullName) {
+  const { error } = await supabase.from("profiles").update({ full_name: fullName }).eq("id", userId);
+  if (error) throw error;
+}
+
+export async function changeOwnPassword(password) {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+}

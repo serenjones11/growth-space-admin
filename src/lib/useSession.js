@@ -11,6 +11,7 @@ export function useSession() {
   const [profile, setProfile] = useState(null);
   const [profileFor, setProfileFor] = useState(null); // user id the profile was loaded for
   const [profileError, setProfileError] = useState(null);
+  const [profileVersion, setProfileVersion] = useState(0); // bump to re-read the profile
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
@@ -47,8 +48,10 @@ export function useSession() {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, profileVersion]);
 
   const authLoading = session === undefined || (!!userId && profileFor !== userId);
-  return { session, profile, profileError, authLoading };
+  // After the user edits their own profile (e.g. their name on Settings).
+  const reloadProfile = () => setProfileVersion((v) => v + 1);
+  return { session, profile, profileError, authLoading, reloadProfile };
 }

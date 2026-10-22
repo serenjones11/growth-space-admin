@@ -44,6 +44,7 @@ import {
   Refrigerator,
   Calendar,
   Menu,
+  Settings,
 } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
@@ -647,6 +648,7 @@ const NAV = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "inventory", label: "Inventory", icon: Boxes },
   { key: "requisitions", label: "Requisitions", icon: ClipboardList },
+  { key: "settings", label: "Settings", icon: Settings },
 ];
 
 // Fixed/off-canvas below `lg` (toggled by GrowthCabinetApp's mobile top bar +
@@ -4671,6 +4673,309 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
 }
 
 /* ---------------------------------------------------------------------- */
+/* Settings - your account, and (owners) users                            */
+/* ---------------------------------------------------------------------- */
+/* Two kinds of account can use the app: owners, who can also add, change
+   and remove users here, and users (role 'admin' in the database), who can
+   do everything else. Accounts are created with a password the owner
+   chooses and passes on; the person can change it here once signed in. */
+const ROLE_LABEL = { owner: "Owner", admin: "User" };
+const MIN_PASSWORD = 10;
+
+/* A random, readable temporary password (no look-alike characters). */
+function generatePassword() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint32Array(14));
+  return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
+function RoleBadge({ role }) {
+  const owner = role === "owner";
+  return (
+    <span className="text-[11px] font-bold rounded-full px-2 py-0.5 flex-shrink-0" style={owner ? { background: "var(--sidebar-bg)", color: "#fff" } : { background: "var(--surface-soft)", color: "var(--ink-soft)", border: "1px solid var(--border)" }}>
+      {ROLE_LABEL[role] || role}
+    </span>
+  );
+}
+
+function PasswordField({ label, value, onChange, onGenerate }) {
+  return (
+    <Field label={label}>
+      <div className="flex gap-2">
+        <input type="text" value={value} onChange={(e) => onChange(e.target.value)} className="gc-input gc-mono flex-1" autoComplete="new-password" placeholder={`At least ${MIN_PASSWORD} characters`} />
+        {onGenerate && (
+          <button type="button" onClick={onGenerate} className="text-xs font-bold px-3 rounded-xl flex-shrink-0" style={{ border: "1px solid var(--border)", color: "var(--accent-dark)", background: "var(--surface)" }}>
+            Generate
+          </button>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+function AccountSection({ profile, email, onSaveName }) {
+  const [name, setName] = useState(profile?.full_name || "");
+  const [savingName, setSavingName] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [passwordMsg, setPasswordMsg] = useState(null); // { ok, text }
+  const [savingPassword, setSavingPassword] = useState(false);
+
+  const nameDirty = name.trim() !== (profile?.full_name || "");
+  const saveName = async () => {
+    setSavingName(true);
+    try { await onSaveName(name.trim()); } finally { setSavingName(false); }
+  };
+  const savePassword = async (e) => {
+    e.preventDefault();
+    if (password.length < MIN_PASSWORD) return setPasswordMsg({ ok: false, text: `Use at least ${MIN_PASSWORD} characters.` });
+    if (password !== confirm) return setPasswordMsg({ ok: false, text: "The two passwords don't match." });
+    setSavingPassword(true);
+    try {
+      await api.changeOwnPassword(password);
+      setPassword(""); setConfirm("");
+      setPasswordMsg({ ok: true, text: "Password changed." });
+    } catch (err) {
+      setPasswordMsg({ ok: false, text: err.message || "Couldn't change your password." });
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  return (
+    <div className="gc-card p-5 space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="gc-display font-bold text-sm">Your account</h3>
+        <RoleBadge role={profile?.role} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Name">
+          <div className="flex gap-2">
+            <input value={name} onChange={(e) => setName(e.target.value)} className="gc-input flex-1" />
+            {nameDirty && name.trim() && (
+              <button type="button" disabled={savingName} onClick={saveName} className="text-xs font-bold px-3 rounded-xl text-white flex-shrink-0 disabled:opacity-60" style={{ background: "var(--btn-accent)" }}>
+                {savingName ? "Saving…" : "Save"}
+              </button>
+            )}
+          </div>
+        </Field>
+        <Field label="Email (used to sign in)">
+          <input value={email} disabled className="gc-input" style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }} />
+        </Field>
+      </div>
+      <form onSubmit={savePassword} className="pt-4 space-y-3" style={{ borderTop: "1px solid var(--border)" }}>
+        <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Change your password</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="New password"><input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setPasswordMsg(null); }} className="gc-input" autoComplete="new-password" placeholder={`At least ${MIN_PASSWORD} characters`} /></Field>
+          <Field label="Confirm new password"><input type="password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setPasswordMsg(null); }} className="gc-input" autoComplete="new-password" /></Field>
+        </div>
+        {passwordMsg && <p className="text-sm font-semibold" style={{ color: passwordMsg.ok ? "var(--free)" : "var(--overdue)" }}>{passwordMsg.text}</p>}
+        <button type="submit" disabled={!password || savingPassword} className="text-sm font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}>
+          {savingPassword ? "Changing…" : "Change password"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function AddUserForm({ onCreate, onCancel }) {
+  const [form, setForm] = useState({ fullName: "", email: "", role: "admin", password: generatePassword() });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (v) => { setForm((f) => ({ ...f, [k]: v })); setError(""); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.fullName.trim() || !form.email.trim()) return setError("Enter their name and email.");
+    if (form.password.length < MIN_PASSWORD) return setError(`The password needs at least ${MIN_PASSWORD} characters.`);
+    setBusy(true);
+    try {
+      await onCreate({ ...form, fullName: form.fullName.trim(), email: form.email.trim() });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="rounded-xl p-4 space-y-3" style={{ border: "1px solid var(--border)", background: "var(--surface-soft)" }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="Name"><input value={form.fullName} onChange={(e) => set("fullName")(e.target.value)} className="gc-input" placeholder="e.g. Sam Taylor" /></Field>
+        <Field label="Email"><input type="email" value={form.email} onChange={(e) => set("email")(e.target.value)} className="gc-input" placeholder="s.taylor@university.ac.uk" /></Field>
+        <Field label="Role">
+          <select value={form.role} onChange={(e) => set("role")(e.target.value)} className="gc-input">
+            <option value="admin">User - full access, can't manage users</option>
+            <option value="owner">Owner - full access, can manage users</option>
+          </select>
+        </Field>
+        <PasswordField label="Temporary password" value={form.password} onChange={set("password")} onGenerate={() => set("password")(generatePassword())} />
+      </div>
+      <p className="text-xs" style={{ color: "var(--ink-faint)" }}>
+        Pass the email and password on to them securely (not in the same message as the app's address). They can change the password under Settings once signed in.
+      </p>
+      {error && <p className="text-sm font-semibold" style={{ color: "var(--overdue)" }}>{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" disabled={busy} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2 rounded-xl text-white disabled:opacity-60" style={{ background: "var(--btn-accent)" }}>
+          <UserPlus size={14} /> {busy ? "Adding…" : "Add user"}
+        </button>
+        <button type="button" disabled={busy} onClick={onCancel} className="text-sm font-semibold px-3 py-2 rounded-xl" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function UsersSection({ currentUserId, isOwner }) {
+  const [users, setUsers] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [created, setCreated] = useState(null); // { email, password } to pass on
+  const [resetting, setResetting] = useState(null); // { user, password }
+  const [removing, setRemoving] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    api.listUsers().then(setUsers).catch((err) => setLoadError(err.message));
+  }, []);
+
+  // Runs one change, replacing the list with the server's updated copy.
+  const run = async (userId, fn) => {
+    setBusyId(userId);
+    try {
+      setUsers(await fn());
+      return true;
+    } catch (err) {
+      window.alert(err.message);
+      return false;
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const create = async (form) => {
+    setUsers(await api.createUser(form)); // AddUserForm shows any error itself
+    setAdding(false);
+    setCreated({ email: form.email, password: form.password });
+  };
+  const ownerCount = (users || []).filter((u) => u.role === "owner").length;
+
+  return (
+    <div className="gc-card p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="gc-display font-bold text-sm">Users</h3>
+          <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>
+            Owners can add, change and remove users. Users can do everything else in the app.
+          </p>
+        </div>
+        {isOwner && !adding && (
+          <button onClick={() => { setAdding(true); setCreated(null); }} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: "var(--btn-accent)" }}>
+            <UserPlus size={13} /> Add user
+          </button>
+        )}
+      </div>
+
+      {!isOwner && (
+        <p className="text-xs rounded-lg px-3 py-2" style={{ background: "var(--surface-soft)", color: "var(--ink-soft)" }}>
+          Only owners can add or remove users - ask an owner if someone needs access.
+        </p>
+      )}
+      {adding && <AddUserForm onCreate={create} onCancel={() => setAdding(false)} />}
+      {created && (
+        <div className="rounded-xl p-3.5 text-sm" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
+          <div className="font-bold mb-1">Account created - pass these sign-in details on:</div>
+          <div className="gc-mono text-[13px]">{created.email}<br />{created.password}</div>
+          <button onClick={() => setCreated(null)} className="text-xs font-bold underline mt-2">Done</button>
+        </div>
+      )}
+
+      {loadError && <p className="text-sm" style={{ color: "var(--overdue)" }}>Couldn't load users: {loadError}</p>}
+      {!users && !loadError && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>Loading…</p>}
+      {users && (
+        <div>
+          {users.map((u) => {
+            const isMe = u.id === currentUserId;
+            const busy = busyId === u.id;
+            const lastOwner = u.role === "owner" && ownerCount <= 1;
+            return (
+              <div key={u.id} className="py-3 space-y-2" style={{ borderTop: "1px solid rgba(22,33,29,0.07)" }}>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold truncate flex items-center gap-2">
+                      {u.fullName || u.email}{isMe && <span className="text-xs font-normal" style={{ color: "var(--ink-faint)" }}>(you)</span>}
+                    </div>
+                    <div className="text-xs truncate" style={{ color: "var(--ink-faint)" }}>
+                      {u.email} · {u.lastSignInAt ? `last signed in ${fmtGB(u.lastSignInAt)}` : "never signed in"}
+                    </div>
+                  </div>
+                  {isOwner && !isMe ? (
+                    <select
+                      value={u.role} disabled={busy || lastOwner}
+                      title={lastOwner ? "There must always be at least one owner" : undefined}
+                      onChange={(e) => run(u.id, () => api.setUserRole(u.id, e.target.value))}
+                      className="gc-input text-xs font-semibold flex-shrink-0" style={{ width: "auto", padding: "6px 30px 6px 10px" }}
+                    >
+                      <option value="admin">User</option>
+                      <option value="owner">Owner</option>
+                    </select>
+                  ) : (
+                    <RoleBadge role={u.role} />
+                  )}
+                  {isOwner && !isMe && (
+                    <div className="flex items-center gap-1.5">
+                      <button disabled={busy} onClick={() => setResetting({ user: u, password: generatePassword() })} className="text-xs font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-40" style={{ border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
+                        Reset password
+                      </button>
+                      <button disabled={busy || lastOwner} onClick={() => setRemoving(u)} title={lastOwner ? "There must always be at least one owner" : "Remove"} className="w-8 h-8 flex items-center justify-center rounded-lg disabled:opacity-40" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {resetting?.user.id === u.id && (
+                  <div className="rounded-xl p-3 space-y-2.5" style={{ background: "var(--surface-soft)" }}>
+                    <PasswordField label={`New password for ${u.fullName || u.email}`} value={resetting.password} onChange={(password) => setResetting((r) => ({ ...r, password }))} onGenerate={() => setResetting((r) => ({ ...r, password: generatePassword() }))} />
+                    <div className="flex gap-2">
+                      <button
+                        disabled={busy || resetting.password.length < MIN_PASSWORD}
+                        onClick={async () => { const { password } = resetting; if (await run(u.id, () => api.resetUserPassword(u.id, password))) { setResetting(null); setCreated({ email: u.email, password }); } }}
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}
+                      >
+                        Set password
+                      </button>
+                      <button onClick={() => setResetting(null)} className="text-xs font-semibold px-2" style={{ color: "var(--ink-soft)" }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {removing && (
+        <ConfirmDialog
+          title={`Remove ${removing.fullName || removing.email}?`}
+          message="They'll no longer be able to sign in. Requisitions they approved and maintenance they logged stay, without their name. This can't be undone."
+          confirmLabel="Remove"
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => { const u = removing; setRemoving(null); run(u.id, () => api.removeUser(u.id)); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SettingsPage({ profile, session, isOwner, onSaveName }) {
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <h1 className="gc-display text-2xl font-extrabold">Settings</h1>
+      <AccountSection key={profile?.full_name} profile={profile} email={session?.user?.email || ""} onSaveName={onSaveName} />
+      <UsersSection currentUserId={session?.user?.id} isOwner={isOwner} />
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
 /* App shell                                                              */
 /* ---------------------------------------------------------------------- */
 function LoadingScreen({ message = "Loading…", isError = false }) {
@@ -4715,8 +5020,10 @@ function AdminLoginForm({ onDone }) {
 }
 
 export default function GrowthCabinetApp() {
-  const { session, profile, profileError, authLoading } = useSession();
-  const isAdmin = profile?.role === "admin";
+  const { session, profile, profileError, authLoading, reloadProfile } = useSession();
+  // Owners and users ('admin') both get the whole app; only owners manage users.
+  const isOwner = profile?.role === "owner";
+  const isAdmin = isOwner || profile?.role === "admin";
   const [showAdminLogin, setShowAdminLogin] = useState(false);
 
   // appData is null until an admin session's data has loaded. Everything
@@ -5129,6 +5436,12 @@ export default function GrowthCabinetApp() {
               initialExpandIndex={requisitionsExpandIndex}
               returnUnitId={returnUnitId}
               onBackToUnit={backToInventoryUnit}
+            />
+          )}
+          {page === "settings" && (
+            <SettingsPage
+              profile={profile} session={session} isOwner={isOwner}
+              onSaveName={withErrorAlert(async (name) => { await api.updateOwnName(session.user.id, name); reloadProfile(); })}
             />
           )}
           {page === "request" && (
