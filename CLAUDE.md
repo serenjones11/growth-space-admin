@@ -111,6 +111,10 @@ Everything lives in one file, organized top-to-bottom as:
   `reftech` room (can hold several simultaneous bookings) — this split is a frontend read-model
   convenience; the actual schema unifies everything into one `bookings` table with a unit
   foreign key (see `supabase/schema.sql`'s design notes).
+- A unit's **research area** (`units.disciplines`: `{plant}`, `{insect}`, both, or empty) is a
+  label set on the add/edit CER form. It drives the tile's discipline pill(s), the timeline row icons
+  and the inventory discipline filter - not the requisitions booked on it - and doesn't restrict
+  which requisitions it can take.
 - **Requisition lifecycle**: `pending` → `approved`/`declined` → (`approved` only) `completed`.
   Approving assigns a unit and creates a booking; completing frees the unit again. Each
   requisition gets a human-readable `code` (`R26-0001` etc.) assigned by a DB trigger on insert.

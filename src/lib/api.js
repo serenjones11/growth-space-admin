@@ -217,6 +217,9 @@ function mapUnitRow(u) {
   return {
     id: u.id,
     type: u.type,
+    // Research area(s) the unit is labelled for: [], ["plant"], ["insect"]
+    // or both (a shared reftech room). Set on the add/edit form.
+    disciplines: u.disciplines || [],
     floor: u.floor,
     room: u.room,
     manufacturer: u.manufacturer,
@@ -553,6 +556,7 @@ export async function saveUnit(data, { isNew = false } = {}) {
   const row = {
     id: data.id,
     type: data.type,
+    disciplines: data.disciplines || [],
     floor: data.floor,
     room: data.room,
     manufacturer: data.manufacturer,

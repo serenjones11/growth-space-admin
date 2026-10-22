@@ -35,7 +35,7 @@ const data = {
   units: [
     unit({ id: "GC-01" }),
     unit({ id: "GC-02", is_out_of_service: true }),
-    unit({ id: "R-01", type: "reftech", floor: "LG", shelves: null }),
+    unit({ id: "R-01", type: "reftech", floor: "LG", shelves: null, disciplines: ["plant", "insect"] }),
     unit({ id: "GC-03" }),
   ],
   requisitions: [
@@ -87,6 +87,8 @@ describe("buildSheets", () => {
     expect(byId["R-01"].status).toBe("Occupied");
     expect(byId["R-01"].current).toBe("R26-0002 Test Researcher");
     expect(byId["GC-03"].status).toBe("Free to book");
+    expect(byId["R-01"].area).toBe("Plant Sciences & Insect Sciences");
+    expect(byId["GC-03"].area).toBe("");
     expect(byId["GC-03"].current).toBe("");
     expect(byId["GC-01"].installed).toEqual(utcDay("2026-09-04"));
   });

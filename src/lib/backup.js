@@ -61,7 +61,9 @@ function buildSheets(data) {
       status = left < 0 ? "Overdue" : left <= ENDING_SOON_DAYS ? "Ending soon" : "Occupied";
     }
     return {
-      id: u.id, type: UNIT_TYPE[u.type] || u.type, floor: FLOOR[u.floor] || u.floor, room: u.room,
+      id: u.id, type: UNIT_TYPE[u.type] || u.type,
+      area: (u.disciplines || []).map((d) => DISCIPLINE[d] || d).join(" & "),
+      floor: FLOOR[u.floor] || u.floor, room: u.room,
       manufacturer: u.manufacturer, model: u.model, serial: u.serial_number, asset: u.asset_number, tscan: u.tscan_id,
       shelves: num(u.shelves), lighting: u.lighting_type, ballasts: u.ballasts,
       co2: yesNo(u.co2_control), dimming: yesNo(u.dimming_control),
@@ -124,7 +126,7 @@ function buildSheets(data) {
       name: "Units",
       rows: units,
       columns: [
-        ["Unit ID", "id"], ["Type", "type"], ["Floor", "floor"], ["Room", "room"], ["Manufacturer", "manufacturer"], ["Model", "model"],
+        ["Unit ID", "id"], ["Type", "type"], ["Research area", "area"], ["Floor", "floor"], ["Room", "room"], ["Manufacturer", "manufacturer"], ["Model", "model"],
         ["Serial no.", "serial"], ["Asset no.", "asset"], ["TSCAN ID", "tscan"], ["Shelves", "shelves"], ["Lighting type", "lighting"],
         ["Ballasts", "ballasts"], ["CO₂ control", "co2"], ["Dimming control", "dimming"],
         ["Temp range min (°C)", "tMin"], ["Temp range max (°C)", "tMax"], ["Humidity range min (%)", "hMin"], ["Humidity range max (%)", "hMax"],

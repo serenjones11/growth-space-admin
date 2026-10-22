@@ -185,6 +185,18 @@ const DISCIPLINE_META = {
   plant: { label: "Plant Sciences", icon: Leaf, color: "#2F8F5B" },
   insect: { label: "Insect Sciences", icon: Bug, color: "#A6763F" },
 };
+/* A unit's research area label (units.disciplines) <-> the add/edit form's
+   single dropdown, where "both" covers a shared reftech room. */
+const UNIT_AREA_OPTIONS = [
+  { value: "", label: "Not set", disciplines: [] },
+  { value: "plant", label: "Plant Sciences", disciplines: ["plant"] },
+  { value: "insect", label: "Insect Sciences", disciplines: ["insect"] },
+  { value: "both", label: "Plant & Insect Sciences", disciplines: ["plant", "insect"] },
+];
+function unitAreaValue(disciplines = []) {
+  const has = (d) => disciplines.includes(d);
+  return has("plant") && has("insect") ? "both" : has("plant") ? "plant" : has("insect") ? "insect" : "";
+}
 
 // Spelt exactly as the seeded light_cycle_options rows, so a form filled in
 // before the live list arrives still saves a value that's on the list.
@@ -1681,9 +1693,8 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
   // reads as free time and a lane stack reads as a clash. The unit label
   // opens that unit's detail modal (over the timeline, not navigating away).
   const renderUnitRow = ({ u, items }) => {
-    // One icon per discipline among the row's requisitions - a reftech room
-    // can hold plant and insect ones at once.
-    const rowDisciplines = Object.keys(DISCIPLINE_META).filter((k) => items.some((it) => it.o.discipline === k));
+    // The unit's research area label (both for a shared reftech room).
+    const rowDisciplines = Object.keys(DISCIPLINE_META).filter((k) => (u.disciplines || []).includes(k));
     const laneCount = Math.max(0, ...items.map((it) => it.lane)) + 1;
     const rowH = laneCount * TIMELINE_LANE_H + (laneCount - 1) * TIMELINE_LANE_GAP;
     return (
@@ -1935,10 +1946,8 @@ function UnitCard({ unit, onClick }) {
   // just on the unit detail page) so it's visible without opening it.
   // Hidden once the overlap has been explicitly approved as intentional.
   const currentForClash = currentBookingsList(unit);
-  // One pill per discipline across every current booking - a reftech room
-  // can hold plant and insect requisitions at once. Empty when free:
-  // discipline isn't a fixed unit property.
-  const disciplines = Object.keys(DISCIPLINE_META).filter((k) => currentForClash.some((b) => b.discipline === k));
+  // The research area(s) the unit is labelled for on its add/edit form.
+  const disciplines = Object.keys(DISCIPLINE_META).filter((k) => (unit.disciplines || []).includes(k));
   const hasClash = !isReftech && currentForClash.length > 1 && !isClashAcknowledged(unit, currentForClash);
   const us = unit.settings || {};
   const settingReadouts = [
@@ -1977,22 +1986,17 @@ function UnitCard({ unit, onClick }) {
       {/* room - the most-checked field, given its own prominent chip */}
       <div className="mb-3"><RoomChip unit={unit} /></div>
 
-      {/* The unit's current settings (set on the add/edit unit form), showing
-          only the ones filled in; with none set, its operating ranges. */}
-      {settingReadouts.length > 0 ? (
+      {/* The unit's current settings (set on the add/edit unit form) - only
+          the ones filled in, and nothing at all when none are. */}
+      {settingReadouts.length > 0 && (
         <div className="grid gap-1.5 mb-3" style={{ gridTemplateColumns: `repeat(${settingReadouts.length}, minmax(0, 1fr))` }}>
           {settingReadouts.map((r) => (
             <div key={r.lbl} className="gc-readout"><div className="lbl">{r.lbl}</div><div className="val text-white" style={r.small ? { fontSize: settingReadouts.length >= 4 ? 11 : 12, overflowWrap: "anywhere", ...(r.lbl === "TEMP" ? { whiteSpace: "nowrap" } : {}) } : undefined}>{r.val}</div></div>
           ))}
         </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-1.5 mb-3">
-          <div className="gc-readout"><div className="lbl">TEMP RANGE</div><div className="val text-white" style={{ fontSize: 13.5 }}>{unit.tempRange[0]}–{unit.tempRange[1]}°C</div></div>
-          <div className="gc-readout"><div className="lbl">RH RANGE</div><div className="val text-white" style={{ fontSize: 13.5 }}>{unit.humidityRange[0]}–{unit.humidityRange[1]}%</div></div>
-        </div>
       )}
 
-      {/* tags - discipline only shows when occupied; it's not a fixed unit property */}
+      {/* tags - the unit's research area(s), CO2, dimming */}
       <div className="flex flex-wrap gap-1.5 mb-3">
         {disciplines.map((k) => <DisciplineIconPill key={k} discipline={k} />)}
         {unit.co2Control && <span className="gc-tag" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border }}>CO₂</span>}
@@ -2064,7 +2068,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
     return matchesQuery
       && (statusFilter === "all" || s.key === statusFilter)
       && (typeFilter === "all" || u.type === typeFilter)
-      && (disciplineFilter === "all" || currentAll.some((occ) => occ.discipline === disciplineFilter))
+      && (disciplineFilter === "all" || (u.disciplines || []).includes(disciplineFilter))
       && (labGroupFilter === "all" || currentAll.some((occ) => occ.labGroup === labGroupFilter))
       && (floorFilter === "all" || u.floor === floorFilter);
   });
@@ -2216,6 +2220,7 @@ function AssetInfoCard({ unit }) {
       <FieldGrid>
         <FieldPair label="Status" value={<StatusTag unit={unit} big />} />
         <FieldPair label="Type" value={isReftech ? "Reftech Room" : "Growth Cabinet"} />
+        <FieldPair label="Research area" value={UNIT_AREA_OPTIONS.find((o) => o.value === unitAreaValue(unit.disciplines)).label} />
         <FieldPair label="Manufacturer" value={unit.manufacturer} />
         <FieldPair label="Model" value={unit.model} />
         <FieldPair label="Serial No." value={unit.serialNumber} />
@@ -2227,9 +2232,10 @@ function AssetInfoCard({ unit }) {
     </InfoBox>
   );
 }
+// The unit's current settings (set temps, RH, light) show on its tile, so
+// they aren't repeated here.
 function EnvironmentControlsCard({ unit }) {
   const isReftech = unit.type === "reftech";
-  const us = unit.settings || {};
   return (
     <InfoBox>
       <BoxLabel>Environment &amp; Controls</BoxLabel>
@@ -2241,11 +2247,6 @@ function EnvironmentControlsCard({ unit }) {
         <FieldPair label="Ballasts" value={unit.ballasts} />
         <FieldPair label="CO₂ control" value={unit.co2Control ? "Yes" : "No"} />
         <FieldPair label="Dimming control" value={unit.dimmingControl ? "Yes" : "No"} />
-        {/* Current settings - only the ones that have been filled in. */}
-        {(isSet(us.dayTemp) || isSet(us.nightTemp)) && <FieldPair label="Set temp (day / night)" value={fmtTileTemp(us.dayTemp, us.nightTemp)} />}
-        {isSet(us.humidity) && <FieldPair label="Set RH" value={`${us.humidity}%`} />}
-        {us.lightCycle && <FieldPair label="Set light cycle" value={us.lightCycle} />}
-        {isSet(us.lightIntensity) && <FieldPair label="Set light intensity" value={`${us.lightIntensity} µmol/m²/s`} />}
       </FieldGrid>
     </InfoBox>
   );
@@ -2919,9 +2920,14 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
   const isEdit = !!unit;
   const [form, setForm] = useState(
     unit
-      ? { ...unit, tempMin: unit.tempRange[0], tempMax: unit.tempRange[1], humMin: unit.humidityRange[0], humMax: unit.humidityRange[1] }
+      ? {
+          ...unit, tempMin: unit.tempRange[0], tempMax: unit.tempRange[1], humMin: unit.humidityRange[0], humMax: unit.humidityRange[1],
+          // Blank columns arrive as null; text inputs need "".
+          model: unit.model || "", serialNumber: unit.serialNumber || "", assetNumber: unit.assetNumber || "",
+          tscanId: unit.tscanId || "", installDate: unit.installDate || "", shelves: unit.shelves ?? "",
+        }
       : {
-          id: "", type: "cabinet", floor: "L1", room: (rooms.find((r) => r.floor === "L1" && r.type === "cabinet") || {}).name || "",
+          id: "", type: "cabinet", disciplines: [], floor: "L1", room: (rooms.find((r) => r.floor === "L1" && r.type === "cabinet") || {}).name || "",
           manufacturer: (manufacturers[0] || {}).name || "", model: "", serialNumber: "", assetNumber: "", tscanId: "",
           shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: "",
           co2Control: false, dimmingControl: false,
@@ -3014,6 +3020,17 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
                 {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
               </select>
             </Field>
+            <div className="sm:col-span-2">
+              <Field label="Research area">
+                <select
+                  value={unitAreaValue(form.disciplines)}
+                  onChange={(e) => setForm((f) => ({ ...f, disciplines: UNIT_AREA_OPTIONS.find((o) => o.value === e.target.value).disciplines }))}
+                  className="gc-input"
+                >
+                  {UNIT_AREA_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </Field>
+            </div>
             {/* Rooms belong to one floor and unit type, so the list is scoped
                 to both; the add row names the floor. */}
             <div className="sm:col-span-2">
@@ -3367,7 +3384,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Any unit that matches type and is available across the *requested*
   // date window - not just units that happen to be free right now.
-  // Discipline isn't a unit property: any cabinet can be assigned
+  // A unit's research-area label doesn't restrict this: any cabinet can be assigned
   // regardless of what discipline the requisition is for.
   const windowCandidates = units.filter((u) =>
     u.type === req.unitType

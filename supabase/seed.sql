@@ -8,19 +8,19 @@
 -- assign_requisition_code, so neither is inserted here. No emails are sent:
 -- the test project has no webhook secret in Vault.
 
-insert into units (id, type, floor, room, manufacturer, model, shelves, lighting_type, ballasts, co2_control, dimming_control,
+insert into units (id, type, disciplines, floor, room, manufacturer, model, shelves, lighting_type, ballasts, co2_control, dimming_control,
                    temp_min, temp_max, humidity_min, humidity_max, install_date, set_day_temp, set_night_temp, set_humidity, set_light_cycle)
-select v.id, v.type::unit_type, v.floor,
+select v.id, v.type::unit_type, v.disciplines::discipline_type[], v.floor,
        coalesce((select name from rooms r where r.floor = v.floor and r.type = v.type::unit_type order by name limit 1), 'Room ' || v.floor),
        v.manufacturer, v.model, v.shelves, 'LED', 'Electronic', v.co2, v.dim, 4, 35, 30, 90, current_date - 400,
        v.day, v.night, v.rh, v.cycle
 from (values
-  ('TEST-GC-01', 'cabinet', 'L1',  'Conviron',  'E-15',    3, true,  false, 22, 18, 60, '16/8h (L/D)'),
-  ('TEST-GC-02', 'cabinet', 'L1',  'Percival',  'AR-66',   4, false, false, null, null, null, null),
-  ('TEST-GC-03', 'cabinet', 'L2A', 'Snijders',  'MLR-352', 3, true,  true,  25, 20, 65, '12/12h (L/D)'),
-  ('TEST-GC-04', 'cabinet', 'L3',  'Conviron',  'GC-8',    5, false, false, null, null, null, null),
-  ('TEST-R-01',  'reftech', 'LG',  'Conviron',  'Room',    null, true, true, null, null, null, null)
-) as v(id, type, floor, manufacturer, model, shelves, co2, dim, day, night, rh, cycle);
+  ('TEST-GC-01', 'cabinet', '{plant}',        'L1',  'Conviron',  'E-15',    3, true,  false, 22, 18, 60, '16/8h (L/D)'),
+  ('TEST-GC-02', 'cabinet', '{plant}',        'L1',  'Percival',  'AR-66',   4, false, false, null, null, null, null),
+  ('TEST-GC-03', 'cabinet', '{insect}',       'L2A', 'Snijders',  'MLR-352', 3, true,  true,  25, 20, 65, '12/12h (L/D)'),
+  ('TEST-GC-04', 'cabinet', '{}',             'L3',  'Conviron',  'GC-8',    5, false, false, null, null, null, null),
+  ('TEST-R-01',  'reftech', '{plant,insect}', 'LG',  'Conviron',  'Room',    null, true, true, null, null, null, null)
+) as v(id, type, disciplines, floor, manufacturer, model, shelves, co2, dim, day, night, rh, cycle);
 
 insert into requisitions (researcher_name, email, role, emergency_number, lab_group_id, pi_name, unit_type, discipline,
                           species, containment_level, project_title, set_temp, night_temp, set_humidity, light_cycle,

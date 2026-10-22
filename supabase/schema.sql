@@ -156,6 +156,10 @@ insert into maintenance_categories (name, bg_hex, ink_hex, border_hex) values
 create table units (
   id                     text primary key,             -- "GC-041", "RTR-03"
   type                   unit_type not null,
+  -- Research area(s) the unit is labelled for on its add/edit form: {plant},
+  -- {insect} or both (a shared reftech room). Drives its tile pill and the
+  -- inventory filter; doesn't restrict which requisitions it can take.
+  disciplines            discipline_type[] not null default '{}',
   floor                  text not null,                 -- "LG","L1","L2A","L2B","L3"
   room                   text not null,
   manufacturer           text not null,
