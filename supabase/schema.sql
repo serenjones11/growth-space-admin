@@ -198,12 +198,14 @@ create table units (
   -- if a booking nobody approved joins the overlap, the warning reappears.
   acknowledged_clash_booking_ids uuid[] default array[]::uuid[],
   -- What the unit is currently set to, shown on its inventory tile (all
-  -- optional; none set shows the ranges). Light intensity in µmol/m²/s.
+  -- optional). Light intensity in µmol/m²/s; dawn/dusk = lights on/off.
   set_day_temp           numeric,
   set_night_temp         numeric,
   set_humidity           numeric,
   set_light_cycle        text,
   set_light_intensity    numeric,
+  set_dawn_time          time,
+  set_dusk_time          time,
 
   created_at             timestamptz not null default now(),
   updated_at             timestamptz not null default now()

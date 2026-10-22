@@ -215,10 +215,10 @@ function fmtTemps(dayTemp, nightTemp) {
 }
 // Unit tile TEMP readout: "20°C / 18°C" (day / night), or whichever one
 // was given.
-function fmtTileTemp(dayTemp, nightTemp) {
-  if (isSet(dayTemp) && isSet(nightTemp)) return `${dayTemp}°C / ${nightTemp}°C`;
-  if (isSet(dayTemp)) return `${dayTemp}°C`;
-  return isSet(nightTemp) ? `${nightTemp}°C night` : "-";
+/* "HH:MM" -> fraction of the day (0-1), for the tile's day bar. */
+function dayFraction(hhmm) {
+  const [h, m] = String(hhmm).split(":").map(Number);
+  return (h * 60 + (m || 0)) / 1440;
 }
 function fmtDawnDusk(dawn, dusk) {
   const parts = [dawn ? `Dawn ${dawn}` : null, dusk ? `Dusk ${dusk}` : null].filter(Boolean);
@@ -1974,6 +1974,32 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
 /* ---------------------------------------------------------------------- */
 /* Inventory / map                                                        */
 /* ---------------------------------------------------------------------- */
+/* A unit tile's lights-on hours: a 24-hour bar, lit from dawn to dusk
+   (wrapping past midnight when dusk is earlier than dawn), with the two
+   times marked under it. */
+function DayBar({ dawn, dusk, cycle }) {
+  const on = dayFraction(dawn), off = dayFraction(dusk);
+  const lit = on <= off ? [[on, off]] : [[0, off], [on, 1]];
+  // Keep the time labels inside the bar's ends.
+  const at = (f) => `${Math.min(Math.max(f * 100, 11), 89)}%`;
+  return (
+    <div className="mb-1.5" style={{ background: "var(--chip-bg)", borderRadius: 10, padding: "8px 10px 7px" }}>
+      <div className="flex items-center justify-between">
+        <span style={{ color: "var(--chip-label)", fontSize: 9, fontWeight: 700, letterSpacing: "0.07em" }}>LIGHTS</span>
+        {cycle && <span className="text-white" style={{ fontSize: 11, fontWeight: 800 }}>{cycle}</span>}
+      </div>
+      <div className="relative" style={{ height: 10, borderRadius: 5, background: "#2A3A34", margin: "6px 0 4px" }}>
+        {lit.map(([a, b]) => (
+          <div key={a} className="absolute top-0 bottom-0" style={{ left: `${a * 100}%`, width: `${(b - a) * 100}%`, borderRadius: 5, background: "#FFFFFF" }} />
+        ))}
+      </div>
+      <div className="relative text-white" style={{ height: 14, fontSize: 10.5, fontWeight: 800 }}>
+        <span className="absolute whitespace-nowrap" style={{ left: at(on), transform: "translateX(-50%)" }}>{dawn}</span>
+        <span className="absolute whitespace-nowrap" style={{ left: at(off), transform: "translateX(-50%)" }}>{dusk}</span>
+      </div>
+    </div>
+  );
+}
 function UnitCard({ unit, onClick }) {
   const isReftech = unit.type === "reftech";
   const upcoming = upcomingBookings(unit);
@@ -1986,12 +2012,24 @@ function UnitCard({ unit, onClick }) {
   const disciplines = Object.keys(DISCIPLINE_META).filter((k) => (unit.disciplines || []).includes(k));
   const hasClash = !isReftech && currentForClash.length > 1 && !isClashAcknowledged(unit, currentForClash);
   const us = unit.settings || {};
+  // With both dawn and dusk set, the light cycle moves onto the day bar
+  // below; otherwise it stays a box of its own.
+  const hasDayBar = !!(us.dawnTime && us.duskTime);
+  const unitText = (t) => <span style={{ fontSize: 10, color: "var(--chip-label)" }}>{t}</span>;
   const settingReadouts = [
-    (isSet(us.dayTemp) || isSet(us.nightTemp)) && { lbl: "TEMP", val: fmtTileTemp(us.dayTemp, us.nightTemp), small: isSet(us.dayTemp) && isSet(us.nightTemp) },
+    isSet(us.dayTemp) && isSet(us.nightTemp) && { lbl: "DAY / NIGHT", val: <>{us.dayTemp}° {unitText("/")} {us.nightTemp}°</> },
+    isSet(us.dayTemp) && !isSet(us.nightTemp) && { lbl: "TEMP", val: `${us.dayTemp}°C` },
+    !isSet(us.dayTemp) && isSet(us.nightTemp) && { lbl: "NIGHT", val: `${us.nightTemp}°C` },
     isSet(us.humidity) && { lbl: "RH", val: `${us.humidity}%` },
-    us.lightCycle && { lbl: "CYCLE", val: us.lightCycle, small: true },
-    isSet(us.lightIntensity) && { lbl: "LIGHT", val: `${us.lightIntensity} µmol`, small: true },
+    !hasDayBar && us.lightCycle && { lbl: "CYCLE", val: us.lightCycle, small: true },
+    isSet(us.lightIntensity) && { lbl: "LIGHT", val: <>{us.lightIntensity} {unitText("µmol")}</> },
+    !hasDayBar && us.dawnTime && { lbl: "DAWN", val: us.dawnTime },
+    !hasDayBar && us.duskTime && { lbl: "DUSK", val: us.duskTime },
   ].filter(Boolean);
+  // Up to three across a cabinet tile; four go 2 x 2 there (one row on a
+  // double-width reftech tile) rather than three and a straggler.
+  const n = settingReadouts.length;
+  const readoutColumns = n <= 3 ? n : n === 4 ? (isReftech ? 4 : 2) : 3;
   // Current requisitions (most urgent first), then upcoming ones by start.
   const allRows = [...currentForClash.slice().sort((a, b) => new Date(a.endDate) - new Date(b.endDate)), ...upcoming];
   const tileRows = allRows.slice(0, 3);
@@ -2025,12 +2063,14 @@ function UnitCard({ unit, onClick }) {
       {/* The unit's current settings (set on the add/edit unit form) - only
           the ones filled in, and nothing at all when none are. */}
       {settingReadouts.length > 0 && (
-        <div className="grid gap-1.5 mb-3" style={{ gridTemplateColumns: `repeat(${settingReadouts.length}, minmax(0, 1fr))` }}>
+        <div className="grid gap-1.5 mb-1.5" style={{ gridTemplateColumns: `repeat(${readoutColumns}, minmax(0, 1fr))` }}>
           {settingReadouts.map((r) => (
-            <div key={r.lbl} className="gc-readout"><div className="lbl">{r.lbl}</div><div className="val text-white" style={r.small ? { fontSize: settingReadouts.length >= 4 ? 11 : 12, overflowWrap: "anywhere", ...(r.lbl === "TEMP" ? { whiteSpace: "nowrap" } : {}) } : undefined}>{r.val}</div></div>
+            <div key={r.lbl} className="gc-readout"><div className="lbl">{r.lbl}</div><div className="val text-white" style={{ fontSize: r.small ? 12 : 14, whiteSpace: r.small ? "normal" : "nowrap" }}>{r.val}</div></div>
           ))}
         </div>
       )}
+      {hasDayBar && <DayBar dawn={us.dawnTime} dusk={us.duskTime} cycle={us.lightCycle} />}
+      {(settingReadouts.length > 0 || hasDayBar) && <div className="mb-1.5" />}
 
       {/* tags - the unit's research area(s), CO2, dimming */}
       <div className="flex flex-wrap gap-1.5 mb-3">
@@ -2959,6 +2999,15 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
 /* ---------------------------------------------------------------------- */
 /* Add / edit unit modal                                                  */
 /* ---------------------------------------------------------------------- */
+/* Divider heading inside the add/edit form's "Current settings" box. */
+function SettingsHeading({ children }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-soft)" }}>{children}</span>
+      <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
+    </div>
+  );
+}
 function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoom, onDeleteRoom, manufacturers, onAddManufacturer, onRenameManufacturer, onDeleteManufacturer, lightCycles, onAddLightCycle, onRenameLightCycle, onDeleteLightCycle }) {
   const isEdit = !!unit;
   const [form, setForm] = useState(
@@ -2975,7 +3024,7 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
           shelves: 4, lightingType: LIGHTING_TYPES[0], ballasts: "",
           co2Control: false, dimmingControl: false,
           installDate: "", tempMin: 4, tempMax: 30, humMin: 30, humMax: 85, status: "free",
-          settings: { dayTemp: "", nightTemp: "", humidity: "", lightCycle: "", lightIntensity: "" },
+          settings: { dayTemp: "", nightTemp: "", humidity: "", lightCycle: "", lightIntensity: "", dawnTime: "", duskTime: "" },
         }
   );
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -3146,24 +3195,30 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
             </label>
           )}
           {/* What the unit is set to right now - shown on its inventory tile
-              (only the ones filled in; none set shows the ranges above). */}
+              (only the ones filled in). */}
           <div className="rounded-xl p-3.5 space-y-3" style={{ background: "var(--surface-soft)", border: "1px solid var(--border)" }}>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: "var(--ink-soft)" }}>Current settings</span>
-              <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <SettingsHeading>Current settings · Climate</SettingsHeading>
+            <div className="grid grid-cols-3 gap-3">
               <Field label="Day temp (°C)"><input {...settingInput("dayTemp")} /></Field>
               <Field label="Night temp (°C)"><input {...settingInput("nightTemp")} /></Field>
               <Field label="RH (%)"><input {...settingInput("humidity")} /></Field>
+            </div>
+            <SettingsHeading>Lighting</SettingsHeading>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <ManagedSelectField
+                  label="Light cycle" noun="light cycle" emptyLabel="Not set"
+                  value={form.settings?.lightCycle || ""} options={lightCycles}
+                  onChange={setSetting("lightCycle")}
+                  onAdd={onAddLightCycle} onRename={onRenameLightCycle} onDelete={onDeleteLightCycle}
+                />
+              </div>
               <Field label="Light (µmol)"><input {...settingInput("lightIntensity")} /></Field>
             </div>
-            <ManagedSelectField
-              label="Light cycle" noun="light cycle" emptyLabel="Not set"
-              value={form.settings?.lightCycle || ""} options={lightCycles}
-              onChange={setSetting("lightCycle")}
-              onAdd={onAddLightCycle} onRename={onRenameLightCycle} onDelete={onDeleteLightCycle}
-            />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Dawn (lights on)"><input type="time" value={form.settings?.dawnTime || ""} onChange={(e) => setSetting("dawnTime")(e.target.value)} className="gc-input" /></Field>
+              <Field label="Dusk (lights off)"><input type="time" value={form.settings?.duskTime || ""} onChange={(e) => setSetting("duskTime")(e.target.value)} className="gc-input" /></Field>
+            </div>
           </div>
           {error && <p className="text-sm font-semibold" style={{ color: "var(--overdue)" }}>{error}</p>}
           <button type="submit" disabled={saving} className="w-full py-2.5 rounded-xl font-medium text-white disabled:opacity-60" style={{ background: "var(--gradient)" }}>

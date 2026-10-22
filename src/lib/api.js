@@ -249,6 +249,8 @@ function mapUnitRow(u) {
       humidity: u.set_humidity,
       lightCycle: u.set_light_cycle || "",
       lightIntensity: u.set_light_intensity,
+      dawnTime: hhmm(u.set_dawn_time),
+      duskTime: hhmm(u.set_dusk_time),
     },
     addedRecently: false,
   };
@@ -585,6 +587,8 @@ export async function saveUnit(data, { isNew = false, originalId = null } = {}) 
     set_humidity: numOrNull(data.settings?.humidity),
     set_light_cycle: nullIfEmpty(data.settings?.lightCycle),
     set_light_intensity: numOrNull(data.settings?.lightIntensity),
+    set_dawn_time: nullIfEmpty(data.settings?.dawnTime),
+    set_dusk_time: nullIfEmpty(data.settings?.duskTime),
   };
   if (data.status !== undefined) row.is_out_of_service = data.status === "service";
   const { error } = isNew
