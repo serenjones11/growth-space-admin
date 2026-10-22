@@ -27,6 +27,9 @@ src/index.css                      ← Tailwind directives only
 supabase/schema.sql                ← the full schema, kept in sync with migrations/ — see below
 supabase/migrations/               ← every migration applied to the live project, in order
 supabase/tests/                    ← SQL regression checks, run in the SQL editor (they roll back)
+supabase/seed.sql                  ← fake sample data for the TEST project only
+.env.staging                       ← TEST project URL + publishable key (committed; fake data only)
+.github/workflows/ci.yml           ← lint + tests + build on every push / pull request
 supabase/functions/notify-requisition/  ← Edge Function: requisition email notifications (Resend)
 supabase/functions/manage-users/   ← Edge Function: Settings page user management (list/add/role/reset/remove)
 design-prototypes/                 ← old exploratory HTML mockups, NOT part of the app — ignore
@@ -46,7 +49,12 @@ npm run build  # production build
 npm run preview # preview the production build locally
 npm run lint   # ESLint (eslint.config.js)
 npm test       # Vitest unit tests
+npm run dev:staging # dev server against the TEST Supabase project (.env.staging)
 ```
+
+Every push runs lint, tests and a build on GitHub Actions, and Vercel's build runs the same
+checks (`vercel-build` in package.json), so a commit that fails them never replaces the live site -
+the previous deployment stays up.
 
 **`src/App.jsx`** is the single source of truth for the whole UI: dashboard, inventory,
 cabinet/reftech detail drawer, requisitions lifecycle, timeline view, lab-usage chart, request-space
@@ -115,6 +123,22 @@ Everything lives in one file, organized top-to-bottom as:
   version. The `guard_requisition_write` trigger resets admin-only columns (status, unit,
   decided/completed, admin notes, amendment record) on writes from anyone who isn't an admin.
 
+## Two Supabase projects: test first, then live
+
+- **Live**: "CER App" (`ttyyttkdezvlyldtrcpx`) - real data. Vercel **production** uses it.
+- **Test**: "CER App (test)" (`hzkmhlnypxwsvoagurko`) - fake data from `supabase/seed.sql`.
+  Vercel **preview** deployments (any branch other than `main`) and `npm run dev:staging` use it.
+  It has the `manage-users` Edge Function but deliberately no `notify-requisition` webhook secret,
+  so test data never sends real emails. Free-plan projects pause after a week unused; restore it
+  from the Supabase dashboard when needed.
+
+Workflow for any database change: write the migration file, apply it to the **test** project, try
+it there (preview deployment or `npm run dev:staging`, plus `supabase/tests/`), and only then apply
+the same file to **live** and mirror it into `schema.sql`. Edge Functions likewise: deploy to test,
+check, then deploy to live. (Supabase's built-in branching would automate this but needs the Pro
+plan.) To rebuild the test project from scratch: run `schema.sql`, then `seed.sql`, in its SQL
+editor.
+
 ## Backend — live Supabase project
 
 The app is fully wired to Supabase; there is **no mock data path left**. Schema changes are made
@@ -163,8 +187,8 @@ Edge Function secrets in Supabase, never as Vercel/frontend env vars.
 
 ## Deployment
 
-Frontend is set up to deploy on Vercel (Vite preset, no custom `vercel.json` needed — no
-client-side router, so no rewrite rules required). Needs `VITE_SUPABASE_URL` and
-`VITE_SUPABASE_PUBLISHABLE_KEY` set as Vercel env vars (Production **and** Preview/Development),
-copied from `.env` — Vite only bakes these in at build time, so changing them requires a redeploy,
-not just a re-save.
+Frontend deploys on Vercel (project `grow-space`, Vite preset, no `vercel.json` — no client-side
+router, so no rewrite rules). `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` are set per
+environment: **Production** = live project (same values as `.env`), **Preview/Development** = test
+project (same as `.env.staging`). Vite bakes them in at build time, so changing them needs a
+redeploy, not just a re-save. Vercel's build runs `npm run vercel-build` (lint + tests + build).

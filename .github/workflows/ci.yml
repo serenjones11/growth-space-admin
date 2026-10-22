@@ -1,0 +1,26 @@
+# Lint, unit tests and a production build on every push and pull request.
+# Vercel runs the same checks before it deploys (package.json "vercel-build"),
+# so a commit that fails here never replaces the live site.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+        env:
+          # The build only bakes these in; nothing is called during CI.
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder

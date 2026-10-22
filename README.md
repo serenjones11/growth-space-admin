@@ -45,17 +45,28 @@ src/lib/*.test.js        unit tests
 supabase/schema.sql      the full database schema, current state
 supabase/migrations/     every change applied to the live database, in order
 supabase/tests/          SQL checks to run in the Supabase SQL editor
-supabase/functions/      the notify-requisition email function
+supabase/functions/      Edge Functions: notification emails, user management
+supabase/seed.sql        made-up sample data for the test project
 ```
+
+## Test database
+
+There's a second Supabase project, "CER App (test)", with made-up data. Try
+database changes there before the live project (see `CLAUDE.md`).
+`npm run dev:staging` runs the app against it, and Vercel preview deployments
+(any branch other than `main`) use it automatically.
 
 ## Deploying
 
-Pushing to `main` deploys the frontend on Vercel. Vercel needs the same two
-`VITE_SUPABASE_*` variables set for Production and Preview (it bakes them in
-at build time, so changing them needs a redeploy).
+Pushing to `main` deploys the frontend on Vercel, but only if lint, tests and
+the build pass (GitHub Actions also runs them on every push). If they fail,
+the live site keeps the previous version. Vercel's two `VITE_SUPABASE_*`
+variables point Production at the live project and Preview/Development at the
+test project (they're baked in at build time, so changing them needs a
+redeploy).
 
-Database changes are SQL files in `supabase/migrations/`, applied to the live
-project, then mirrored into `supabase/schema.sql`. The email function is
+Database changes are SQL files in `supabase/migrations/`, applied to the test
+project, then the live one, then mirrored into `supabase/schema.sql`. The email function is
 deployed to Supabase separately and reads its secrets (`RESEND_API_KEY`,
 `WEBHOOK_SECRET`, optionally `NOTIFY_FROM_EMAIL` and `APP_URL`) from Supabase's
 Edge Function secrets.
