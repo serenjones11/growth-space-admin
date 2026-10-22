@@ -12,17 +12,21 @@ maintenance, and handling space requisitions (including a public, no-login reque
 
 The app is Vite + React + Tailwind on the frontend, backed by a **live Supabase project**
 (Postgres + Auth + Storage + Edge Functions). There is no mock data layer anymore — it was fully
-replaced; every page reads and writes through real queries. There is still **no test runner** or
-lint script configured.
+replaced; every page reads and writes through real queries. `npm run lint` (ESLint) and `npm test`
+(Vitest unit tests for the pure logic in `src/lib/`) both need to pass before pushing.
 
 ```
-src/App.jsx                        ← the entire UI (~4,800 lines): pages, modals, wizard, all of it
-src/lib/api.js                     ← every Supabase query/mutation the UI calls (~800 lines)
+src/App.jsx                        ← the entire UI (~5,200 lines): pages, modals, wizard, all of it
+src/lib/api.js                     ← every Supabase query/mutation the UI calls (~950 lines)
+src/lib/dates.js                   ← "today", day counts, ending-soon/overdue rule - shared by UI, api, backup
+src/lib/backup.js                  ← Dashboard "Full backup" Excel export (exceljs, lazy-loaded)
+src/lib/*.test.js                  ← Vitest unit tests (dates, lab-usage maths, backup columns)
 src/lib/supabaseClient.js          ← creates the Supabase client from VITE_ env vars
 src/lib/useSession.js              ← auth session + profile (role) hook
 src/index.css                      ← Tailwind directives only
 supabase/schema.sql                ← the full schema, kept in sync with migrations/ — see below
 supabase/migrations/               ← every migration applied to the live project, in order
+supabase/tests/                    ← SQL regression checks, run in the SQL editor (they roll back)
 supabase/functions/notify-requisition/  ← Edge Function: requisition email notifications (Resend)
 design-prototypes/                 ← old exploratory HTML mockups, NOT part of the app — ignore
 ```
@@ -39,9 +43,9 @@ npm install    # install dependencies
 npm run dev    # start Vite dev server (http://localhost:5173, or next free port)
 npm run build  # production build
 npm run preview # preview the production build locally
+npm run lint   # ESLint (eslint.config.js)
+npm test       # Vitest unit tests
 ```
-
-There is no lint or test script configured.
 
 **`src/App.jsx`** is the single source of truth for the whole UI: dashboard, inventory,
 cabinet/reftech detail drawer, requisitions lifecycle, timeline view, lab-usage chart, request-space
@@ -59,8 +63,11 @@ earlier design iterations — this file is authoritative.
   carries the three `@tailwind` directives, nothing else.
 - Google Fonts (Plus Jakarta Sans + Inter) are linked via `<link>` tags inside `App.jsx` itself
   rather than `index.html` — left as-is from the original handoff, not yet cleaned up.
-- `recharts` is installed but double-check it's still used before relying on it — most charts
-  in `App.jsx` were rebuilt as custom SVG.
+- Charts are custom SVG in `App.jsx`; there is no charting library.
+- Dates: booking dates are calendar days (`YYYY-MM-DD`). Compare them as strings or via
+  `src/lib/dates.js` - never mix `new Date("YYYY-MM-DD")` (UTC midnight) with local-time `Date`s,
+  which is off by a day around midnight in British Summer Time. `App.jsx`'s `TODAY` is refreshed
+  when the date rolls over.
 - No responsive breakpoints to speak of — the admin shell (fixed sidebar, multi-column grids) is
   desktop-only today. The public `RequestSpacePage` wizard is the closest thing to mobile-usable
   as-is. Treat any mobile/iPad work as a real scoping conversation, not a quick pass.
@@ -100,6 +107,12 @@ Everything lives in one file, organized top-to-bottom as:
   requisition gets a human-readable `code` (`R26-0001` etc.) assigned by a DB trigger on insert.
 - Requisitions and units are true DB relations now (foreign keys, RLS-enforced) — there is no
   seed-time linking step; that whole class of mock-data problem no longer exists.
+- **Bookings follow their requisition automatically**: the `sync_booking_from_requisition`
+  trigger creates/updates an approved requisition's booking whenever the requisition is written,
+  so the client only ever writes `requisitions` to approve, edit or move one (never `bookings`).
+  While an amendment is under review (status back to `pending`) the booking keeps the approved
+  version. The `guard_requisition_write` trigger resets admin-only columns (status, unit,
+  decided/completed, admin notes, amendment record) on writes from anyone who isn't an admin.
 
 ## Backend — live Supabase project
 
@@ -122,6 +135,11 @@ everything. Everyone else — including anonymous visitors, since there's no res
 can only INSERT a new requisition and read/amend their own pending ones; a few reference tables
 (`species_options`, and the `list_lab_groups()` RPC) are deliberately public-read since the
 public request form needs them without a session.
+
+Migration `20261022120100_review_hardening_part2.sql` (ON DELETE SET NULL on the profile
+references, and dropping duplicate SELECT policies) is written but **not yet applied** - the
+Supabase connector holds statements like these for the owner's approval. Until it is, deleting a
+user who has approved/completed requisitions or logged maintenance fails on a foreign key.
 
 **Email notifications**: `supabase/functions/notify-requisition` (Deno Edge Function, called via
 `pg_net` from triggers on `requisitions`, not from the frontend) sends Resend emails — admins get

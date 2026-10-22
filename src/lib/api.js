@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { bookingDateState, localISODate, monthKey, today as todayDate } from "./dates";
 
 /* Live lab-group lookup, replacing the old hardcoded LAB_GROUP_ID_BY_NAME/
    LAB_GROUP_NAME_BY_ID maps now that admins can read lab_groups directly
@@ -107,17 +108,27 @@ export async function deleteLabGroup(id) {
 
 const UNIT_FILES_BUCKET = "unit-files";
 
-/* Signed URLs (not public ones - the bucket is private, admin-only). Swallows
-   errors so one stale/missing storage object can't break the whole fetch. */
-async function trySignedUrl(path, expiresIn = 3600) {
-  if (!path) return null;
+/* Signed URLs (not public ones - the bucket is private, admin-only), for
+   every path in one request. Returns { path: url }; a stale/missing object
+   just has no entry, so it can't break the whole fetch. */
+async function trySignedUrls(paths, expiresIn = 3600) {
+  const wanted = [...new Set(paths.filter(Boolean))];
+  if (!wanted.length) return {};
   try {
-    const { data, error } = await supabase.storage.from(UNIT_FILES_BUCKET).createSignedUrl(path, expiresIn);
-    if (error) return null;
-    return data.signedUrl;
+    const { data, error } = await supabase.storage.from(UNIT_FILES_BUCKET).createSignedUrls(wanted, expiresIn);
+    if (error) return {};
+    return Object.fromEntries(data.filter((d) => !d.error && d.signedUrl).map((d) => [d.path, d.signedUrl]));
   } catch {
-    return null;
+    return {};
   }
+}
+
+/* Storage keys only allow a limited character set - keep the original
+   name readable but swap anything else (spaces, brackets, accents) for "-". */
+export function safeFileName(name) {
+  const cleaned = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").replace(/-\./g, ".").replace(/^-|-$/g, "");
+  return cleaned || "file";
 }
 
 function nullIfEmpty(v) {
@@ -164,29 +175,32 @@ export async function fetchLabUsageHistory() {
   const { labels, fullLabels, keys } = labUsageWindow();
   const { data, error } = await supabase.from("bookings").select("unit_id, lab_group_id, start_date, end_date");
   if (error) throw error;
-
   // Relies on labGroupCache already being populated - fetchAdminData() calls
   // fetchLabGroups() before this, which is the only caller of this function.
-  const series = {};
-  Object.values(labGroupCache.nameById).forEach((lab) => { series[lab] = new Array(keys.length).fill(0); });
+  const series = computeLabUsage(data, labGroupCache.nameById, keys);
+  return { labels, fullLabels, keys, series };
+}
 
+/* { labName: [count per month key] } - distinct units each lab group had a
+   booking in during each month. "YYYY-MM" keys compare as strings, so a
+   booking overlaps a month when it starts in or before it and ends in or
+   after it. */
+export function computeLabUsage(bookings, labNameById, keys) {
+  const series = {};
+  Object.values(labNameById).forEach((lab) => { series[lab] = new Array(keys.length).fill(0); });
   keys.forEach((key, i) => {
-    const [y, m] = key.split("-").map(Number);
-    const monthStart = new Date(y, m - 1, 1);
-    const monthEnd = new Date(y, m, 0); // last day of the month
     const unitsByLab = {};
-    data.forEach((b) => {
-      const lab = labGroupCache.nameById[b.lab_group_id];
+    bookings.forEach((b) => {
+      const lab = labNameById[b.lab_group_id];
       if (!lab) return;
-      if (new Date(b.start_date) > monthEnd || new Date(b.end_date) < monthStart) return;
+      if (monthKey(b.start_date) > key || monthKey(b.end_date) < key) return;
       (unitsByLab[lab] ||= new Set()).add(b.unit_id);
     });
     Object.entries(unitsByLab).forEach(([lab, unitSet]) => {
       if (series[lab]) series[lab][i] = unitSet.size;
     });
   });
-
-  return { labels, fullLabels, keys, series };
+  return series;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -406,10 +420,8 @@ export async function fetchAdminData() {
     (documentsByUnit[d.unitId] ||= []).push(d);
   });
 
-  // Truncated to midnight, matching App.jsx's TODAY constant - kept as a
-  // local calculation (rather than importing TODAY from App.jsx) to avoid
-  // a circular import between the two modules.
-  const today = new Date(new Date().toISOString().slice(0, 10));
+  const today = todayDate();
+  const todayISO = localISODate();
 
   const units = unitsRes.data.map((row) => {
     const base = mapUnitRow(row);
@@ -428,15 +440,15 @@ export async function fetchAdminData() {
     // leaves more than one current, the earliest-ending wins, so an overdue
     // booking isn't masked by a newer one that's still running.
     const current = bookings
-      .filter((b) => new Date(b.startDate) <= today)
-      .sort((a, b) => new Date(a.endDate) - new Date(b.endDate))[0] || null;
+      .filter((b) => b.startDate <= todayISO)
+      .sort((a, b) => (a.endDate < b.endDate ? -1 : a.endDate > b.endDate ? 1 : 0))[0] || null;
     let status, urgency = null;
     if (base.isOutOfService) {
       status = "service";
     } else if (current) {
       status = "occupied";
-      const daysLeft = Math.round((new Date(current.endDate) - today) / 86400000);
-      urgency = daysLeft < 0 ? "overdue" : daysLeft <= 2 ? "warning" : null;
+      const state = bookingDateState(current.startDate, current.endDate, today);
+      urgency = state === "overdue" || state === "warning" ? state : null;
     } else {
       status = "free";
     }
@@ -451,13 +463,12 @@ export async function fetchAdminData() {
   // signed URL. Same for each document's storage_path. Resolved in one
   // batch after the main fetch rather than during it, so a slow/failing
   // signed-url call can't hold up everything else.
-  const unitsWithFiles = await Promise.all(
-    units.map(async (u) => ({
-      ...u,
-      photoDataUrl: await trySignedUrl(u.photoDataUrl),
-      documents: await Promise.all(u.documents.map(async (d) => ({ ...d, url: await trySignedUrl(d.storagePath) }))),
-    }))
-  );
+  const urls = await trySignedUrls(units.flatMap((u) => [u.photoDataUrl, ...u.documents.map((d) => d.storagePath)]));
+  const unitsWithFiles = units.map((u) => ({
+    ...u,
+    photoDataUrl: urls[u.photoDataUrl] || null,
+    documents: u.documents.map((d) => ({ ...d, url: urls[d.storagePath] || null })),
+  }));
 
   const requests = reqRes.data.map(mapRequisitionRow);
 
@@ -496,7 +507,7 @@ export async function uploadUnitPhoto(unitId, file) {
   const { data: existing } = await supabase.from("units").select("photo_url").eq("id", unitId).single();
   const oldPath = existing?.photo_url || null;
 
-  const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+  const ext = (file.name.includes(".") ? safeFileName(file.name.split(".").pop()) : "") || "jpg";
   const path = `photos/${unitId}/${Date.now()}.${ext}`;
   const { error: uploadError } = await supabase.storage.from(UNIT_FILES_BUCKET).upload(path, file, { upsert: true });
   if (uploadError) throw uploadError;
@@ -510,7 +521,7 @@ export async function uploadUnitPhoto(unitId, file) {
 }
 
 export async function addUnitDocument(unitId, file, name, type, addedByUserId) {
-  const path = `documents/${unitId}/${Date.now()}-${file.name}`;
+  const path = `documents/${unitId}/${Date.now()}-${safeFileName(file.name)}`;
   const { error: uploadError } = await supabase.storage.from(UNIT_FILES_BUCKET).upload(path, file, { upsert: true });
   if (uploadError) throw uploadError;
   const { error } = await supabase
@@ -536,7 +547,9 @@ export async function removeUnitDocument(docId) {
 /* Writes                                                                  */
 /* ---------------------------------------------------------------------- */
 
-export async function saveUnit(data) {
+/* isNew inserts (so an ID that's already taken fails instead of silently
+   overwriting that unit); otherwise updates the existing row. */
+export async function saveUnit(data, { isNew = false } = {}) {
   const row = {
     id: data.id,
     type: data.type,
@@ -552,7 +565,6 @@ export async function saveUnit(data) {
     ballasts: data.ballasts,
     co2_control: !!data.co2Control,
     dimming_control: !!data.dimmingControl,
-    available_light_cycles: data.availableLightCycles || null,
     install_date: nullIfEmpty(data.installDate),
     temp_min: data.tempRange[0],
     temp_max: data.tempRange[1],
@@ -565,8 +577,13 @@ export async function saveUnit(data) {
     set_light_intensity: numOrNull(data.settings?.lightIntensity),
   };
   if (data.status !== undefined) row.is_out_of_service = data.status === "service";
-  const { error } = await supabase.from("units").upsert(row);
-  if (error) throw error;
+  const { error } = isNew
+    ? await supabase.from("units").insert(row)
+    : await supabase.from("units").update(row).eq("id", data.id);
+  if (error) {
+    if (isNew && error.code === "23505") throw new Error(`A unit with the ID "${data.id}" already exists.`);
+    throw error;
+  }
 }
 
 export async function updateUnitNotes(unitId, notes) {
@@ -791,42 +808,14 @@ export async function submitRequisition(payload, researcherId) {
   if (error) throw error;
 }
 
-/* Bookings denormalize a snapshot of these fields off their requisition at
-   approval time (see decideRequisition below) - occupancy, the dashboard
-   timeline, and everything else that reads unit.occupant/unit.bookings
-   reads that snapshot, not the requisition directly. Shared here so
-   editing a requisition's dates (or researcher/temp/etc.) after approval
-   actually propagates instead of silently going stale. */
-function bookingFieldsFromRequisition(req) {
-  return {
-    researcher_name: req.researcher,
-    role: nullIfEmpty(req.role),
-    // Same fallback as requisitionFieldsToRow - an admin edit only carries the
-    // lab group's name, not a resolved id, so this must also check the cache.
-    lab_group_id: req.labGroupId ?? labGroupCache.idByName[req.labGroup] ?? null,
-    project_title: req.projectTitle,
-    discipline: req.discipline,
-    species: req.species || [],
-    set_temp: numOrNull(req.setTemp),
-    night_temp: numOrNull(req.nightTemp),
-    set_humidity: numOrNull(req.setHumidity),
-    light_cycle: nullIfEmpty(req.lightCycle),
-    dawn_time: nullIfEmpty(req.dawnTime),
-    dusk_time: nullIfEmpty(req.duskTime),
-    start_date: req.startDate,
-    end_date: req.endDate,
-  };
-}
-
+/* A requisition's booking is a denormalized snapshot of it (occupancy, the
+   timeline and the unit tiles read bookings). It's kept in sync by the
+   sync_booking_from_requisition() trigger whenever an approved requisition
+   is written - so approving, editing and moving a requisition below are
+   each one write, and the booking can't be left half-updated. */
 export async function editRequisition(reqId, updates) {
   const { error } = await supabase.from("requisitions").update(requisitionFieldsToRow(updates)).eq("id", reqId);
   if (error) throw error;
-  // No-op (updates zero rows) if this requisition was never approved.
-  const { error: bookingError } = await supabase
-    .from("bookings")
-    .update(bookingFieldsFromRequisition(updates))
-    .eq("requisition_id", reqId);
-  if (bookingError) throw bookingError;
 }
 
 /* Deliberately separate from requisitionFieldsToRow/editRequisition - this
@@ -852,49 +841,34 @@ export async function amendRequisition(reqId, payload) {
   if (error) throw error;
 }
 
-/* An amended, previously approved requisition still has its booking -
-   approving the amendment updates that booking (unit and details) rather
-   than adding a second one, and declining it restores the original
-   approved version via decline_amendment(). */
+/* Approving sets the unit; the trigger creates the booking (or, for an
+   amended requisition that was already approved, updates its existing one).
+   Declining an amendment to an approved requisition restores the approved
+   version via decline_amendment() instead. */
 export async function decideRequisition(req, decision, unitId, decidedByUserId) {
   if (decision === "declined" && req.amendedPrevious?.status === "approved") {
     const { error } = await supabase.rpc("decline_amendment", { p_requisition_id: req.id });
     if (error) throw error;
     return;
   }
-  if (decision === "approved" && unitId) {
-    const { data: existing, error: findError } = await supabase.from("bookings").select("id").eq("requisition_id", req.id);
-    if (findError) throw findError;
-    const bookingRow = { unit_id: unitId, ...bookingFieldsFromRequisition(req) };
-    const { error: bookingError } = existing.length
-      ? await supabase.from("bookings").update(bookingRow).eq("requisition_id", req.id)
-      : await supabase.from("bookings").insert({ ...bookingRow, requisition_id: req.id });
-    if (bookingError) throw bookingError;
-
-    const { error } = await supabase
-      .from("requisitions")
-      .update({ status: "approved", assigned_unit_id: unitId, decided_date: new Date().toISOString(), decided_by: decidedByUserId })
-      .eq("id", req.id);
-    if (error) throw error;
-  } else {
-    const { error } = await supabase
-      .from("requisitions")
-      .update({ status: "declined", assigned_unit_id: null, decided_date: new Date().toISOString(), decided_by: decidedByUserId })
-      .eq("id", req.id);
-    if (error) throw error;
-  }
+  const approved = decision === "approved" && unitId;
+  const { error } = await supabase
+    .from("requisitions")
+    .update({
+      status: approved ? "approved" : "declined",
+      assigned_unit_id: approved ? unitId : null,
+      decided_date: new Date().toISOString(),
+      decided_by: decidedByUserId,
+    })
+    .eq("id", req.id);
+  if (error) throw error;
 }
 
-/* Moves an already-approved requisition's booking to a different unit -
-   e.g. the originally assigned cabinet needs to go out of service, or was
-   simply the wrong pick. Updates both the requisition's assigned_unit_id
-   and its booking's unit_id together so occupancy correctly moves off the
-   old unit and onto the new one. */
+/* Moves an approved requisition to a different unit (e.g. the original
+   cabinet has to go out of service); its booking follows via the trigger. */
 export async function reassignRequisitionUnit(reqId, newUnitId) {
-  const { error: reqError } = await supabase.from("requisitions").update({ assigned_unit_id: newUnitId }).eq("id", reqId);
-  if (reqError) throw reqError;
-  const { error: bookingError } = await supabase.from("bookings").update({ unit_id: newUnitId }).eq("requisition_id", reqId);
-  if (bookingError) throw bookingError;
+  const { error } = await supabase.from("requisitions").update({ assigned_unit_id: newUnitId }).eq("id", reqId);
+  if (error) throw error;
 }
 
 /* Does NOT delete the booking row - completing a requisition is what makes

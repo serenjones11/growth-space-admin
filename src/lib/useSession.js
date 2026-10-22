@@ -3,11 +3,14 @@ import { supabase } from "./supabaseClient";
 
 /* Minimal auth hook - the temporary stand-in for Entra ID SSO. Tracks the
    Supabase auth session and the matching `profiles` row (role/lab group).
-   session === undefined means "still checking"; null means "signed out". */
+   session === undefined means "still checking"; null means "signed out".
+   profileError is set if the profile couldn't be loaded (e.g. offline), so
+   the app can say so instead of quietly treating an admin as a visitor. */
 export function useSession() {
   const [session, setSession] = useState(undefined);
   const [profile, setProfile] = useState(null);
-  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileFor, setProfileFor] = useState(null); // user id the profile was loaded for
+  const [profileError, setProfileError] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
@@ -17,28 +20,35 @@ export function useSession() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Keyed on the user id, not the session object: Supabase hands out a new
+  // session object on every token refresh (about hourly), and refetching -
+  // with the loading screen that implies - would unmount the whole admin
+  // app and throw away whatever form or modal was open.
+  const userId = session?.user?.id ?? null;
   useEffect(() => {
     let cancelled = false;
-    if (!session) {
+    if (!userId) {
       setProfile(null);
+      setProfileError(null);
+      setProfileFor(null);
       return;
     }
-    setProfileLoading(true);
     supabase
       .from("profiles")
       .select("*")
-      .eq("id", session.user.id)
+      .eq("id", userId)
       .single()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
         if (cancelled) return;
         setProfile(data || null);
-        setProfileLoading(false);
+        setProfileError(error ? error.message : null);
+        setProfileFor(userId);
       });
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [userId]);
 
-  const authLoading = session === undefined || (!!session && profileLoading);
-  return { session, profile, authLoading };
+  const authLoading = session === undefined || (!!userId && profileFor !== userId);
+  return { session, profile, profileError, authLoading };
 }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import {
   LayoutDashboard,
@@ -25,12 +25,10 @@ import {
   Maximize2,
   Minimize2,
   ArrowUpRight,
-  ArrowDownRight,
   ChevronRight,
   ChevronLeft,
   ChevronDown,
   ShieldAlert,
-  FlaskConical,
   AlertTriangle,
   Clock,
   History,
@@ -41,29 +39,17 @@ import {
   UserPlus,
   UserMinus,
   FileText,
-  ImagePlus,
   Trash2,
   CalendarPlus,
   Refrigerator,
   Calendar,
-  Settings,
   Menu,
 } from "lucide-react";
-import {
-  ComposedChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
 import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
 import * as api from "./lib/api";
 import { downloadFullBackup } from "./lib/backup";
+import { bookingDateState, daysUntil as daysFrom, fmtGB, localISODate, rangesOverlap, today } from "./lib/dates";
 
 /* ---------------------------------------------------------------------- */
 /* Design tokens - dark sidebar / light workspace, warm-green readouts     */
@@ -199,8 +185,9 @@ const DISCIPLINE_META = {
   insect: { label: "Insect Sciences", icon: Bug, color: "#A6763F" },
 };
 
-const MODELS = ["E-15", "AR-66", "MLR-352H", "GC-8", "TC-30"];
-const LIGHT_CYCLES = ["8/16 h (L/D)", "12/12 h (L/D)", "16/8 h (L/D)", "24 h dark", "Continuous light"];
+// Spelt exactly as the seeded light_cycle_options rows, so a form filled in
+// before the live list arrives still saves a value that's on the list.
+const LIGHT_CYCLES = ["8/16h (L/D)", "12/12h (L/D)", "16/8h (L/D)", "24h dark", "Continuous light"];
 // The admin-managed light cycle list (light_cycle_options), refreshed with
 // the admin data on every reload; LIGHT_CYCLES is only the fallback until
 // it loads. The public request form fetches its own copy.
@@ -220,11 +207,6 @@ function fmtTileTemp(dayTemp, nightTemp) {
   if (isSet(dayTemp)) return `${dayTemp}°C`;
   return isSet(nightTemp) ? `${nightTemp}°C night` : "-";
 }
-function fmtEnv(dayTemp, nightTemp, humidity) {
-  const temps = fmtTemps(dayTemp, nightTemp);
-  const parts = [temps !== "Not specified" ? temps : null, isSet(humidity) ? `${humidity}% RH` : null].filter(Boolean);
-  return parts.length ? parts.join(" / ") : "Not specified";
-}
 function fmtDawnDusk(dawn, dusk) {
   const parts = [dawn ? `Dawn ${dawn}` : null, dusk ? `Dusk ${dusk}` : null].filter(Boolean);
   return parts.length ? parts.join(" · ") : "Not specified";
@@ -240,23 +222,16 @@ const FLOOR_LABEL = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b",
 /* Strips everything but letters/digits and lowercases - lets a search
    match regardless of hyphens/spaces/case ("GC01" finds "GC-01"). */
 function normalizeSearch(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
-function addDays(base, days) { const d = new Date(base); d.setDate(d.getDate() + days); return d; }
-function fmt(date) { return date.toISOString().slice(0, 10); }
-/* British date display - "YYYY-MM-DD" (or a full timestamp, date-only
-   portion taken) -> "DD/MM/YYYY" */
-function fmtGB(iso) {
-  if (!iso) return "-";
-  const [y, m, d] = String(iso).slice(0, 10).split("-");
-  if (!y || !m || !d) return iso;
-  return `${d}/${m}/${y}`;
-}
-/* Real "today", truncated to midnight so date-only comparisons (booking
-   start/end dates) behave the same way they did against the old hardcoded
-   mock date. */
-const TODAY = new Date(new Date().toISOString().slice(0, 10));
-/* Do two date ranges (inclusive) overlap? */
-function rangesOverlap(aStart, aEnd, bStart, bEnd) {
-  return new Date(aStart) <= new Date(bEnd) && new Date(bStart) <= new Date(aEnd);
+/* Today's local date at UTC midnight - the same form `new Date("YYYY-MM-DD")`
+   gives booking dates, so they compare exactly (see src/lib/dates.js).
+   Reassigned by refreshToday() when the date rolls over, so a tab left open
+   overnight doesn't keep showing yesterday's statuses. */
+let TODAY = today();
+function refreshToday() {
+  const next = today();
+  if (next.getTime() === TODAY.getTime()) return false;
+  TODAY = next;
+  return true;
 }
 /* Is a unit available for a given requested date window - even if it's not free "right now".
    Reftech rooms are multi-occupancy by design (see canAssign/isClash in
@@ -328,7 +303,7 @@ const DOCUMENT_TYPES = ["Manual", "Certificate", "Risk Assessment"];
 /* ---------------------------------------------------------------------- */
 /* Status helpers - unify cabinet (single occupant) & reftech (bookings)  */
 /* ---------------------------------------------------------------------- */
-function daysUntil(dateStr) { return Math.round((new Date(dateStr) - TODAY) / 86400000); }
+function daysUntil(dateStr) { return daysFrom(dateStr, TODAY); }
 
 /* For reftech rooms: a booking counts as "current" once it's started,
    regardless of whether its end date has passed - it only stops being
@@ -382,10 +357,7 @@ function displayStatus(unit) {
   if (unit.type === "reftech") {
     const cb = currentBooking(unit);
     if (!cb) return { key: "free", ...STATUS_META.free };
-    const left = daysUntil(cb.endDate);
-    if (left < 0) return { key: "overdue", label: "Overdue", color: "var(--overdue)", soft: "var(--overdue-soft)" };
-    if (left <= 2) return { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" };
-    return { key: "occupied", ...STATUS_META.occupied };
+    return bookingStatus(cb);
   }
 
   if (unit.status === "occupied" && unit.urgency === "overdue")
@@ -401,10 +373,10 @@ function displayStatus(unit) {
    dashboard timeline, which (unlike displayStatus) needs to plot upcoming
    bookings too, not just whichever one is current right now. */
 function bookingStatus(booking) {
-  if (new Date(booking.startDate) > TODAY) return { key: "upcoming", label: "Upcoming", color: "#009E73", soft: "var(--accent-soft)" };
-  const left = daysUntil(booking.endDate);
-  if (left < 0) return { key: "overdue", label: "Overdue", color: "var(--overdue)", soft: "var(--overdue-soft)" };
-  if (left <= 2) return { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" };
+  const state = bookingDateState(booking.startDate, booking.endDate, TODAY);
+  if (state === "upcoming") return { key: "upcoming", label: "Upcoming", color: "#009E73", soft: "var(--accent-soft)" };
+  if (state === "overdue") return { key: "overdue", label: "Overdue", color: "var(--overdue)", soft: "var(--overdue-soft)" };
+  if (state === "warning") return { key: "warning", label: "Ending soon", color: "var(--warning)", soft: "var(--warning-soft)" };
   return { key: "occupied", ...STATUS_META.occupied };
 }
 
@@ -505,35 +477,6 @@ function DisciplineIconPill({ discipline }) {
     </span>
   );
 }
-function DisciplineBadge({ discipline, size = "sm" }) {
-  const d = DISCIPLINE_META[discipline];
-  const Icon = d.icon;
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full font-semibold"
-      style={{
-        color: d.color, background: `${d.color}1A`,
-        padding: size === "sm" ? "2px 7px" : "3px 9px",
-        fontSize: size === "sm" ? 10 : 12,
-      }}
-    >
-      <Icon size={size === "sm" ? 10 : 12} />
-      {d.label}
-    </span>
-  );
-}
-function MiniGauge({ icon: Icon, value, unit, min, max }) {
-  const pct = Math.max(4, Math.min(100, ((value - min) / (max - min)) * 100));
-  return (
-    <div className="flex items-center gap-1.5">
-      <Icon size={12} style={{ color: "var(--ink-faint)" }} />
-      <div className="w-10 h-1 rounded-full overflow-hidden" style={{ background: "var(--surface)" }}>
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "var(--accent)" }} />
-      </div>
-      <span className="gc-mono text-[11px]" style={{ color: "var(--ink-soft)" }}>{value}{unit}</span>
-    </div>
-  );
-}
 function Field({ label, children }) {
   return (
     <label className="block">
@@ -545,7 +488,6 @@ function Field({ label, children }) {
 
 const WEEKDAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
 function isSameDate(a, b) { return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
-function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 
 /* Custom calendar popup replacing the browser's native type="date" input -
    that native control can't be restyled beyond its edges (the actual
@@ -557,12 +499,15 @@ function isoDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padS
    call site works unmodified. */
 function DateField({ label, value, onChange }) {
   const [open, setOpen] = useState(false);
+  // Local-time dates throughout: the grid is built from local calendar days.
   const selected = value ? new Date(value + "T00:00:00") : null;
-  const [viewDate, setViewDate] = useState(selected || TODAY);
+  const now = new Date();
+  const [viewDate, setViewDate] = useState(selected || now);
 
-  useEffect(() => { if (open) setViewDate(selected || TODAY); }, [open]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reset the month shown only when (re)opening
+  useEffect(() => { if (open) setViewDate(selected || new Date()); }, [open]);
 
-  const pick = (d) => { onChange({ target: { value: isoDate(d) } }); setOpen(false); };
+  const pick = (d) => { onChange({ target: { value: localISODate(d) } }); setOpen(false); };
 
   const monthStart = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
   const leadingBlanks = (monthStart.getDay() + 6) % 7; // week starts Monday
@@ -570,7 +515,11 @@ function DateField({ label, value, onChange }) {
   const cells = [...Array(leadingBlanks).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
 
   return (
-    <Field label={label}>
+    // A div, not <Field>: Field is a <label>, and when a picked day's button
+    // disappears as the calendar closes, the label forwards that click to
+    // the trigger button and the calendar pops straight back open.
+    <div className="block">
+      <span className="text-xs font-medium block mb-1" style={{ color: "var(--ink-soft)" }}>{label}</span>
       <div className="relative">
         <button
           type="button"
@@ -601,7 +550,7 @@ function DateField({ label, value, onChange }) {
                   if (d === null) return <span key={i} />;
                   const cellDate = new Date(viewDate.getFullYear(), viewDate.getMonth(), d);
                   const isSelected = isSameDate(cellDate, selected);
-                  const isToday = isSameDate(cellDate, TODAY);
+                  const isToday = isSameDate(cellDate, now);
                   return (
                     <button
                       key={i} type="button" onClick={() => pick(cellDate)}
@@ -618,14 +567,14 @@ function DateField({ label, value, onChange }) {
                   );
                 })}
               </div>
-              <button type="button" onClick={() => pick(TODAY)} className="w-full mt-2.5 text-xs font-bold py-1.5 rounded-lg" style={{ background: "var(--surface-soft)", color: "var(--accent-dark)" }}>
+              <button type="button" onClick={() => pick(new Date())} className="w-full mt-2.5 text-xs font-bold py-1.5 rounded-lg" style={{ background: "var(--surface-soft)", color: "var(--accent-dark)" }}>
                 Today
               </button>
             </div>
           </>
         )}
       </div>
-    </Field>
+    </div>
   );
 }
 
@@ -943,9 +892,9 @@ function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "
   // open instead of making an admin scroll down from the far end every time.
   useEffect(() => {
     if (!open) return;
-    const targetYear = value ? value.slice(0, 4) : String(TODAY.getFullYear());
+    const targetYear = value ? value.slice(0, 4) : String(TODAY.getUTCFullYear());
     yearRefs.current[targetYear]?.scrollIntoView({ block: "start" });
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- scroll only when opening
 
   return (
     <div className="relative">
@@ -1033,11 +982,13 @@ function LabUsageTrend({ units, labUsageHistory }) {
   const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
   const xFor = (i) => PAD_L + (labels.length === 1 ? 0 : (i / (labels.length - 1)) * plotW);
   const yFor = (v) => PAD_T + plotH - (v / maxV) * plotH;
-  const labelStep = labels.length > 18 ? 3 : labels.length > 12 ? 2 : 1;
+  // Roughly a dozen month labels however wide the range (up to ~78 years).
+  const labelStep = Math.max(1, Math.ceil(labels.length / 12));
 
   const ranked = LAB_GROUPS.map((lab) => ({ lab, current: currentCounts[lab] })).sort((a, b) => b.current - a.current);
   const top = ranked[0];
-  const avg = ranked.reduce((s, r) => s + r.current, 0) / ranked.length;
+  const avg = ranked.length ? ranked.reduce((s, r) => s + r.current, 0) / ranked.length : 0;
+  const aboveAvg = top && avg > 0 && top.current > avg ? ` - ${Math.round(((top.current - avg) / avg) * 100)}% above the group average (${avg.toFixed(1)})` : "";
 
   return (
     <div className={isFullScreen ? "fixed inset-0 z-50 p-6 gc-scroll overflow-y-auto" : ""} style={isFullScreen ? { background: "var(--bg)" } : undefined}>
@@ -1062,7 +1013,9 @@ function LabUsageTrend({ units, labUsageHistory }) {
       </div>
 
       <p className="text-xs mt-2 mb-1" style={{ color: "var(--ink-soft)" }}>
-        Highest right now: <strong style={{ color: "var(--ink)" }}>{piDisplay(top.lab)}</strong> at {top.current} units - {avg > 0 ? `${Math.round(((top.current - avg) / avg) * 100)}% above` : ""} the group average ({avg.toFixed(1)}).
+        {top && top.current > 0 ? (
+          <>Highest right now: <strong style={{ color: "var(--ink)" }}>{piDisplay(top.lab)}</strong> at {top.current} unit{top.current !== 1 ? "s" : ""}{aboveAvg}.</>
+        ) : "No units are currently held by any lab group."}
       </p>
 
       <div className="relative">
@@ -1589,24 +1542,26 @@ function assignLanes(items) {
    generated independently of any single data source (unlike
    labUsageHistory's keys) since the timeline spans arbitrary past/future
    scheduling, not just months with recorded usage. */
+/* Month maths in UTC, like TODAY and booking dates (see src/lib/dates.js). */
+function monthKeyOf(d) { return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; }
+function monthKeyToDate(key) {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 1));
+}
+function addMonths(d, n) { return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1)); }
+const MONTH_LABEL = { month: "short", year: "numeric", timeZone: "UTC" };
 function buildMonthRange(yearsBack, yearsForward) {
   const keys = [], fullLabels = [];
-  let d = new Date(TODAY.getFullYear() - yearsBack, TODAY.getMonth(), 1);
-  const end = new Date(TODAY.getFullYear() + yearsForward, TODAY.getMonth(), 1);
+  let d = addMonths(TODAY, -12 * yearsBack);
+  const end = addMonths(TODAY, 12 * yearsForward);
   while (d <= end) {
-    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
-    fullLabels.push(d.toLocaleDateString("en-GB", { month: "short", year: "numeric" }));
-    d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    keys.push(monthKeyOf(d));
+    fullLabels.push(d.toLocaleDateString("en-GB", MONTH_LABEL));
+    d = addMonths(d, 1);
   }
   return { keys, fullLabels };
 }
-const TIMELINE_MONTH_RANGE = buildMonthRange(5, 2100 - TODAY.getFullYear());
-function monthKeyOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
-function monthKeyToDate(key) {
-  const [y, m] = key.split("-").map(Number);
-  return new Date(y, m - 1, 1);
-}
-function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, 1); }
+const TIMELINE_MONTH_RANGE = buildMonthRange(5, 2100 - TODAY.getUTCFullYear());
 
 const TIMELINE_LANE_H = 28, TIMELINE_LANE_GAP = 4;
 
@@ -1628,8 +1583,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
   const handleTo = (key) => { setToKey(key); if (TIMELINE_MONTH_RANGE.keys.indexOf(key) < TIMELINE_MONTH_RANGE.keys.indexOf(fromKey)) setFromKey(key); };
 
   const rangeStart = monthKeyToDate(fromKey);
-  const toMonth = monthKeyToDate(toKey);
-  const rangeEnd = new Date(toMonth.getFullYear(), toMonth.getMonth() + 1, 0); // last day of the "to" month
+  const rangeEnd = new Date(addMonths(monthKeyToDate(toKey), 1) - 86400000); // last day of the "to" month
   const totalMs = rangeEnd - rangeStart;
   const pct = (date) => Math.max(0, Math.min(100, ((date - rangeStart) / totalMs) * 100));
 
@@ -1639,13 +1593,12 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
   const tickEvery = spanMonths > 24 ? 4 : spanMonths > 12 ? 2 : 1;
   const axisMarks = [];
   {
-    let cur = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1), i = 0;
+    let cur = rangeStart, i = 0;
     while (cur <= rangeEnd) {
       if (i % tickEvery === 0) {
-        const d = cur < rangeStart ? rangeStart : cur;
-        axisMarks.push({ label: d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }), pct: pct(d) });
+        axisMarks.push({ label: cur.toLocaleDateString("en-GB", { month: "short", year: "2-digit", timeZone: "UTC" }), pct: pct(cur) });
       }
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      cur = addMonths(cur, 1);
       i++;
     }
   }
@@ -1739,7 +1692,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
             const width = Math.max(1.2, pct(end) - left);
             const top = lane * (TIMELINE_LANE_H + TIMELINE_LANE_GAP);
             const req = requests[reqIndex];
-            const rowKey = u.id + reqIndex;
+            const rowKey = `${u.id}:${reqIndex}`;
             const isHovered = hoveredRow === rowKey;
             return (
               <div key={rowKey}>
@@ -1964,7 +1917,6 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
 /* Inventory / map                                                        */
 /* ---------------------------------------------------------------------- */
 function UnitCard({ unit, onClick }) {
-  const s = displayStatus(unit);
   const isReftech = unit.type === "reftech";
   const upcoming = upcomingBookings(unit);
   // Cabinets are meant to only hold one booking at a time - more than one
@@ -2031,12 +1983,7 @@ function UnitCard({ unit, onClick }) {
 
       {/* tags - discipline only shows when occupied; it's not a fixed unit property */}
       <div className="flex flex-wrap gap-1.5 mb-3">
-        {disciplines.map((k) => {
-          const dm = DISCIPLINE_META[k];
-          return (
-            <DisciplineIconPill key={k} discipline={k} />
-          );
-        })}
+        {disciplines.map((k) => <DisciplineIconPill key={k} discipline={k} />)}
         {unit.co2Control && <span className="gc-tag" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border }}>CO₂</span>}
         {unit.dimmingControl && <span className="gc-tag" style={{ background: CATEGORY_GREY.bg, color: CATEGORY_GREY.ink, borderColor: CATEGORY_GREY.border }}>Dimming</span>}
       </div>
@@ -2079,6 +2026,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
   // last picked, not whatever filter a dashboard tile first opened it with.
   useEffect(() => {
     if (onFilterChange) onFilterChange({ query, status: statusFilter, type: typeFilter, discipline: disciplineFilter, labGroup: labGroupFilter, floor: floorFilter });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onFilterChange is a state setter
   }, [query, statusFilter, typeFilter, disciplineFilter, labGroupFilter, floorFilter]);
 
   const cabinetCount = units.filter((u) => u.type === "cabinet").length;
@@ -2216,14 +2164,6 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
 /* ---------------------------------------------------------------------- */
 /* Unit detail drawer / full page + editable service log                  */
 /* ---------------------------------------------------------------------- */
-function SpecRow({ label, value }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: "var(--ink-faint)" }}>{label}</div>
-      <div className="text-[14px] font-bold mt-1" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{value}</div>
-    </div>
-  );
-}
 /* Plain grey-caps label, no underline - used for every section header in the unit modal */
 function SectionLabel({ children }) {
   return <h3 className="gc-display text-[13px] font-bold" style={{ color: "var(--ink)" }}>{children}</h3>;
@@ -2300,13 +2240,14 @@ function EnvironmentControlsCard({ unit }) {
   );
 }
 
-function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCategory, onRemoveCategory }) {
+function ServiceLogEditor({ unit, onUpdate, categories, onAddCategory, onRemoveCategory }) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [manageOpen, setManageOpen] = useState(false);
   const [newCat, setNewCat] = useState("");
-  const [date, setDate] = useState(fmt(TODAY));
-  const [category, setCategory] = useState(categories[0]);
+  const [date, setDate] = useState(localISODate());
+  const [category, setCategory] = useState(categories[0] || "");
+  const [confirmingRemove, setConfirmingRemove] = useState(null); // entry awaiting delete confirmation
   const [status, setStatus] = useState("completed");
   const [engineer, setEngineer] = useState("");
   const [cost, setCost] = useState("");
@@ -2314,11 +2255,12 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
 
   const resetForm = () => {
     setAdding(false); setEditingId(null); setEngineer(""); setNotes(""); setCost(""); setManageOpen(false);
-    setDate(fmt(TODAY)); setCategory(categories[0]); setStatus("completed");
+    setDate(localISODate()); setCategory(categories[0] || ""); setStatus("completed");
   };
 
+  // The category list can load (or lose the chosen entry) after the form opened.
   const buildEntry = (id) => ({
-    id, date, category, status, engineer, notes,
+    id, date, category: categories.includes(category) ? category : categories[0] || "", status, engineer, notes,
     cost: cost === "" ? null : Number(cost),
   });
 
@@ -2336,7 +2278,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
   const logAsDone = (entry) => {
     startEdit(entry);
     setStatus("completed");
-    setDate(fmt(TODAY));
+    setDate(localISODate());
   };
   const saveEdit = () => {
     if (!notes.trim() || (status === "completed" && !engineer.trim())) return;
@@ -2347,6 +2289,8 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
     resetForm();
   };
   const removeEntry = (id) => onUpdate(unit.serviceLog.filter((e) => e.id !== id));
+  // Same check as the add form's Save button: notes, plus a contractor once done.
+  const canSave = !!notes.trim() && (status !== "completed" || !!engineer.trim());
 
   return (
     <section>
@@ -2412,7 +2356,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
           <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="gc-input" placeholder="What was done, or what's planned…" /></Field>
           <Field label="Cost (optional)"><input type="number" min={0} value={cost} onChange={(e) => setCost(e.target.value)} className="gc-input" placeholder="£" /></Field>
           <div className="flex gap-2 pt-1">
-            <button onClick={editingId ? saveEdit : addEntry} className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
+            <button disabled={!canSave} title={canSave ? undefined : "Add notes, and a contractor for completed work"} onClick={editingId ? saveEdit : addEntry} className="flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg disabled:opacity-40" style={{ background: "var(--btn-accent)", color: "white" }}>
               <Save size={13} /> {editingId ? "Save changes" : "Save entry"}
             </button>
             <button onClick={resetForm} className="text-sm font-semibold px-3 py-2 rounded-lg" style={{ color: "var(--ink-soft)" }}>Cancel</button>
@@ -2457,7 +2401,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
                 <td className="py-2.5 align-top">
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 justify-end">
                     <button onClick={() => startEdit(entry)} className="p-1" style={{ color: "var(--ink-faint)" }} title="Edit entry"><Pencil size={13} /></button>
-                    <button onClick={() => removeEntry(entry.id)} className="p-1" style={{ color: "var(--ink-faint)" }} title="Delete entry"><Trash2 size={13} /></button>
+                    <button onClick={() => setConfirmingRemove(entry)} className="p-1" style={{ color: "var(--ink-faint)" }} title="Delete entry"><Trash2 size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -2466,6 +2410,14 @@ function ServiceLogEditor({ unit, onUpdate, categories, categoryColors, onAddCat
         </tbody>
       </table>
       {unit.serviceLog.length === 0 && <p className="text-sm py-2" style={{ color: "var(--ink-faint)" }}>No service history yet.</p>}
+      {confirmingRemove && (
+        <ConfirmDialog
+          title="Delete this maintenance entry?"
+          message={`${fmtGB(confirmingRemove.date)} · ${confirmingRemove.category || "Maintenance"}${confirmingRemove.notes ? ` - ${confirmingRemove.notes}` : ""}. This can't be undone.`}
+          onCancel={() => setConfirmingRemove(null)}
+          onConfirm={() => { removeEntry(confirmingRemove.id); setConfirmingRemove(null); }}
+        />
+      )}
     </section>
   );
 }
@@ -2477,6 +2429,7 @@ function DocumentsSection({ unit, onAdd, onRemove }) {
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const fileInputRef = useRef(null);
+  const [confirmingRemove, setConfirmingRemove] = useState(null); // document awaiting delete confirmation
 
   const handleFile = (e) => {
     const f = e.target.files && e.target.files[0];
@@ -2495,7 +2448,6 @@ function DocumentsSection({ unit, onAdd, onRemove }) {
       setBusy(false);
     }
   };
-  const removeDoc = (id) => onRemove(id);
   const openDoc = (d) => { if (d.url) window.open(d.url, "_blank", "noopener,noreferrer"); };
 
   return (
@@ -2530,11 +2482,19 @@ function DocumentsSection({ unit, onAdd, onRemove }) {
               <div className="text-[13px] font-medium truncate" style={{ color: d.url ? "var(--accent-dark)" : "var(--ink)" }}>{d.name}</div>
               <div className="text-[11.5px]" style={{ color: "var(--ink-faint)" }}>{d.type} · {d.addedBy} · {fmtGB(d.date)}{!d.url ? " · no file attached" : ""}</div>
             </button>
-            <button onClick={() => removeDoc(d.id)} className="opacity-0 group-hover:opacity-100 p-1 flex-shrink-0" style={{ color: "var(--ink-faint)" }} title="Remove"><Trash2 size={13} /></button>
+            <button onClick={() => setConfirmingRemove(d)} className="opacity-0 group-hover:opacity-100 p-1 flex-shrink-0" style={{ color: "var(--ink-faint)" }} title="Remove"><Trash2 size={13} /></button>
           </div>
         ))}
         {unit.documents.length === 0 && <p className="text-sm py-2" style={{ color: "var(--ink-faint)" }}>No documents attached yet.</p>}
       </div>
+      {confirmingRemove && (
+        <ConfirmDialog
+          title={`Delete "${confirmingRemove.name}"?`}
+          message="This removes the document and its file from this unit. This can't be undone."
+          onCancel={() => setConfirmingRemove(null)}
+          onConfirm={() => { onRemove(confirmingRemove.id); setConfirmingRemove(null); }}
+        />
+      )}
     </section>
   );
 }
@@ -2692,10 +2652,9 @@ function BookingCard({ booking, onOpenRequisition }) {
 }
 
 function UnitDetailContent({
-  unit, onEdit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, onAssignRequisition, requests = [], onOpenRequisition, goRequisitions,
-  categories, categoryColors, onAddCategory, onRemoveCategory,
+  unit, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, onAssignRequisition, requests = [], onOpenRequisition, goRequisitions,
+  categories, onAddCategory, onRemoveCategory,
 }) {
-  const s = displayStatus(unit);
   const isReftech = unit.type === "reftech";
   const current = currentBookingsList(unit);
   const upcoming = upcomingBookings(unit);
@@ -2834,7 +2793,7 @@ function UnitDetailContent({
       <NotesEditor label="Notes" value={unit.notes} onSave={(text) => onUpdateNotes(unit.id, text)} placeholder="General notes about this unit…" />
       <ServiceLogEditor
         unit={unit} onUpdate={(log) => onUpdateServiceLog(unit.id, log)}
-        categories={categories} categoryColors={categoryColors} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
+        categories={categories} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
       />
       <DocumentsSection
         unit={unit}
@@ -2876,7 +2835,7 @@ function ConfirmDialog({ title, message, confirmLabel = "Delete", onConfirm, onC
   );
 }
 
-function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, onAssignRequisition, requests, onOpenRequisition, goRequisitions, categories, categoryColors, onAddCategory, onRemoveCategory }) {
+function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, onAssignRequisition, requests, onOpenRequisition, goRequisitions, categories, onAddCategory, onRemoveCategory }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!unit) return null;
 
@@ -2922,10 +2881,10 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
 
         <div className="px-4 sm:px-7 py-5 sm:py-6">
           <UnitDetailContent
-            unit={unit} onEdit={onEdit} onUpdateServiceLog={onUpdateServiceLog}
+            unit={unit} onUpdateServiceLog={onUpdateServiceLog}
             onAddDocument={onAddDocument} onRemoveDocument={onRemoveDocument} onUpdatePhoto={onUpdatePhoto} onUpdateNotes={onUpdateNotes} onAcknowledgeClash={onAcknowledgeClash} onAssignRequisition={onAssignRequisition}
             requests={requests} onOpenRequisition={onOpenRequisition} goRequisitions={goRequisitions}
-            categories={categories} categoryColors={categoryColors} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
+            categories={categories} onAddCategory={onAddCategory} onRemoveCategory={onRemoveCategory}
           />
         </div>
       </div>
@@ -2964,6 +2923,21 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
   const setSetting = (k) => (v) => setForm((f) => ({ ...f, settings: { ...(f.settings || {}), [k]: v } }));
   const settingInput = (k) => ({ type: "number", value: form.settings?.[k] ?? "", onChange: (e) => setSetting(k)(e.target.value), className: "gc-input", placeholder: "Not set" });
   const firstRoomFor = (floor, type) => (rooms.find((r) => r.floor === floor && r.type === type) || {}).name || "";
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  // Blocks the save with a message rather than letting the database (or a
+  // silently swapped-in default) decide. Empty number inputs read as "".
+  const validate = () => {
+    if (!isEdit && !form.id.trim()) return "Enter a cabinet / room ID.";
+    if (!form.room) return "Choose a room (or add one under Manage).";
+    if (!form.manufacturer) return "Choose a manufacturer (or add one under Manage).";
+    const nums = [form.tempMin, form.tempMax, form.humMin, form.humMax];
+    if (nums.some((v) => v === "" || Number.isNaN(Number(v)))) return "Fill in both ends of the temperature and humidity ranges.";
+    if (Number(form.tempMin) > Number(form.tempMax)) return "The temperature range's minimum is above its maximum.";
+    if (Number(form.humMin) > Number(form.humMax)) return "The humidity range's minimum is above its maximum.";
+    if (form.type === "cabinet" && (form.shelves === "" || Number(form.shelves) < 1)) return "Enter how many shelves the cabinet has.";
+    return "";
+  };
 
   return (
     // zIndex 58 - editing a unit is only ever triggered from inside
@@ -2985,16 +2959,23 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
         </div>
         <form
           className="p-5 space-y-4"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            onSave({
-              ...form,
-              id: isEdit ? unit.id : form.id || `GC-NEW-${Math.floor(Math.random() * 900 + 100)}`,
-              shelves: form.type === "reftech" ? null : Number(form.shelves),
-              tempRange: [Number(form.tempMin), Number(form.tempMax)],
-              humidityRange: [Number(form.humMin), Number(form.humMax)],
-              availableLightCycles: form.availableLightCycles || LIGHT_CYCLES,
-            });
+            const problem = validate();
+            setError(problem);
+            if (problem || saving) return;
+            setSaving(true);
+            try {
+              await onSave({
+                ...form,
+                id: isEdit ? unit.id : form.id.trim(),
+                shelves: form.type === "reftech" ? null : Number(form.shelves),
+                tempRange: [Number(form.tempMin), Number(form.tempMax)],
+                humidityRange: [Number(form.humMin), Number(form.humMax)],
+              }, { isNew: !isEdit });
+            } finally {
+              setSaving(false);
+            }
           }}
         >
           {!isEdit && (
@@ -3113,8 +3094,9 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
               onAdd={onAddLightCycle} onRename={onRenameLightCycle} onDelete={onDeleteLightCycle}
             />
           </div>
-          <button type="submit" className="w-full py-2.5 rounded-xl font-medium text-white" style={{ background: "var(--gradient)" }}>
-            {isEdit ? "Save changes" : "Add unit"}
+          {error && <p className="text-sm font-semibold" style={{ color: "var(--overdue)" }}>{error}</p>}
+          <button type="submit" disabled={saving} className="w-full py-2.5 rounded-xl font-medium text-white disabled:opacity-60" style={{ background: "var(--gradient)" }}>
+            {saving ? "Saving…" : isEdit ? "Save changes" : "Add unit"}
           </button>
         </form>
       </div>
@@ -3235,6 +3217,8 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
   // booking already on this requisition's assigned unit - e.g. a reftech
   // room genuinely can hold overlapping bookings by design, so this is
   // informational, letting the admin judge whether it's actually a problem.
+  const dateError = !form.startDate || !form.endDate ? "Both dates are required."
+    : form.endDate < form.startDate ? "The end date is before the start date." : "";
   const assignedUnit = req.assignedUnitId ? units.find((u) => u.id === req.assignedUnitId) : null;
   const clashes = assignedUnit && form.startDate && form.endDate
     ? (assignedUnit.bookings || []).filter((b) => b.requisitionId !== req.id && rangesOverlap(form.startDate, form.endDate, b.startDate, b.endDate))
@@ -3248,7 +3232,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
         <BoxLabel>Requester</BoxLabel>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
           <Field label="Name"><input value={form.researcher} onChange={set("researcher")} className="gc-input" /></Field>
-          <Field label="Role"><select value={form.role || ROLES[0]} onChange={set("role")} className="gc-input">{ROLES.map((r) => <option key={r}>{r}</option>)}</select></Field>
+          <Field label="Role"><select value={form.role || ""} onChange={set("role")} className="gc-input"><option value="">-</option>{ROLES.map((r) => <option key={r}>{r}</option>)}</select></Field>
           <Field label="Email"><input value={form.email} onChange={set("email")} className="gc-input" /></Field>
           <Field label="Emergency number"><input value={form.emergencyNumber || ""} onChange={set("emergencyNumber")} className="gc-input" /></Field>
           <Field label="PI/Supervisor">
@@ -3260,6 +3244,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
               onChange={(e) => { const lab = e.target.value; setForm((f) => ({ ...f, labGroup: lab, labGroupId: null, pi: PI_BY_LAB[lab] || "" })); }}
               className="gc-input"
             >
+              {!LAB_GROUPS.includes(form.labGroup) && <option value={form.labGroup || ""}>{form.pi || "-"}</option>}
               {LAB_GROUPS.map((l) => <option key={l} value={l}>{PI_BY_LAB[l] || l}</option>)}
             </select>
           </Field>
@@ -3288,7 +3273,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
               className="gc-input"
             />
           </Field>
-          {isPlant && <Field label="Containment level"><select value={form.containmentLevel || CONTAINMENT_LEVELS[0]} onChange={set("containmentLevel")} className="gc-input">{CONTAINMENT_LEVELS.map((c) => <option key={c}>{c}</option>)}</select></Field>}
+          {isPlant && <Field label="Containment level"><select value={form.containmentLevel || ""} onChange={set("containmentLevel")} className="gc-input"><option value="">-</option>{CONTAINMENT_LEVELS.map((c) => <option key={c}>{c}</option>)}</select></Field>}
           <div className="grid grid-cols-2 gap-3.5">
             <Field label="Day temp (°C)"><input type="number" min={0} max={60} value={form.setTemp ?? ""} onChange={setNum("setTemp")} className="gc-input" placeholder="Not specified" /></Field>
             <Field label="Night temp (°C)"><input type="number" min={0} max={60} value={form.nightTemp ?? ""} onChange={setNum("nightTemp")} className="gc-input" placeholder="Not specified" /></Field>
@@ -3349,8 +3334,9 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
         </div>
       </InfoBox>
 
+      {dateError && <p className="text-sm font-semibold" style={{ color: "var(--overdue)" }}>{dateError}</p>}
       <div className="flex gap-2 pt-1">
-        <button onClick={() => onSave(form)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--btn-accent)", color: "white" }}>
+        <button disabled={!!dateError} onClick={() => onSave(form)} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-40" style={{ background: "var(--btn-accent)", color: "white" }}>
           <Save size={14} /> Save changes
         </button>
         <button onClick={onCancel} className="text-sm font-semibold px-4 py-2.5 rounded-xl" style={{ color: "var(--ink-soft)" }}>Cancel</button>
@@ -3448,7 +3434,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                       </option>
                     ))}
                   </select>
-                  {windowCandidates.length === 0 && <p className="text-xs" style={{ color: "var(--overdue)" }}>No units match this request's type & discipline for the requested dates.</p>}
+                  {windowCandidates.length === 0 && <p className="text-xs" style={{ color: "var(--overdue)" }}>No units of this type are free for the requested dates.</p>}
                   <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
                     <button disabled={!chosenUnit} onClick={() => onDecide(index, "approved", chosenUnit)} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}>
@@ -3485,7 +3471,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                         ))}
                       </select>
                       {windowCandidates.filter((u) => u.id !== req.assignedUnitId).length === 0 && (
-                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units match this request's type & discipline for these dates.</p>
+                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units of this type are free for these dates.</p>
                       )}
                       <button
                         disabled={!reassignUnit}
@@ -3533,7 +3519,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
    jump to the full Requisitions page. */
 function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComplete, onRevert, onReassign, onDelete, onClose, onOpenFull, backToUnitId }) {
   // An amended, already-approved requisition keeps its unit unless changed.
-  const amendsApproval = req.status === "pending" && req.amendedPrevious?.status === "approved";
+  const amendsApproval = req?.status === "pending" && req.amendedPrevious?.status === "approved";
   const [chosenUnit, setChosenUnit] = useState(amendsApproval ? req.assignedUnitId || "" : "");
   const [editing, setEditing] = useState(false);
   const [reassigning, setReassigning] = useState(false);
@@ -3638,7 +3624,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                         ))}
                       </select>
                       {windowCandidates.filter((u) => u.id !== req.assignedUnitId).length === 0 && (
-                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units match this request's type & discipline for these dates.</p>
+                        <p className="text-xs" style={{ color: "var(--overdue)" }}>No other units of this type are free for these dates.</p>
                       )}
                       <button
                         disabled={!reassignUnit}
@@ -3791,7 +3777,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
                 <div className="text-xs font-bold mb-2" style={{ color: g.key === "amended" ? "var(--overdue)" : "var(--ink-soft)" }}>{g.title} ({g.items.length})</div>
                 <div className="space-y-3">
                   {g.items.map(({ r, i }) => (
-                    <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
+                    <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
                   ))}
                 </div>
               </div>
@@ -3802,7 +3788,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
             <SectionLabel>Current ({ongoing.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {ongoing.map(({ r, i }) => (
-                <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
+                <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
               ))}
               {ongoing.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>No approved requisitions currently in progress.</p>}
             </div>
@@ -3829,7 +3815,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           </div>
           <div className="space-y-3">
             {filteredHistoric.map(({ r, i }) => (
-              <RequisitionCard key={i} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
+              <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
             ))}
             {filteredHistoric.length === 0 && (
               <div className="text-center py-16" style={{ color: "var(--ink-faint)" }}>
@@ -4292,7 +4278,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
     role: ROLES[0], emergencyNumber: "",
     species: [], containmentLevel: CONTAINMENT_LEVELS[0], spaceDescription: "",
     projectTitle: "", projectDesc: "",
-    setTemp: 22, nightTemp: 22, setHumidity: 60, lightCycle: LIGHT_CYCLES[0], dawnTime: "", duskTime: "", co2: "",
+    setTemp: 22, nightTemp: 22, setHumidity: 60, lightCycle: "", dawnTime: "", duskTime: "", co2: "",
     pestConsent: false, invertebrateWelfareAck: false, dimmingRequired: false, safetyCompliance: false,
     preferredFloor: "any", startDate: "", endDate: "",
     hazardNotes: "", notes: "",
@@ -4478,6 +4464,14 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
             window.alert("Please select a start and end date.");
             return;
           }
+          if (form.endDate < form.startDate) {
+            window.alert("The end date is before the start date.");
+            return;
+          }
+          if (!form.species.length) {
+            window.alert("Please select at least one species (or add your own with +).");
+            return;
+          }
           setSubmitting(true);
           try {
             const isPiThemself = form.role === "PI / Academic Staff";
@@ -4492,7 +4486,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
               labGroupId = form.labGroupId;
               pi = (piGroups.find((g) => g.id === form.labGroupId) || {}).piName || "";
             }
-            const payload = { ...form, labGroupId, pi, unitType: spaceType, discipline, status: "pending", submittedDate: fmt(TODAY) };
+            const payload = { ...form, labGroupId, pi, unitType: spaceType, discipline };
             if (mode === "amend" && amendIndex !== null) await onAmend(amendIndex, payload);
             else await onSubmit(payload);
             setSubmitted(true);
@@ -4721,7 +4715,7 @@ function AdminLoginForm({ onDone }) {
 }
 
 export default function GrowthCabinetApp() {
-  const { session, profile, authLoading } = useSession();
+  const { session, profile, profileError, authLoading } = useSession();
   const isAdmin = profile?.role === "admin";
   const [showAdminLogin, setShowAdminLogin] = useState(false);
 
@@ -4732,15 +4726,22 @@ export default function GrowthCabinetApp() {
 
   const [lastBackup, setLastBackup] = useState(null);
   const refreshLastBackup = () => api.fetchLastBackup().then(setLastBackup).catch((err) => console.error(err));
+  // Two reloads can overlap (e.g. quick successive saves); only the most
+  // recently started one may apply its result, so a slow older response
+  // can't overwrite fresher data.
+  const reloadSeq = useRef(0);
   const reload = async () => {
+    const seq = ++reloadSeq.current;
     refreshLastBackup();
     try {
       const data = await api.fetchAdminData();
+      if (seq !== reloadSeq.current) return;
       applyLabGroups(data.labGroups); // must run before setAppData - see LAB_GROUPS/PI_BY_LAB comment
       if (data.lightCycles.length) LIGHT_CYCLE_NAMES = data.lightCycles.map((c) => c.name);
       setAppData(data);
       setLoadError(null);
     } catch (err) {
+      if (seq !== reloadSeq.current) return;
       console.error(err);
       setLoadError(err.message || String(err));
     }
@@ -4749,6 +4750,18 @@ export default function GrowthCabinetApp() {
   useEffect(() => {
     if (isAdmin) reload();
     else setAppData(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
+
+  // Statuses (current / ending soon / overdue) depend on today's date. When
+  // the date rolls over - a tab left open overnight, or a laptop woken from
+  // sleep - refresh, rather than keep showing yesterday's picture.
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+    const check = () => { if (refreshToday()) reload(); };
+    const timer = setInterval(check, 60 * 1000);
+    document.addEventListener("visibilitychange", check);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", check); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
@@ -4782,7 +4795,6 @@ export default function GrowthCabinetApp() {
   const selected = units.find((u) => u.id === selectedUnitId) || null;
   const setSelected = (unit) => setSelectedUnitId(unit ? unit.id : null);
   const categories = appData ? appData.categories : [];
-  const categoryColors = appData ? appData.categoryColors : {};
   const categoryIdByName = appData ? appData.categoryIdByName : {};
   const labUsageHistory = appData ? appData.labUsageHistory : { labels: [], fullLabels: [], keys: [], series: {} };
   const labGroups = appData ? appData.labGroups : [];
@@ -4805,8 +4817,8 @@ export default function GrowthCabinetApp() {
     }
   };
 
-  const handleSaveUnit = withErrorAlert(async (data) => {
-    await api.saveUnit(data);
+  const handleSaveUnit = withErrorAlert(async (data, options) => {
+    await api.saveUnit(data, options);
     setEditingUnit(undefined);
     setSelected(null);
     await reload();
@@ -5010,6 +5022,11 @@ export default function GrowthCabinetApp() {
   const pendingCount = requests.filter((r) => r.status === "pending").length;
 
   if (authLoading) return <LoadingScreen />;
+  // Signed in, but the profile (and so the admin role) couldn't be read -
+  // say so, rather than quietly showing an admin the public form.
+  if (session && profileError) {
+    return <LoadingScreen message={`Couldn't load your account: ${profileError}. Check your connection and refresh the page.`} isError />;
+  }
 
   // Non-admin - including signed out - only ever sees the request form.
   // This matches the real end-state design for researchers once Entra ID
@@ -5137,7 +5154,6 @@ export default function GrowthCabinetApp() {
           onOpenRequisition={(tab, index) => setPreviewReqIndex(index)}
           goRequisitions={goRequisitions}
           categories={categories}
-          categoryColors={categoryColors}
           onAddCategory={handleAddCategory}
           onRemoveCategory={handleRemoveCategory}
         />

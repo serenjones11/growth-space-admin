@@ -1,66 +1,68 @@
-# Growth Space Admin
+# GrowSpace (Growth Space Admin)
 
-This zip contains everything built so far, organised for handing off to Claude Code.
+A web app for managing a research facility's growth cabinets and Reftech
+(controlled-environment) rooms: booking space out to researchers, tracking
+maintenance, and handling space requests, including a public request form that
+needs no login.
 
-## What's actually current
+- **Frontend:** a single-page React app (Vite + Tailwind), hosted on Vercel.
+- **Backend:** Supabase (Postgres database, logins, file storage, and an Edge
+  Function that sends notification emails through Resend).
 
-**`app/App.jsx`** is the one and only current version of the app — every feature discussed
-across the whole design conversation (dashboard, inventory, cabinet popup, requisitions
-lifecycle, lab-usage chart, etc.) is in this single file. It's a self-contained React
-component using Tailwind utility classes, lucide-react icons, and recharts — it has **no
-backend yet**; all data is generated in-memory on load and resets on refresh.
+`CLAUDE.md` is the detailed technical guide (architecture, data model, security
+rules, email set-up). This file covers getting it running.
 
-If you (or Claude Code) see a version with a coral/cream colour scheme, a lab-beaker icon
-on requisitions, or a sidebar that isn't dark green — **that's an old version**, not this
-one. Early in the design process the whole visual language changed from a coral/cream
-theme to the current dark-sidebar green theme, and the app went through several more
-rounds of changes after that. Because every version was saved to a file with the same
-name across a very long conversation, it's easy to accidentally re-download an old
-message's attachment instead of the latest one. This zip resolves that ambiguity — treat
-`app/App.jsx` in here as the single source of truth going forward.
+## Running it locally
 
-## Folder structure
+You need Node.js 20+ and a `.env` file in this folder with the Supabase
+project's URL and publishable (anon) key:
 
 ```
-app/
-  App.jsx              ← the current, complete app (frontend only, no backend yet)
-supabase/
-  schema.sql            ← Postgres schema for Supabase (tables, enums, RLS policies, seed data)
-design-prototypes/      ← exploratory HTML mockups from earlier in the design process.
-                           NOT the app — these were one-off comparisons used to choose a
-                           direction (e.g. "5 ways to show lab usage over time") before
-                           the winning ideas were built into App.jsx. Kept for reference
-                           only; safe to ignore or delete.
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=<publishable key>
 ```
 
-## Turning `App.jsx` into a runnable project
+Both are in the Supabase dashboard under Project Settings → API. The
+publishable key is designed to be public: what it can do is limited by the
+database's row-level security rules.
 
-`App.jsx` currently expects these to be available (they were assumed present in the
-environment it was built in):
-- React (function components + hooks: useState, useMemo, useRef)
-- Tailwind CSS (utility classes throughout — no separate CSS file exists yet)
-- `lucide-react` (icons)
-- `recharts` (only if any chart still uses it — most charts were rebuilt as custom SVG,
-  worth double-checking whether this import is still needed by grepping the file)
-- Google Fonts: Plus Jakarta Sans + Inter (linked via a `<link>` tag inside the component
-  itself — fine for now, but should move to `index.html` in a real project)
-
-A reasonable Vite scaffold:
 ```bash
-npm create vite@latest growth-space-admin -- --template react
-cd growth-space-admin
-npm install lucide-react recharts
-npx tailwindcss init -p   # then configure content paths + add the Tailwind directives
+npm install       # once
+npm run dev       # local dev server, http://localhost:5173
+npm run lint      # ESLint
+npm test          # unit tests (Vitest)
+npm run build     # production build into dist/
 ```
-Then drop `App.jsx` in as `src/App.jsx`, export it as the default export (it already is),
-and render it from `src/main.jsx`.
 
-## Next step: Supabase
+## Where things live
 
-`supabase/schema.sql` is ready to run in Supabase's SQL Editor on a fresh project. See the
-comments at the top and bottom of that file for what it sets up and what to do right
-after running it (adding users, setting one to `admin`, creating a Storage bucket).
+```
+src/App.jsx              the whole UI (pages, modals, request wizard)
+src/lib/api.js           every database call the UI makes
+src/lib/dates.js         shared date rules (today, ending soon, overdue)
+src/lib/backup.js        the Dashboard's "Full backup" Excel export
+src/lib/*.test.js        unit tests
+supabase/schema.sql      the full database schema, current state
+supabase/migrations/     every change applied to the live database, in order
+supabase/tests/          SQL checks to run in the Supabase SQL editor
+supabase/functions/      the notify-requisition email function
+```
 
-Once that's running, the bulk of the remaining work is swapping `App.jsx`'s mock data
-generators and local `useState` mutations for real Supabase queries — that's the natural
-next task to hand to Claude Code.
+## Deploying
+
+Pushing to `main` deploys the frontend on Vercel. Vercel needs the same two
+`VITE_SUPABASE_*` variables set for Production and Preview (it bakes them in
+at build time, so changing them needs a redeploy).
+
+Database changes are SQL files in `supabase/migrations/`, applied to the live
+project, then mirrored into `supabase/schema.sql`. The email function is
+deployed to Supabase separately and reads its secrets (`RESEND_API_KEY`,
+`WEBHOOK_SECRET`, optionally `NOTIFY_FROM_EMAIL` and `APP_URL`) from Supabase's
+Edge Function secrets.
+
+## Backups
+
+The Dashboard's **Full backup** button downloads an Excel workbook of every
+unit, requisition and maintenance entry. It contains personal data, so store
+it somewhere access-restricted. Supabase's own database backups depend on the
+plan (the free plan has none).

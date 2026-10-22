@@ -27,16 +27,22 @@ const FLOOR_LABEL: Record<string, string> = { LG: "LG", L1: "Level 1", L2A: "Lev
 
 // Same palette as the app's TOKENS (src/App.jsx) - kept as plain hex here
 // since CSS custom properties aren't reliable in email clients. `occupied`
-// is the same blue the app uses for an "Ongoing/Approved" status pill.
+// is the app's "Current" status blue, `warning` its "Ending soon" orange.
 const COLOR = {
   ink: "#16211D", inkSoft: "#5C6D65", inkFaint: "#93A29B",
   surface: "#FFFFFF", surfaceSoft: "#F1F5F3", border: "#E3E8E5",
   accent: "#009E73", accentDark: "#007A5A", accentSoft: "#E1F7F0", accentInk: "#053D2C",
-  warning: "#C97A2B", warningSoft: "#FBEDDD",
-  occupied: "#3B6EA5", occupiedSoft: "#E4EDF6", occupiedInk: "#1D3A57",
+  warning: "#C77700", warningSoft: "#FBEDDD",
+  occupied: "#2E8BC9", occupiedSoft: "#E4EDF6", occupiedInk: "#1D3A57",
   // Amended fields - the app's --overdue red.
-  changed: "#B23A34", changedSoft: "#FAE4E2",
+  changed: "#D7263D", changedSoft: "#FAE4E2",
 };
+
+// "YYYY-MM-DD" -> "DD/MM/YYYY", as the app shows dates.
+function fmtGB(iso: unknown): string {
+  const [y, m, d] = String(iso ?? "").slice(0, 10).split("-");
+  return y && m && d ? `${d}/${m}/${y}` : String(iso ?? "");
+}
 const FONT_STACK = "'Plus Jakarta Sans','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
 
 function esc(s: unknown): string {
@@ -131,8 +137,8 @@ function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string,
   const was = (cols: string[], fmt: (x: Record<string, any>) => string) =>
     changed(...cols) ? esc(fmt(amendment!.before)) : undefined;
 
-  const fmtDates = (x: Record<string, any>) => `${x.start_date} to ${x.end_date}`;
-  const fmtFloor = (x: Record<string, any>) => x.preferred_floor && x.preferred_floor !== "any" ? x.preferred_floor : "No preference";
+  const fmtDates = (x: Record<string, any>) => `${fmtGB(x.start_date)} to ${fmtGB(x.end_date)}`;
+  const fmtFloor = (x: Record<string, any>) => x.preferred_floor && x.preferred_floor !== "any" ? FLOOR_LABEL[x.preferred_floor] || x.preferred_floor : "No preference";
   // set_temp is the day temperature; night_temp the night one.
   const fmtTemps = (x: Record<string, any>) => [
     x.set_temp != null ? `${x.set_temp}°C day` : null,
@@ -260,7 +266,7 @@ function renderEndDateReminder(r: Record<string, any>, unit: { id: string; floor
   const bodyHtml = `
     <div style="padding:16px 18px;border-radius:12px;background:${COLOR.warningSoft};margin-bottom:18px;">
       <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${COLOR.warning};margin-bottom:4px;">Ends ${esc(endsIn)}</div>
-      <div style="font-family:${FONT_STACK};font-size:22px;font-weight:800;color:${COLOR.ink};">${esc(r.end_date)}</div>
+      <div style="font-family:${FONT_STACK};font-size:22px;font-weight:800;color:${COLOR.ink};">${esc(fmtGB(r.end_date))}</div>
       <div style="font-size:13px;color:${COLOR.inkSoft};margin-top:2px;">${esc(unit?.id ?? "No unit assigned")}${unit ? ` &middot; ${esc(unitTypeLabel)} &middot; ${esc(floorLabel)}, ${esc(unit.room)}` : ""}</div>
     </div>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -356,7 +362,7 @@ Deno.serve(async (req) => {
     return new Response("requisition not found", { status: 404 });
   }
 
-  const dateRange = `${req_.start_date} to ${req_.end_date}`;
+  const dateRange = `${fmtGB(req_.start_date)} to ${fmtGB(req_.end_date)}`;
   const unitTypeLabel = UNIT_TYPE_LABEL[req_.unit_type] || req_.unit_type;
 
   const unit = req_.unit as { id: string; floor: string; room: string; type: string } | null;
@@ -393,7 +399,7 @@ Deno.serve(async (req) => {
     } else {
       await sendEmail(
         emails,
-        `Ending soon: ${req_.project_title}${unit ? ` (${unit.id})` : ""} - ends ${req_.end_date}`,
+        `Ending soon: ${req_.project_title}${unit ? ` (${unit.id})` : ""} - ends ${fmtGB(req_.end_date)}`,
         renderEndDateReminder(req_, unit, assignedUnitTypeLabel, dateRange),
       );
     }

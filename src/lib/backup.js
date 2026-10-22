@@ -5,6 +5,7 @@
    re-imports. ExcelJS is loaded only when the button is clicked, so it
    doesn't weigh down the app's normal load. */
 import * as api from "./api";
+import { bookingDateState, daysUntil, ENDING_SOON_DAYS } from "./dates";
 
 const UNIT_TYPE = { cabinet: "Growth cabinet", reftech: "Reftech room" };
 const FLOOR = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
@@ -22,27 +23,20 @@ const FIELD_LABEL = {
   start_date: "Start date", end_date: "End date", hazard_notes: "Hazard notes", notes: "Researcher notes",
 };
 
-const todayUTC = () => { const n = new Date(); return Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()); };
 // A "YYYY-MM-DD..." value as a real Excel date (shown DD/MM/YYYY), so it sorts as a date.
 const asDate = (v) => {
   if (!v) return null;
   const [y, m, d] = String(v).slice(0, 10).split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d));
 };
-const daysFromToday = (v) => Math.round((asDate(v).getTime() - todayUTC()) / 86400000);
 const yesNo = (v) => (v ? "Yes" : "No");
 const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
 const hhmm = (v) => (v ? String(v).slice(0, 5) : "");
 const fmtDateTime = (d) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
 /* Booking state from dates - the same rules as the app's status colours. */
-function dateState(start, end) {
-  if (daysFromToday(start) > 0) return "Upcoming";
-  const left = daysFromToday(end);
-  if (left < 0) return "Overdue";
-  if (left <= 2) return "Ending soon";
-  return "Current";
-}
+const DATE_STATE_LABEL = { upcoming: "Upcoming", overdue: "Overdue", warning: "Ending soon", current: "Current" };
+const dateState = (start, end) => DATE_STATE_LABEL[bookingDateState(start, end)];
 
 /* Each sheet: [{ header, key, date?, width? }] columns + plain row objects. */
 function buildSheets(data) {
@@ -58,13 +52,13 @@ function buildSheets(data) {
   /* ---- Units ---- */
   const units = data.units.map((u) => {
     const current = activeBookings
-      .filter((b) => b.unit_id === u.id && daysFromToday(b.start_date) <= 0)
-      .sort((a, b) => (a.end_date < b.end_date ? -1 : 1));
+      .filter((b) => b.unit_id === u.id && daysUntil(b.start_date) <= 0)
+      .sort((a, b) => a.end_date.localeCompare(b.end_date));
     let status = "Free to book";
     if (u.is_out_of_service) status = "Out of service";
     else if (current.length) {
-      const left = daysFromToday(current[0].end_date);
-      status = left < 0 ? "Overdue" : left <= 2 ? "Ending soon" : "Occupied";
+      const left = daysUntil(current[0].end_date);
+      status = left < 0 ? "Overdue" : left <= ENDING_SOON_DAYS ? "Ending soon" : "Occupied";
     }
     return {
       id: u.id, type: UNIT_TYPE[u.type] || u.type, floor: FLOOR[u.floor] || u.floor, room: u.room,
@@ -118,7 +112,7 @@ function buildSheets(data) {
   /* ---- Maintenance ---- */
   const maintenance = data.serviceLog
     .slice()
-    .sort((a, b) => (a.unit_id === b.unit_id ? (a.date < b.date ? 1 : -1) : a.unit_id.localeCompare(b.unit_id, undefined, { numeric: true })))
+    .sort((a, b) => a.unit_id.localeCompare(b.unit_id, undefined, { numeric: true }) || b.date.localeCompare(a.date))
     .map((s) => ({
       unit: s.unit_id, date: asDate(s.date), status: s.status === "scheduled" ? "Scheduled" : "Completed",
       category: s.maintenance_categories?.name || "", contractor: s.contractor || "", notes: s.notes || "",
