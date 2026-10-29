@@ -1979,7 +1979,8 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
    times marked under it. */
 function DayBar({ dawn, dusk, cycle }) {
   const on = dayFraction(dawn), off = dayFraction(dusk);
-  const lit = on <= off ? [[on, off]] : [[0, off], [on, 1]];
+  // Equal times means lights on round the clock (24:0).
+  const lit = on === off ? [[0, 1]] : on < off ? [[on, off]] : [[0, off], [on, 1]];
   // Keep the time labels inside the bar's ends.
   const at = (f) => `${Math.min(Math.max(f * 100, 11), 89)}%`;
   return (
@@ -4945,7 +4946,7 @@ function UsersSection({ currentUserId, isOwner }) {
   const [users, setUsers] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [adding, setAdding] = useState(false);
-  const [created, setCreated] = useState(null); // { email, password } to pass on
+  const [created, setCreated] = useState(null); // { email, password, reset } to pass on
   const [resetting, setResetting] = useState(null); // { user, password }
   const [removing, setRemoving] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -4988,7 +4989,7 @@ function UsersSection({ currentUserId, isOwner }) {
       {adding && <AddUserForm onCreate={create} onCancel={() => setAdding(false)} />}
       {created && (
         <div className="rounded-xl p-3.5 text-sm" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
-          <div className="font-bold mb-1">Account created - pass these sign-in details on:</div>
+          <div className="font-bold mb-1">{created.reset ? "Password reset" : "Account created"} - pass these sign-in details on:</div>
           <div className="gc-mono text-[13px]">{created.email}<br />{created.password}</div>
           <button onClick={() => setCreated(null)} className="text-xs font-bold underline mt-2">Done</button>
         </div>
@@ -5010,7 +5011,7 @@ function UsersSection({ currentUserId, isOwner }) {
                       {u.fullName || u.email}{isMe && <span className="text-xs font-normal" style={{ color: "var(--ink-faint)" }}>(you)</span>}
                     </div>
                     <div className="text-xs truncate" style={{ color: "var(--ink-faint)" }}>
-                      {u.email} · {u.lastSignInAt ? `last signed in ${fmtGB(u.lastSignInAt)}` : "never signed in"}
+                      {u.email} · {u.lastSignInAt ? `last signed in ${fmtGB(localISODate(new Date(u.lastSignInAt)))}` : "never signed in"}
                     </div>
                   </div>
                   {isOwner && !isMe ? (
@@ -5043,7 +5044,7 @@ function UsersSection({ currentUserId, isOwner }) {
                     <div className="flex gap-2">
                       <button
                         disabled={busy || resetting.password.length < MIN_PASSWORD}
-                        onClick={async () => { const { password } = resetting; if (await run(u.id, () => api.resetUserPassword(u.id, password))) { setResetting(null); setCreated({ email: u.email, password }); } }}
+                        onClick={async () => { const { password } = resetting; if (await run(u.id, () => api.resetUserPassword(u.id, password))) { setResetting(null); setCreated({ email: u.email, password, reset: true }); } }}
                         className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}
                       >
                         Set password

@@ -1502,6 +1502,28 @@ revoke execute on function rename_unit(text, text) from public, anon;
 grant execute on function rename_unit(text, text) to authenticated;
 
 
+-- ----------------------------------------------------------------------------
+-- 29. APPROVING OVERLAPPING BOOKINGS ON A CABINET  ("Approve clash", sharing)
+-- ----------------------------------------------------------------------------
+-- Adds booking ids to units.acknowledged_clash_booking_ids in one UPDATE
+-- (not a read-then-write from the browser, so two admins doing it at once
+-- can't overwrite each other's). p_requisition_id adds that requisition's
+-- booking too. SECURITY INVOKER: "admin write units" decides who can.
+create or replace function approve_unit_overlap(p_unit_id text, p_booking_ids uuid[], p_requisition_id uuid default null)
+returns void as $$
+  update units set acknowledged_clash_booking_ids = array(
+    select distinct x from unnest(
+      coalesce(acknowledged_clash_booking_ids, '{}'::uuid[])
+      || coalesce(p_booking_ids, '{}'::uuid[])
+      || coalesce((select array_agg(b.id) from bookings b where b.requisition_id = p_requisition_id), '{}'::uuid[])
+    ) as x
+  )
+  where id = p_unit_id;
+$$ language sql security invoker set search_path = public;
+revoke execute on function approve_unit_overlap(text, uuid[], uuid) from public, anon;
+grant execute on function approve_unit_overlap(text, uuid[], uuid) to authenticated;
+
+
 -- ============================================================================
 -- End of schema. Next steps once this has run cleanly:
 --   1. Supabase → Authentication → add your 4-6 admin users for now (magic

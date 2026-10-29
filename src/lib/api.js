@@ -554,13 +554,12 @@ export async function removeUnitDocument(docId) {
 
 /* isNew inserts (so an ID that's already taken fails instead of silently
    overwriting that unit); otherwise updates the existing row. A changed ID
-   (originalId -> data.id) is renamed first by rename_unit(), which moves the
-   unit's bookings, requisitions, maintenance and documents with it. */
+   (originalId -> data.id) is renamed by rename_unit(), which moves the
+   unit's bookings, requisitions, maintenance and documents with it - after
+   the other fields are saved, so if either step fails, saving again from
+   the same form still works (the unit keeps its old ID until the rename). */
 export async function saveUnit(data, { isNew = false, originalId = null } = {}) {
-  if (!isNew && originalId && originalId !== data.id) {
-    const { error: renameError } = await supabase.rpc("rename_unit", { p_old: originalId, p_new: data.id });
-    if (renameError) throw renameError;
-  }
+  const currentId = !isNew && originalId ? originalId : data.id;
   const row = {
     id: data.id,
     type: data.type,
@@ -591,12 +590,17 @@ export async function saveUnit(data, { isNew = false, originalId = null } = {}) 
     set_dusk_time: nullIfEmpty(data.settings?.duskTime),
   };
   if (data.status !== undefined) row.is_out_of_service = data.status === "service";
+  if (!isNew) delete row.id;
   const { error } = isNew
     ? await supabase.from("units").insert(row)
-    : await supabase.from("units").update(row).eq("id", data.id);
+    : await supabase.from("units").update(row).eq("id", currentId);
   if (error) {
     if (isNew && error.code === "23505") throw new Error(`A unit with the ID "${data.id}" already exists.`);
     throw error;
+  }
+  if (currentId !== data.id) {
+    const { error: renameError } = await supabase.rpc("rename_unit", { p_old: currentId, p_new: data.id });
+    if (renameError) throw renameError;
   }
 }
 
@@ -607,25 +611,23 @@ export async function updateUnitNotes(unitId, notes) {
 
 /* Marks bookings on a cabinet as approved to overlap - see the
    acknowledged_clash_booking_ids column comment for why it's specific
-   bookings rather than a bare boolean. Adds to the ones already approved,
-   so a share approved for later dates isn't forgotten. */
+   bookings rather than a bare boolean. approve_unit_overlap() adds them to
+   the ones already approved in one statement, so two admins doing this at
+   once can't overwrite each other's. */
 export async function acknowledgeClash(unitId, bookingIds) {
-  const { data, error: readError } = await supabase.from("units").select("acknowledged_clash_booking_ids").eq("id", unitId).single();
-  if (readError) throw readError;
-  const ids = [...new Set([...(data.acknowledged_clash_booking_ids || []), ...bookingIds])];
-  const { error } = await supabase.from("units").update({ acknowledged_clash_booking_ids: ids }).eq("id", unitId);
+  const { error } = await supabase.rpc("approve_unit_overlap", { p_unit_id: unitId, p_booking_ids: bookingIds });
   if (error) throw error;
 }
 
 /* After a requisition is assigned to a cabinet already booked for its
    dates (two researchers sharing it): approve the overlap between its
-   booking - made by the sync_booking_from_requisition trigger - and
-   otherBookingIds. */
+   booking - made by the sync_booking_from_requisition trigger, and looked
+   up by the function - and otherBookingIds. */
 export async function markCabinetShared(unitId, requisitionId, otherBookingIds) {
-  const { data, error } = await supabase.from("bookings").select("id")
-    .eq("requisition_id", requisitionId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const { error } = await supabase.rpc("approve_unit_overlap", {
+    p_unit_id: unitId, p_booking_ids: otherBookingIds, p_requisition_id: requisitionId,
+  });
   if (error) throw error;
-  await acknowledgeClash(unitId, data ? [data.id, ...otherBookingIds] : otherBookingIds);
 }
 
 /* bookings/service_log/documents cascade-delete with the unit. requisitions

@@ -9,7 +9,7 @@
 -- (swap in any two unit ids if not).
 do $t$
 declare
-  admin_id uuid := (select id from profiles where role = 'admin' limit 1);
+  admin_id uuid := (select id from profiles where role in ('admin', 'owner') limit 1);
   rid uuid; r requisitions; b bookings; n int; out text := '';
 begin
   -- 1. Anonymous visitor tries to submit an already-approved, back-dated
