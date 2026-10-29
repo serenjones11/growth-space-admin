@@ -835,84 +835,67 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
 /* ---------------------------------------------------------------------- */
 /* Activity feed (bookings, completed requisitions, new units, servicing) */
 /* ---------------------------------------------------------------------- */
+/* Icon and colour per activity_log type (see supabase/schema.sql's
+   activity log section for when each is written). */
+const ACT_GOOD = { color: "var(--free)", soft: "var(--free-soft)" };
+const ACT_INFO = { color: "var(--occupied)", soft: "var(--occupied-soft)" };
+const ACT_NEW = { color: "var(--accent)", soft: "var(--accent-soft)" };
+const ACT_WARN = { color: "var(--warning)", soft: "var(--warning-soft)" };
+const ACT_GONE = { color: "var(--critical, #b3261e)", soft: "var(--critical-soft, #fbe7e5)" };
+const ACT_QUIET = { color: "var(--service)", soft: "var(--service-soft)" };
 const ACTIVITY_META = {
-  booking: { icon: User, color: "var(--occupied)", soft: "var(--occupied-soft)" },
-  completed: { icon: CheckCircle2, color: "var(--free)", soft: "var(--free-soft)" },
-  added: { icon: PackagePlus, color: "var(--accent)", soft: "var(--accent-soft)" },
-  service: { icon: Wrench, color: "var(--service)", soft: "var(--service-soft)" },
-  unit_added: { icon: PackagePlus, color: "var(--accent)", soft: "var(--accent-soft)" },
-  unit_deleted: { icon: PackageMinus, color: "var(--critical, #b3261e)", soft: "var(--critical-soft, #fbe7e5)" },
-  lab_group_added: { icon: UserPlus, color: "var(--accent)", soft: "var(--accent-soft)" },
-  lab_group_deleted: { icon: UserMinus, color: "var(--critical, #b3261e)", soft: "var(--critical-soft, #fbe7e5)" },
-  requisition_deleted: { icon: Trash2, color: "var(--critical, #b3261e)", soft: "var(--critical-soft, #fbe7e5)" },
+  requisition_submitted: { icon: ClipboardList, ...ACT_NEW },
+  requisition_approved: { icon: CheckCircle2, ...ACT_INFO },
+  requisition_declined: { icon: XCircle, ...ACT_GONE },
+  requisition_completed: { icon: CheckCircle2, ...ACT_GOOD },
+  requisition_reverted: { icon: History, ...ACT_INFO },
+  requisition_moved: { icon: MapPin, ...ACT_INFO },
+  requisition_dates_changed: { icon: CalendarClock, ...ACT_INFO },
+  requisition_edited: { icon: Pencil, ...ACT_QUIET },
+  requisition_note: { icon: Pencil, ...ACT_QUIET },
+  requisition_amended: { icon: Pencil, ...ACT_WARN },
+  amendment_approved: { icon: CheckCircle2, ...ACT_INFO },
+  amendment_declined: { icon: XCircle, ...ACT_WARN },
+  requisition_deleted: { icon: Trash2, ...ACT_GONE },
+  unit_added: { icon: PackagePlus, ...ACT_NEW },
+  unit_deleted: { icon: PackageMinus, ...ACT_GONE },
+  unit_renamed: { icon: Pencil, ...ACT_QUIET },
+  unit_edited: { icon: Pencil, ...ACT_QUIET },
+  unit_out_of_service: { icon: AlertTriangle, ...ACT_WARN },
+  unit_in_service: { icon: CheckCircle2, ...ACT_GOOD },
+  service_logged: { icon: Wrench, ...ACT_QUIET },
+  service_scheduled: { icon: Wrench, ...ACT_WARN },
+  service_edited: { icon: Wrench, ...ACT_QUIET },
+  service_deleted: { icon: Trash2, ...ACT_GONE },
+  document_added: { icon: FileText, ...ACT_NEW },
+  document_removed: { icon: Trash2, ...ACT_GONE },
+  lab_group_added: { icon: UserPlus, ...ACT_NEW },
+  lab_group_approved: { icon: UserPlus, ...ACT_GOOD },
+  lab_group_edited: { icon: Pencil, ...ACT_QUIET },
+  lab_group_deleted: { icon: UserMinus, ...ACT_GONE },
+  user_added: { icon: UserPlus, ...ACT_NEW },
+  user_role_changed: { icon: User, ...ACT_QUIET },
+  user_removed: { icon: UserMinus, ...ACT_GONE },
 };
+const ACTIVITY_FALLBACK = { icon: History, ...ACT_QUIET };
 
-// `units`/`requests` still-live state gives us bookings, servicing, and
-// requisition status changes by inference (the row is still there to read).
-// `activityLog` covers what inference structurally can't: events whose row
-// is now gone (a deleted unit, a deleted PI, a deleted requisition) - see
-// supabase/schema.sql § 16. Booking-assigned and requisition status-change
-// events are NOT duplicated into activity_log, so merging the two here is
-// safe from double-counting.
-function buildActivityFeed(units, requests, activityLog = []) {
-  const items = [];
-  units.forEach((u) => {
-    if (u.type === "cabinet" && u.occupant) {
-      items.push({
-        // createdAt (when the booking was actually made), not startDate
-        // (when the occupancy period is scheduled for, which can be far in
-        // the future or past) - "recent activity" should reflect when
-        // things really happened, not what they're scheduled around.
-        type: "booking", date: u.occupant.createdAt, unitId: u.id,
-        title: `${u.occupant.researcher} was assigned ${u.id}`,
-        subtitle: `${piDisplay(u.occupant.labGroup)} · ${FLOOR_LABEL[u.floor]}, ${u.room}`,
-      });
-    }
-    if (u.type === "reftech") {
-      u.bookings.forEach((b) => {
-        items.push({
-          type: "booking", date: b.createdAt, unitId: u.id,
-          title: `${b.researcher} was assigned ${u.room}`,
-          subtitle: `${piDisplay(b.labGroup)} · ${u.id}`,
-        });
-      });
-    }
-    if (u.serviceLog[0]) {
-      items.push({
-        type: "service", date: u.serviceLog[0].date, unitId: u.id,
-        title: `${u.id} serviced by contractor ${u.serviceLog[0].engineer}`,
-        subtitle: u.serviceLog[0].notes,
-      });
-    }
-  });
-  requests.forEach((r, i) => {
-    if (r.status === "approved" || r.status === "declined") {
-      items.push({
-        type: "completed", date: r.decidedAt || r.decidedDate || r.submittedAt || r.submittedDate, reqIndex: i,
-        title: `Requisition ${r.status === "approved" ? "approved" : "declined"} - ${r.projectTitle}`,
-        subtitle: `${r.researcher} · ${piDisplay(r.labGroup)}${r.assignedUnitId ? ` · assigned ${r.assignedUnitId}` : ""}`,
-      });
-    }
-    if (r.status === "completed") {
-      items.push({
-        type: "completed", date: r.completedAt || r.completedDate || r.decidedAt || r.decidedDate, reqIndex: i,
-        title: `Requisition marked finished - ${r.projectTitle}`,
-        subtitle: `${r.researcher} · ${piDisplay(r.labGroup)}${r.assignedUnitId ? ` · freed ${r.assignedUnitId}` : ""}`,
-      });
-    }
-  });
-  activityLog.forEach((a) => {
-    items.push({
-      type: a.type, date: a.createdAt, unitId: a.unitId,
-      title: a.title,
-      subtitle: a.subtitle,
-    });
-  });
-  return items.filter((it) => it.date).sort((a, b) => new Date(b.date) - new Date(a.date));
+/* Recent activity = activity_log, newest first. Triggers write a row for
+   every change as it happens (whoever made it, from whatever screen), so
+   a requisition moved, re-dated, amended or reverted shows up each time -
+   not just its latest state, which is all the feed could show when it was
+   worked out from the current data. */
+function buildActivityFeed(activityLog = []) {
+  return activityLog
+    .map((a) => ({
+      type: a.type, date: a.createdAt, unitId: a.unitId, requisitionId: a.requisitionId,
+      title: a.title, subtitle: [a.subtitle, a.actor && `by ${a.actor}`].filter(Boolean).join(" · "),
+    }))
+    .filter((it) => it.date)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
 }
 
 function ActivityRow({ item, onClick }) {
-  const meta = ACTIVITY_META[item.type];
+  const meta = ACTIVITY_META[item.type] || ACTIVITY_FALLBACK;
   const Icon = meta.icon;
   return (
     <button onClick={onClick} className="w-full flex items-center gap-3 text-left rounded-xl px-2 py-2 -mx-2 gc-clickable" style={{ background: "transparent" }}>
@@ -1257,8 +1240,8 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
   const utilisation = total === 0 ? 0 : Math.round((occupied / total) * 100);
   const pending = requests.filter((r) => r.status === "pending");
 
-  const activity = useMemo(() => buildActivityFeed(units, requests, activityLog), [units, requests, activityLog]);
-  const shownActivity = activityExpanded ? activity.slice(0, 25) : activity.slice(0, 4);
+  const activity = useMemo(() => buildActivityFeed(activityLog), [activityLog]);
+  const shownActivity = activityExpanded ? activity.slice(0, 50) : activity.slice(0, 4);
 
   const [labsExpanded, setLabsExpanded] = useState(false);
   // Counts every currently-active booking, not just one per unit - see the
@@ -1269,16 +1252,12 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
     .sort((a, b) => b.count - a.count);
   const byLab = labsExpanded ? byLabAll : byLabAll.slice(0, 4);
 
+  // A requisition's entry opens it on the tab it's on now (by its current
+  // status, not the event's); anything else on a unit opens the unit.
   const handleActivityClick = (item) => {
-    // item.type === "completed" is just this activity item's display/icon
-    // category (shared by approved/declined/completed requisition events -
-    // see buildActivityFeed) - NOT the requisition's actual status. Route
-    // by the real status via requisitionTab() instead, so a freshly
-    // approved (still-active) requisition opens on the Active tab rather
-    // than always landing on Completed.
-    if (item.type === "completed") {
-      const req = requests[item.reqIndex];
-      goRequisitions(req ? requisitionTab(req.status) : "completed", item.reqIndex);
+    const reqIndex = item.requisitionId ? requests.findIndex((r) => r.id === item.requisitionId) : -1;
+    if (reqIndex !== -1) {
+      goRequisitions(requisitionTab(requests[reqIndex].status), reqIndex);
       return;
     }
     const unit = units.find((u) => u.id === item.unitId);

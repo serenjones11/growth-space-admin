@@ -491,6 +491,8 @@ export async function fetchAdminData() {
     title: row.title,
     subtitle: row.subtitle || "",
     unitId: row.unit_id,
+    requisitionId: row.requisition_id,
+    actor: row.actor_name || "",
     createdAt: row.created_at,
   }));
 

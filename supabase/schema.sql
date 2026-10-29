@@ -728,26 +728,25 @@ grant execute on function find_or_create_lab_group(text, text) to anon, authenti
 -- ----------------------------------------------------------------------------
 -- 16. ACTIVITY LOG  (durable events that live inference can't recover)
 -- ----------------------------------------------------------------------------
--- The dashboard's "Recent activity" was entirely inferred from current table
--- state (a unit's occupant, a requisition's status) — fine for anything
--- still there, but it can never recover an event whose row is now gone: a
--- deleted unit, a deleted PI, a deleted requisition. This table + triggers
--- cover exactly those events, written automatically regardless of which
--- code path caused the change (admin action or the anon self-registration
--- RPC) rather than by scattering manual logging calls through the app.
--- Booking-assigned and requisition status-change events are deliberately
--- NOT logged here — those still work via live inference (the row is still
--- there), so logging them too would just duplicate every entry.
+-- The dashboard's "Recent activity" feed: one row per change, written by
+-- triggers as it happens (whichever code path made it), so the feed shows
+-- every event - not just each row's latest state - including ones whose
+-- row is now gone (a deleted unit, PI or requisition). The triggers below
+-- cover units added/removed, PIs added/removed and requisitions deleted;
+-- section 30 covers everything else, with who made each change.
 create table activity_log (
   id          uuid primary key default gen_random_uuid(),
-  type        text not null,   -- 'unit_added' | 'unit_deleted' | 'lab_group_added' | 'lab_group_deleted' | 'requisition_deleted'
+  type        text not null,   -- e.g. 'requisition_moved', 'unit_edited', 'service_logged' - see section 30
   title       text not null,
   subtitle    text,
-  -- Deliberately NOT a foreign key: this row must survive the referenced
-  -- unit being deleted (that's the entire point of this table).
+  -- Deliberately NOT foreign keys: this row must survive the referenced
+  -- unit or requisition being deleted (that's the entire point of this table).
   unit_id     text,
+  requisition_id uuid,
+  actor_name  text,            -- who made the change, when someone signed in did
   created_at  timestamptz not null default now()
 );
+create index idx_activity_log_created_at on activity_log (created_at desc);
 
 alter table activity_log enable row level security;
 create policy "read activity_log" on activity_log for select using (is_admin());
@@ -1523,6 +1522,248 @@ returns void as $$
 $$ language sql security invoker set search_path = public;
 revoke execute on function approve_unit_overlap(text, uuid[], uuid) from public, anon;
 grant execute on function approve_unit_overlap(text, uuid[], uuid) to authenticated;
+
+
+-- ----------------------------------------------------------------------------
+-- 30. ACTIVITY LOG: EVERY CHANGE  (the dashboard's Recent activity)
+-- ----------------------------------------------------------------------------
+-- One activity_log row per change to requisitions (submitted, approved,
+-- declined, completed, reverted, moved, re-dated, edited, amended, admin
+-- notes), units (renamed, out of / back in service, edited), maintenance,
+-- documents, PIs and staff logins, with actor_name = who did it.
+-- Name of the signed-in person making the current change (null for a
+-- signed-out researcher, a scheduled job or the service role).
+create or replace function activity_actor()
+returns text as $$
+  select nullif(full_name, '') from profiles where id = auth.uid();
+$$ language sql stable security definer set search_path = public;
+revoke execute on function activity_actor() from public, anon, authenticated;
+
+create or replace function log_activity(p_type text, p_title text, p_subtitle text, p_unit_id text, p_requisition_id uuid)
+returns void as $$
+begin
+  insert into activity_log (type, title, subtitle, unit_id, requisition_id, actor_name)
+  values (p_type, p_title, p_subtitle, p_unit_id, p_requisition_id, activity_actor());
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function log_activity(text, text, text, text, uuid) from public, anon, authenticated;
+
+-- ---- Requisitions ----
+create or replace function log_requisition_change()
+returns trigger as $$
+declare
+  who text := coalesce(new.code || ' · ', '') || new.researcher_name;
+  dates text := to_char(new.start_date, 'DD/MM/YYYY') || ' to ' || to_char(new.end_date, 'DD/MM/YYYY');
+  -- Details an edit can change (dates and unit are logged on their own;
+  -- lab_group_id alone changes when a duplicate PI is merged).
+  details constant text[] := array[
+    'researcher_name', 'email', 'role', 'emergency_number', 'pi_name', 'unit_type', 'discipline',
+    'species', 'containment_level', 'space_description', 'project_title', 'project_desc',
+    'set_temp', 'night_temp', 'set_humidity', 'light_cycle', 'dawn_time', 'dusk_time',
+    'pest_consent', 'invertebrate_welfare_ack', 'dimming_required', 'safety_compliance',
+    'preferred_floor', 'hazard_notes', 'notes'
+  ];
+  o jsonb;
+  n jsonb;
+  k text;
+  edited boolean := false;
+begin
+  if tg_op = 'INSERT' then
+    perform log_activity('requisition_submitted', 'New requisition - ' || new.project_title,
+      who || coalesce(' · PI ' || new.pi_name, ''), null, new.id);
+    return new;
+  end if;
+
+  -- A unit being renamed moves assigned_unit_id; that's logged as the rename.
+  if current_setting('app.renaming_unit', true) = 'on' then
+    return new;
+  end if;
+
+  if old.status is distinct from new.status then
+    if new.status = 'pending' and new.amended_at is distinct from old.amended_at then
+      perform log_activity('requisition_amended', 'Requisition amended - ' || new.project_title, who, new.assigned_unit_id, new.id);
+    elsif old.status = 'pending' and new.status = 'approved' and current_setting('app.reverting_amendment', true) = 'on' then
+      perform log_activity('amendment_declined', 'Amendment declined - ' || new.project_title, who || ' · kept the approved version', new.assigned_unit_id, new.id);
+    elsif old.status = 'pending' and new.status = 'approved' and old.amended_previous ->> 'status' = 'approved' then
+      perform log_activity('amendment_approved', 'Amendment approved - ' || new.project_title, who || ' · ' || coalesce(new.assigned_unit_id, '') || ', ' || dates, new.assigned_unit_id, new.id);
+    elsif new.status = 'approved' and old.status = 'pending' then
+      perform log_activity('requisition_approved', 'Requisition approved - ' || new.project_title, who || ' · assigned ' || coalesce(new.assigned_unit_id, 'no unit'), new.assigned_unit_id, new.id);
+    elsif new.status = 'declined' then
+      perform log_activity('requisition_declined', 'Requisition declined - ' || new.project_title, who, null, new.id);
+    elsif new.status = 'completed' then
+      perform log_activity('requisition_completed', 'Requisition completed - ' || new.project_title, who || coalesce(' · freed ' || new.assigned_unit_id, ''), new.assigned_unit_id, new.id);
+    elsif old.status = 'completed' and new.status = 'approved' then
+      perform log_activity('requisition_reverted', 'Requisition back to active - ' || new.project_title, who || coalesce(' · on ' || new.assigned_unit_id, ''), new.assigned_unit_id, new.id);
+    else
+      perform log_activity('requisition_edited', 'Requisition status changed to ' || new.status || ' - ' || new.project_title, who, new.assigned_unit_id, new.id);
+    end if;
+    return new;
+  end if;
+
+  -- A pending request amended again before review.
+  if new.amended_at is distinct from old.amended_at and new.status = 'pending' then
+    perform log_activity('requisition_amended', 'Requisition amended - ' || new.project_title, who, new.assigned_unit_id, new.id);
+    return new;
+  end if;
+
+  if new.status = 'approved' and new.assigned_unit_id is distinct from old.assigned_unit_id then
+    perform log_activity('requisition_moved', 'Requisition moved - ' || new.project_title,
+      who || ' · ' || coalesce(old.assigned_unit_id, 'no unit') || ' to ' || coalesce(new.assigned_unit_id, 'no unit'), new.assigned_unit_id, new.id);
+  end if;
+  if new.start_date is distinct from old.start_date or new.end_date is distinct from old.end_date then
+    perform log_activity('requisition_dates_changed', 'Dates changed - ' || new.project_title, who || ' · now ' || dates, new.assigned_unit_id, new.id);
+  end if;
+
+  o := to_jsonb(old);
+  n := to_jsonb(new);
+  foreach k in array details loop
+    if o -> k is distinct from n -> k then edited := true; end if;
+  end loop;
+  if edited then
+    perform log_activity('requisition_edited', 'Requisition details edited - ' || new.project_title, who, new.assigned_unit_id, new.id);
+  end if;
+  if new.admin_notes is distinct from old.admin_notes then
+    perform log_activity('requisition_note', 'Admin notes updated - ' || new.project_title, who, new.assigned_unit_id, new.id);
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function log_requisition_change() from public, anon, authenticated;
+create or replace trigger trg_log_requisition_change after insert or update on requisitions
+  for each row execute procedure log_requisition_change();
+
+-- ---- Units (added/removed are already logged by trg_log_unit_insert/delete) ----
+create or replace function log_unit_change()
+returns trigger as $$
+declare
+  changed text[] := '{}';
+begin
+  if old.id is distinct from new.id then
+    perform log_activity('unit_renamed', old.id || ' renamed to ' || new.id, null, new.id, null);
+    return new;
+  end if;
+  if old.is_out_of_service is distinct from new.is_out_of_service then
+    if new.is_out_of_service then
+      perform log_activity('unit_out_of_service', new.id || ' marked out of service', new.floor || ', ' || new.room, new.id, null);
+    else
+      perform log_activity('unit_in_service', new.id || ' back in service', new.floor || ', ' || new.room, new.id, null);
+    end if;
+  end if;
+  if (old.set_day_temp, old.set_night_temp, old.set_humidity, old.set_light_cycle, old.set_light_intensity, old.set_dawn_time, old.set_dusk_time)
+     is distinct from (new.set_day_temp, new.set_night_temp, new.set_humidity, new.set_light_cycle, new.set_light_intensity, new.set_dawn_time, new.set_dusk_time) then
+    changed := changed || 'current settings';
+  end if;
+  if (old.type, old.disciplines, old.floor, old.room, old.manufacturer, old.model, old.serial_number, old.asset_number, old.tscan_id,
+      old.shelves, old.lighting_type, old.ballasts, old.co2_control, old.dimming_control, old.install_date,
+      old.temp_min, old.temp_max, old.humidity_min, old.humidity_max)
+     is distinct from
+     (new.type, new.disciplines, new.floor, new.room, new.manufacturer, new.model, new.serial_number, new.asset_number, new.tscan_id,
+      new.shelves, new.lighting_type, new.ballasts, new.co2_control, new.dimming_control, new.install_date,
+      new.temp_min, new.temp_max, new.humidity_min, new.humidity_max) then
+    changed := changed || 'details';
+  end if;
+  if old.photo_url is distinct from new.photo_url then changed := changed || 'photo'; end if;
+  if old.notes is distinct from new.notes then changed := changed || 'notes'; end if;
+  if cardinality(changed) > 0 then
+    perform log_activity('unit_edited', new.id || ' updated', upper(left(array_to_string(changed, ', '), 1)) || substr(array_to_string(changed, ', '), 2), new.id, null);
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function log_unit_change() from public, anon, authenticated;
+create or replace trigger trg_log_unit_change after update on units
+  for each row execute procedure log_unit_change();
+
+-- ---- Maintenance (the app re-saves every entry when one changes, so only
+-- real changes are logged) ----
+create or replace function log_service_change()
+returns trigger as $$
+declare
+  r service_log := case when tg_op = 'DELETE' then old else new end;
+  cat text := (select name from maintenance_categories where id = r.category_id);
+  what text := coalesce(cat, 'Maintenance') || coalesce(' · ' || nullif(r.contractor, ''), '');
+begin
+  if tg_op = 'INSERT' then
+    if new.status = 'scheduled' then
+      perform log_activity('service_scheduled', new.unit_id || ' maintenance scheduled for ' || to_char(new.date, 'DD/MM/YYYY'), what, new.unit_id, null);
+    else
+      perform log_activity('service_logged', new.unit_id || ' maintenance logged', what || coalesce(' · ' || nullif(new.notes, ''), ''), new.unit_id, null);
+    end if;
+  elsif tg_op = 'UPDATE' then
+    if old.status = 'scheduled' and new.status = 'completed' then
+      perform log_activity('service_logged', new.unit_id || ' scheduled maintenance done', what, new.unit_id, null);
+    elsif (old.category_id, old.status, old.date, old.contractor, old.notes, old.cost)
+          is distinct from (new.category_id, new.status, new.date, new.contractor, new.notes, new.cost) then
+      perform log_activity('service_edited', new.unit_id || ' maintenance entry edited', what, new.unit_id, null);
+    end if;
+  else
+    perform log_activity('service_deleted', old.unit_id || ' maintenance entry deleted', what || ' · ' || to_char(old.date, 'DD/MM/YYYY'), old.unit_id, null);
+  end if;
+  return null;
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function log_service_change() from public, anon, authenticated;
+create or replace trigger trg_log_service_change after insert or update or delete on service_log
+  for each row execute procedure log_service_change();
+
+-- ---- Documents ----
+create or replace function log_document_change()
+returns trigger as $$
+begin
+  if tg_op = 'INSERT' then
+    perform log_activity('document_added', new.name || ' added to ' || new.unit_id, new.type, new.unit_id, null);
+  else
+    perform log_activity('document_removed', old.name || ' removed from ' || old.unit_id, old.type, old.unit_id, null);
+  end if;
+  return null;
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function log_document_change() from public, anon, authenticated;
+create or replace trigger trg_log_document_change after insert or delete on documents
+  for each row execute procedure log_document_change();
+
+-- ---- PIs (added/removed are already logged) ----
+create or replace function log_lab_group_change()
+returns trigger as $$
+begin
+  if not old.is_verified and new.is_verified then
+    perform log_activity('lab_group_approved', new.pi_name || ' approved as a PI', new.name, null, null);
+  elsif (old.name, old.pi_name, old.pi_email) is distinct from (new.name, new.pi_name, new.pi_email) then
+    perform log_activity('lab_group_edited', new.pi_name || '''s PI details updated', new.name, null, null);
+  end if;
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function log_lab_group_change() from public, anon, authenticated;
+create or replace trigger trg_log_lab_group_change after update on lab_groups
+  for each row execute procedure log_lab_group_change();
+
+-- ---- Staff logins (Settings > Users). A new login starts as 'researcher'
+-- and manage-users then gives it its role, so that update is "added". ----
+create or replace function log_profile_change()
+returns trigger as $$
+declare
+  label constant jsonb := '{"owner": "Owner", "admin": "User"}';
+begin
+  if tg_op = 'DELETE' then
+    if old.role in ('admin', 'owner') then
+      perform log_activity('user_removed', coalesce(nullif(old.full_name, ''), 'A user') || '''s login removed', label ->> old.role::text, null, null);
+    end if;
+    return null;
+  end if;
+  if old.role is distinct from new.role then
+    if old.role = 'researcher' and new.role in ('admin', 'owner') then
+      perform log_activity('user_added', coalesce(nullif(new.full_name, ''), 'Someone') || ' given access', 'as ' || (label ->> new.role::text), null, null);
+    elsif new.role in ('admin', 'owner') then
+      perform log_activity('user_role_changed', coalesce(nullif(new.full_name, ''), 'Someone') || ' is now ' || (label ->> new.role::text), 'was ' || coalesce(label ->> old.role::text, old.role::text), null, null);
+    end if;
+  end if;
+  return null;
+end;
+$$ language plpgsql security definer set search_path = public;
+revoke execute on function log_profile_change() from public, anon, authenticated;
+create or replace trigger trg_log_profile_change after update or delete on profiles
+  for each row execute procedure log_profile_change();
 
 
 -- ============================================================================
