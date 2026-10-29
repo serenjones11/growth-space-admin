@@ -5242,32 +5242,97 @@ function AdminLoginForm({ onDone }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [forgot, setForgot] = useState(false); // "Forgot password?" mode
+  const [resetSent, setResetSent] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError("");
+    if (forgot) {
+      try {
+        await api.sendPasswordReset(email.trim());
+        setResetSent(true);
+      } catch (err) {
+        setError(err.message || "Couldn't send the reset email - please try again.");
+      }
+      setBusy(false);
+      return;
+    }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
     if (error) setError(error.message);
     else onDone();
   };
+  const switchMode = (toForgot) => { setForgot(toForgot); setResetSent(false); setError(""); };
 
   return (
     <form onSubmit={submit} className="gc-card p-4 space-y-2.5" style={{ maxWidth: 320, marginLeft: "auto" }}>
-      <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Sign in</div>
-      <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="gc-input" />
-      <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="gc-input" />
-      {error && <div className="text-xs" style={{ color: "var(--overdue)" }}>{error}</div>}
-      <button type="submit" disabled={busy} className="text-xs font-bold px-3 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
-        {busy ? "Signing in…" : "Sign in"}
+      <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>{forgot ? "Reset your password" : "Sign in"}</div>
+      {forgot && resetSent ? (
+        <p className="text-xs" style={{ color: "var(--ink)" }}>
+          If <span className="font-semibold">{email.trim()}</span> has an account, an email with a reset link is on its way. Open it on this device to choose a new password.
+        </p>
+      ) : (
+        <>
+          <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="gc-input" />
+          {!forgot && <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="gc-input" />}
+          {error && <div className="text-xs" style={{ color: "var(--overdue)" }}>{error}</div>}
+          <button type="submit" disabled={busy} className="text-xs font-bold px-3 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
+            {forgot ? (busy ? "Sending…" : "Email me a reset link") : (busy ? "Signing in…" : "Sign in")}
+          </button>
+        </>
+      )}
+      <button type="button" onClick={() => switchMode(!forgot)} className="block text-[11px] font-semibold underline" style={{ color: "var(--ink-faint)" }}>
+        {forgot ? "Back to sign in" : "Forgot password?"}
       </button>
     </form>
   );
 }
 
+/* Opened from a "Reset your password" email: Supabase has signed the user
+   in for this one purpose, and they choose a new password before carrying
+   on into the app. */
+function SetNewPasswordScreen({ email, onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (password.length < MIN_PASSWORD) return setError(`Use at least ${MIN_PASSWORD} characters.`);
+    if (password !== confirm) return setError("The two passwords don't match.");
+    setBusy(true);
+    setError("");
+    try {
+      await api.changeOwnPassword(password);
+      toast("Password changed - you're signed in");
+      onDone();
+    } catch (err) {
+      setError(err.message || "Couldn't change your password - please try again.");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="gc-app min-h-screen flex items-center justify-center p-4">
+      <style>{TOKENS}</style>
+      <Toaster />
+      <form onSubmit={submit} className="gc-card p-6 space-y-3 w-full" style={{ maxWidth: 380 }}>
+        <h1 className="gc-display text-lg font-extrabold">Choose a new password</h1>
+        {email && <p className="text-xs" style={{ color: "var(--ink-soft)" }}>For {email}</p>}
+        <Field label="New password"><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="gc-input" autoComplete="new-password" placeholder={`At least ${MIN_PASSWORD} characters`} autoFocus /></Field>
+        <Field label="Confirm new password"><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="gc-input" autoComplete="new-password" /></Field>
+        {error && <p className="text-xs font-semibold" style={{ color: "var(--overdue)" }}>{error}</p>}
+        <button type="submit" disabled={busy || !password} className="w-full text-sm font-bold px-4 py-2.5 rounded-xl text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}>
+          {busy ? "Saving…" : "Save new password"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function GrowthCabinetApp() {
-  const { session, profile, profileError, authLoading, reloadProfile } = useSession();
+  const { session, profile, profileError, authLoading, reloadProfile, recovering, finishRecovery } = useSession();
   // Owners and users ('admin') both get the whole app; only owners manage users.
   const isOwner = profile?.role === "owner";
   const isAdmin = isOwner || profile?.role === "admin";
@@ -5605,6 +5670,8 @@ export default function GrowthCabinetApp() {
   const pendingCount = requests.filter((r) => r.status === "pending").length;
 
   if (authLoading) return <LoadingScreen />;
+  // Arrived from a password-reset email: new password first.
+  if (session && recovering) return <SetNewPasswordScreen email={session.user?.email} onDone={finishRecovery} />;
   // Signed in, but the profile (and so the admin role) couldn't be read -
   // say so, rather than quietly showing an admin the public form.
   if (session && profileError) {

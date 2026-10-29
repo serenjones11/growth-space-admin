@@ -1006,6 +1006,15 @@ export async function updateOwnName(userId, fullName) {
   if (error) throw error;
 }
 
+/* "Forgot password?" on the sign-in form: Supabase emails a link back to
+   this site, which opens SetNewPasswordScreen. It says nothing about
+   whether the address has an account. The site's address must be in the
+   Supabase project's Auth -> URL Configuration redirect list. */
+export async function sendPasswordReset(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+  if (error) throw error;
+}
+
 export async function changeOwnPassword(password) {
   const { error } = await supabase.auth.updateUser({ password });
   if (error) throw error;
