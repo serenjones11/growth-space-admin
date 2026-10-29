@@ -1087,6 +1087,7 @@ create table notification_preferences (
   admin_id                 uuid primary key references profiles(id) on delete cascade,
   notify_new_requisition   boolean not null default true,
   notify_end_date_reminder boolean not null default true,
+  notify_amended_requisition boolean not null default true,
   discipline_scope         text not null default 'all' check (discipline_scope in ('all','plant','insect')),
   updated_at               timestamptz not null default now()
 );

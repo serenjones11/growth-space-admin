@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("./supabaseClient", () => ({ supabase: {} }));
-const { buildSheets } = await import("./backup");
+const { buildSheets, computeUsage } = await import("./backup");
 
 process.env.TZ = "Europe/London";
 
@@ -131,5 +131,54 @@ describe("buildSheets", () => {
     ]);
     expect(sheet("Maintenance").rows[0].category).toBe("");
     expect(sheet("Maintenance").rows[1].cost).toBe(45.5);
+  });
+});
+
+describe("computeUsage", () => {
+  const usageData = {
+    units: [unit({ id: "GC-01" }), unit({ id: "GC-02" })],
+    requisitions: [
+      req({ id: "a", status: "completed", completed_date: "2026-10-10T17:00:00+00:00" }),
+      req({ id: "b", status: "completed", completed_date: "2026-10-14T17:00:00+00:00", lab_group_id: "lab2" }),
+      req({ id: "c", status: "completed", completed_date: "2026-09-10T12:00:00+00:00" }),
+      req({ id: "d", status: "approved" }),
+    ],
+    bookings: [
+      // GC-01: 1-10 Oct, shared with another lab 5-14 Oct -> 14 distinct days.
+      booking({ requisition_id: "a", unit_id: "GC-01", lab_group_id: "lab1", discipline: "plant", start_date: "2026-10-01", end_date: "2026-10-10", requisitions: { status: "completed" } }),
+      booking({ requisition_id: "b", unit_id: "GC-01", lab_group_id: "lab2", discipline: "insect", start_date: "2026-10-05", end_date: "2026-10-14", requisitions: { status: "completed" } }),
+      // GC-02: booked to 30 Sep but completed early on 10 Sep -> 1-10 Sep only.
+      booking({ requisition_id: "c", unit_id: "GC-02", lab_group_id: "lab1", discipline: "plant", start_date: "2026-09-01", end_date: "2026-09-30", requisitions: { status: "completed" } }),
+      // GC-02: ended 15 Oct, never completed -> still occupying to today (22 Oct).
+      booking({ requisition_id: "d", unit_id: "GC-02", lab_group_id: "lab1", discipline: "plant", start_date: "2026-10-12", end_date: "2026-10-15", requisitions: { status: "approved" } }),
+    ],
+    labGroups: [{ id: "lab1", name: "Test Lab" }, { id: "lab2", name: "Other Lab" }],
+  };
+  const usage = computeUsage(usageData, "2026-10-22");
+  const oct = usage.months.length - 1, sep = oct - 1;
+
+  it("covers the 12 months to the current one, which runs to today", () => {
+    expect(usage.months).toHaveLength(12);
+    expect(usage.months[0].label).toBe("Nov 2025");
+    expect(usage.months[oct].label).toBe("Oct 2026 (to date)");
+    expect(usage.months[oct].days).toBe(22);
+    expect(usage.months[sep].days).toBe(30);
+  });
+
+  it("counts a shared cabinet's overlapping days once for the unit", () => {
+    const gc01 = usage.unitRows.find((r) => r.name === "GC-01");
+    expect(gc01.days).toBe(14);
+    expect(gc01.perMonth[oct]).toBeCloseTo(14 / 22);
+  });
+
+  it("stops a completed booking at its completion date and runs an overdue one to today", () => {
+    const gc02 = usage.unitRows.find((r) => r.name === "GC-02");
+    expect(gc02.perMonth[sep]).toBeCloseTo(10 / 30);
+    expect(gc02.perMonth[oct]).toBeCloseTo(11 / 22); // 12-22 Oct
+  });
+
+  it("totals unit-days per lab group and research area", () => {
+    expect(usage.labRows.map((r) => [r.name, r.days])).toEqual([["Other Lab", 10], ["Test Lab", 31]]);
+    expect(usage.areaRows.map((r) => [r.name, r.days])).toEqual([["Insect Sciences", 10], ["Plant Sciences", 31]]);
   });
 });

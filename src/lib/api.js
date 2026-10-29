@@ -1009,3 +1009,35 @@ export async function changeOwnPassword(password) {
   const { error } = await supabase.auth.updateUser({ password });
   if (error) throw error;
 }
+
+/* The signed-in admin's email preferences (notification_preferences). No
+   row means the defaults - every email, every research area - which is
+   also what's returned here, so the form always shows the real state. */
+export const DEFAULT_NOTIFICATION_PREFS = {
+  newRequisition: true, amendedRequisition: true, endDateReminder: true, disciplineScope: "all",
+};
+
+export async function fetchOwnNotificationPrefs(userId) {
+  const { data, error } = await supabase.from("notification_preferences")
+    .select("notify_new_requisition, notify_amended_requisition, notify_end_date_reminder, discipline_scope")
+    .eq("admin_id", userId).maybeSingle();
+  if (error) throw error;
+  if (!data) return { ...DEFAULT_NOTIFICATION_PREFS };
+  return {
+    newRequisition: data.notify_new_requisition,
+    amendedRequisition: data.notify_amended_requisition,
+    endDateReminder: data.notify_end_date_reminder,
+    disciplineScope: data.discipline_scope,
+  };
+}
+
+export async function saveOwnNotificationPrefs(userId, prefs) {
+  const { error } = await supabase.from("notification_preferences").upsert({
+    admin_id: userId,
+    notify_new_requisition: !!prefs.newRequisition,
+    notify_amended_requisition: !!prefs.amendedRequisition,
+    notify_end_date_reminder: !!prefs.endDateReminder,
+    discipline_scope: prefs.disciplineScope,
+  });
+  if (error) throw error;
+}

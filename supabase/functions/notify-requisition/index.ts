@@ -157,7 +157,7 @@ function renderRequisitionPreview(r: Record<string, any>, unitTypeLabel: string,
 
   const flags = [
     r.pest_consent ? ["pest_consent", "Pest management consent given"] : null,
-    r.invertebrate_welfare_ack ? ["invertebrate_welfare_ack", "Invertebrate Welfare Policy read and understood"] : null,
+    r.invertebrate_welfare_ack ? ["invertebrate_welfare_ack", "Invertebrate Welfare Policy"] : null,
     r.dimming_required ? ["dimming_required", "Corridor dimming required"] : null,
     r.safety_compliance ? ["safety_compliance", "Safety compliance confirmed"] : null,
   ].filter(Boolean) as [string, string][];
@@ -297,10 +297,11 @@ function daysUntil(isoDate: string): number {
 // admin-facing email, honouring each one's
 // notification_preferences row. A missing row means the defaults (every
 // email, every discipline) - see 20260922145959_notification_preferences.sql.
-async function adminRecipients(pref: "notify_new_requisition" | "notify_end_date_reminder", discipline: string): Promise<string[]> {
+type AdminPref = "notify_new_requisition" | "notify_amended_requisition" | "notify_end_date_reminder";
+async function adminRecipients(pref: AdminPref, discipline: string): Promise<string[]> {
   const { data: admins, error } = await supabase
     .from("profiles")
-    .select("id, prefs:notification_preferences(notify_new_requisition, notify_end_date_reminder, discipline_scope)")
+    .select("id, prefs:notification_preferences(notify_new_requisition, notify_amended_requisition, notify_end_date_reminder, discipline_scope)")
     .in("role", ["admin", "owner"]);
   if (error) throw error;
 
@@ -372,11 +373,9 @@ Deno.serve(async (req) => {
   if (type === "new_requisition" || type === "requisition_amended" || type === "end_date_reminder") {
     let emails: string[];
     try {
-      // Amendments go to whoever gets new-requisition emails.
-      emails = await adminRecipients(
-        type === "end_date_reminder" ? "notify_end_date_reminder" : "notify_new_requisition",
-        req_.discipline,
-      );
+      const pref: AdminPref = type === "end_date_reminder" ? "notify_end_date_reminder"
+        : type === "requisition_amended" ? "notify_amended_requisition" : "notify_new_requisition";
+      emails = await adminRecipients(pref, req_.discipline);
     } catch (adminErr) {
       console.error("admin lookup failed", adminErr);
       return new Response("admin lookup failed", { status: 500 });

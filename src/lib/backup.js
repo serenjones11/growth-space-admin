@@ -5,7 +5,7 @@
    re-imports. ExcelJS is loaded only when the button is clicked, so it
    doesn't weigh down the app's normal load. */
 import * as api from "./api";
-import { bookingDateState, daysUntil, ENDING_SOON_DAYS } from "./dates";
+import { bookingDateState, daysUntil, ENDING_SOON_DAYS, localISODate } from "./dates";
 
 const UNIT_TYPE = { cabinet: "Growth cabinet", reftech: "Reftech room" };
 const FLOOR = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
@@ -37,6 +37,109 @@ const fmtDateTime = (d) => `${String(d.getDate()).padStart(2, "0")}/${String(d.g
 /* Booking state from dates - the same rules as the app's status colours. */
 const DATE_STATE_LABEL = { upcoming: "Upcoming", overdue: "Overdue", warning: "Ending soon", current: "Current" };
 const dateState = (start, end) => DATE_STATE_LABEL[bookingDateState(start, end)];
+
+/* ---- Usage report ----
+   How much each unit was occupied, month by month, over the last 12 months
+   (the current month counted to today), plus booked unit-days per lab group
+   and per research area. A booking occupies a unit from its start date to
+   its end date - or to when it was marked completed, if that was earlier;
+   one past its end date but not yet completed still occupies it to today.
+   Overlapping bookings on one unit (a shared cabinet, a reftech room's
+   several occupants) count that day once for the unit's occupancy, but
+   each lab's day separately in the lab and research-area tables. */
+const MONTH_NAME = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayNum = (iso) => {
+  const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
+  return Date.UTC(y, m - 1, d) / 86400000;
+};
+
+function computeUsage(data, todayISO = localISODate()) {
+  const today = dayNum(todayISO);
+  const [ty, tm] = todayISO.split("-").map(Number);
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const first = new Date(Date.UTC(ty, tm - 1 - i, 1));
+    const start = first.getTime() / 86400000;
+    const nextStart = Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1) / 86400000;
+    const end = Math.min(nextStart - 1, today);
+    months.push({ label: `${MONTH_NAME[first.getUTCMonth()]} ${first.getUTCFullYear()}${i === 0 ? " (to date)" : ""}`, start, end, days: end - start + 1 });
+  }
+  const windowStart = months[0].start;
+
+  const reqById = Object.fromEntries(data.requisitions.map((r) => [r.id, r]));
+  const labName = Object.fromEntries(data.labGroups.map((g) => [g.id, g.name]));
+  const spans = data.bookings
+    .filter((b) => ["approved", "pending", "completed"].includes(b.requisitions?.status))
+    .map((b) => {
+      const req = reqById[b.requisition_id];
+      let end = dayNum(b.end_date);
+      if (b.requisitions.status === "completed" && req?.completed_date) end = Math.min(end, dayNum(req.completed_date));
+      else if (end < today) end = today; // past its end date, not yet completed
+      return {
+        unit: b.unit_id, lab: labName[b.lab_group_id] || "No lab group",
+        area: DISCIPLINE[b.discipline] || "Not set",
+        start: Math.max(dayNum(b.start_date), windowStart), end: Math.min(end, today),
+      };
+    })
+    .filter((x) => x.end >= x.start);
+
+  const daysIn = (x, m) => Math.max(0, Math.min(x.end, m.end) - Math.max(x.start, m.start) + 1);
+
+  const unitRows = data.units.map((u) => {
+    const own = spans.filter((x) => x.unit === u.id);
+    let total = 0;
+    const perMonth = months.map((m) => {
+      const covered = new Set();
+      own.forEach((x) => { for (let d = Math.max(x.start, m.start); d <= Math.min(x.end, m.end); d++) covered.add(d); });
+      total += covered.size;
+      return covered.size / m.days;
+    });
+    const allDays = months.reduce((n, m) => n + m.days, 0);
+    return { name: u.id, type: UNIT_TYPE[u.type] || u.type, perMonth, days: total, overall: total / allDays };
+  });
+
+  const groupBy = (key) => {
+    const names = [...new Set(spans.map((x) => x[key]))].sort((a, b) => a.localeCompare(b));
+    return names.map((name) => {
+      const perMonth = months.map((m) => spans.filter((x) => x[key] === name).reduce((n, x) => n + daysIn(x, m), 0));
+      return { name, perMonth, days: perMonth.reduce((a, b) => a + b, 0) };
+    });
+  };
+  return { months, unitRows, labRows: groupBy("lab"), areaRows: groupBy("area") };
+}
+
+function addUsageSheet(wb, usage) {
+  const ws = wb.addWorksheet("Usage", { views: [{ state: "frozen", xSplit: 1 }] });
+  ws.getColumn(1).width = 24;
+  usage.months.forEach((_, i) => { ws.getColumn(i + 2).width = 12; });
+  ws.getColumn(usage.months.length + 2).width = 14;
+  ws.getColumn(usage.months.length + 3).width = 14;
+
+  const title = ws.addRow(["Usage report - last 12 months"]);
+  title.font = { bold: true, size: 14 };
+  const intro = ws.addRow(["Occupancy is the share of each month's days a unit had a booking in it. A booking counts until its end date, or until it was marked completed if sooner."]);
+  intro.font = { italic: true, color: { argb: "FF5C6D65" } };
+
+  const table = (heading, firstCol, rows, { percent, extra }) => {
+    ws.addRow([]);
+    ws.addRow([heading]).font = { bold: true, size: 12 };
+    const head = ws.addRow([firstCol, ...usage.months.map((m) => m.label), ...extra.map((e) => e.header)]);
+    head.font = { bold: true };
+    head.eachCell((c) => { c.fill = HEADER_FILL; c.border = HEADER_BORDER; c.alignment = { wrapText: true, vertical: "top" }; });
+    if (!rows.length) { ws.addRow(["No bookings in this period"]).font = { italic: true }; return; }
+    rows.forEach((r) => {
+      const row = ws.addRow([r.name, ...r.perMonth, ...extra.map((e) => e.value(r))]);
+      if (percent) usage.months.forEach((_, i) => { row.getCell(i + 2).numFmt = "0%"; });
+      extra.forEach((e, i) => { if (e.numFmt) row.getCell(usage.months.length + 2 + i).numFmt = e.numFmt; });
+    });
+  };
+  table("Occupancy by unit", "Unit", usage.unitRows, {
+    percent: true,
+    extra: [{ header: "Days occupied", value: (r) => r.days }, { header: "12-month occupancy", value: (r) => r.overall, numFmt: "0%" }],
+  });
+  table("Booked unit-days by lab group", "Lab group", usage.labRows, { percent: false, extra: [{ header: "Total", value: (r) => r.days }] });
+  table("Booked unit-days by research area", "Research area", usage.areaRows, { percent: false, extra: [{ header: "Total", value: (r) => r.days }] });
+}
 
 /* Each sheet: [{ header, key, date?, width? }] columns + plain row objects. */
 function buildSheets(data) {
@@ -204,11 +307,13 @@ export async function downloadFullBackup({ exportedBy }) {
   head.font = { bold: true };
   head.eachCell((c) => { c.fill = HEADER_FILL; c.border = HEADER_BORDER; });
   sheets.forEach((s) => summary.addRow([s.name, s.rows.length]));
+  summary.addRow(["Usage", "12-month report"]);
   summary.addRow([]);
   const note = summary.addRow(["Note", "Contains personal data (names, emails, emergency numbers) - store somewhere access-restricted."]);
   note.font = { italic: true, color: { argb: "FF5C6D65" } };
 
   sheets.forEach((s) => addDataSheet(wb, s));
+  addUsageSheet(wb, computeUsage(data));
 
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -223,4 +328,4 @@ export async function downloadFullBackup({ exportedBy }) {
 }
 
 // Exported for testing the column mapping without a browser download.
-export { buildSheets };
+export { buildSheets, computeUsage };

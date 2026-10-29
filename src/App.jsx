@@ -4903,6 +4903,76 @@ function AccountSection({ profile, email, onSaveName }) {
   );
 }
 
+/* Which notification emails the signed-in owner/user gets - one switch per
+   admin email the notify-requisition Edge Function sends, plus which
+   research area's requisitions they cover. Each change saves straight away. */
+const EMAIL_PREF_OPTIONS = [
+  { key: "newRequisition", label: "New requisitions", hint: "When a researcher submits a request" },
+  { key: "amendedRequisition", label: "Amended requisitions", hint: "When a researcher changes a request, with the changes marked" },
+  { key: "endDateReminder", label: "Ending soon", hint: "About two weeks before an approved requisition's end date" },
+];
+function EmailPrefsSection({ userId }) {
+  const [prefs, setPrefs] = useState(null);
+  const [status, setStatus] = useState(null); // { ok, text }
+  useEffect(() => {
+    let live = true;
+    api.fetchOwnNotificationPrefs(userId)
+      .then((p) => { if (live) setPrefs(p); })
+      .catch((err) => { if (live) setStatus({ ok: false, text: err.message || "Couldn't load your email preferences." }); });
+    return () => { live = false; };
+  }, [userId]);
+
+  const update = async (change) => {
+    const previous = prefs;
+    const next = { ...prefs, ...change };
+    setPrefs(next);
+    setStatus(null);
+    try {
+      await api.saveOwnNotificationPrefs(userId, next);
+      setStatus({ ok: true, text: "Saved." });
+    } catch (err) {
+      setPrefs(previous);
+      setStatus({ ok: false, text: err.message || "Couldn't save that - please try again." });
+    }
+  };
+
+  return (
+    <div className="gc-card p-5 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="gc-display font-bold text-sm">Email notifications</h3>
+        {status && <span className="text-xs font-semibold" style={{ color: status.ok ? "var(--free)" : "var(--overdue)" }}>{status.text}</span>}
+      </div>
+      {!prefs ? (
+        !status && <p className="text-sm" style={{ color: "var(--ink-soft)" }}>Loading…</p>
+      ) : (
+        <>
+          <div className="space-y-2">
+            {EMAIL_PREF_OPTIONS.map((o) => (
+              <label key={o.key} className="flex items-start gap-3 rounded-xl px-3 py-2.5 cursor-pointer" style={{ border: "1px solid var(--border)" }}>
+                <input type="checkbox" checked={!!prefs[o.key]} onChange={(e) => update({ [o.key]: e.target.checked })} className="mt-0.5" style={{ accentColor: "var(--accent)" }} />
+                <span>
+                  <span className="text-sm font-semibold block">{o.label}</span>
+                  <span className="text-xs" style={{ color: "var(--ink-soft)" }}>{o.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <Field label="Research area">
+            <select value={prefs.disciplineScope} onChange={(e) => update({ disciplineScope: e.target.value })} className="gc-input" style={{ width: "auto" }}>
+              <option value="all">Plant and Insect Sciences</option>
+              <option value="plant">Plant Sciences only</option>
+              <option value="insect">Insect Sciences only</option>
+            </select>
+          </Field>
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
+            Researchers are emailed automatically when their request is approved, and again if its dates or unit change.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function AddUserForm({ onCreate, onCancel }) {
   const [form, setForm] = useState({ fullName: "", email: "", role: "admin", password: generatePassword() });
   const [error, setError] = useState("");
@@ -5082,6 +5152,7 @@ function SettingsPage({ profile, session, isOwner, onSaveName }) {
     <div className="space-y-5 max-w-3xl">
       <h1 className="gc-display text-2xl font-extrabold">Settings</h1>
       <AccountSection key={profile?.full_name} profile={profile} email={session?.user?.email || ""} onSaveName={onSaveName} />
+      {session?.user?.id && <EmailPrefsSection userId={session.user.id} />}
       <UsersSection currentUserId={session?.user?.id} isOwner={isOwner} />
     </div>
   );

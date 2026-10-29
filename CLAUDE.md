@@ -167,7 +167,8 @@ arbitrary addresses without custom SMTP); people change it on the Settings page.
 `maintenance_categories`, `units`, `rooms`, `requisitions`, `bookings`, `service_log`,
 `documents`, `activity_log`, `species_options`, `light_cycle_options`, `requisition_code_counters`, `manufacturers`,
 `notification_preferences`, `backup_log` (when the Dashboard "Full backup" Excel export (GrowSpace-Backup-DD-MM-YYYY.xlsx) was last
-downloaded — `src/lib/backup.js` builds the workbook client-side with a lazily loaded `exceljs`).
+downloaded — `src/lib/backup.js` builds the workbook client-side with a lazily loaded `exceljs`,
+including a 12-month "Usage" sheet: occupancy per unit and booked unit-days per lab and research area).
 
 **RLS shape**: admins (`profiles.role = 'admin'`, checked via `is_admin()`) can read/write
 everything. Everyone else — including anonymous visitors, since there's no researcher SSO yet —
@@ -182,8 +183,9 @@ fields in red, when a researcher amends one - see schema.sql section 24); the re
 assigned" email once a unit is assigned, re-sent if an admin later edits the dates or unit; and
 admins get an "ending soon" email ~2 weeks before an approved requisition's end date (daily
 `pg_cron` job `send-end-date-reminders`, re-armed if the end date moves). Admin emails respect
-each admin's `notification_preferences` row (no row = everything); there's no UI for that table
-yet, so for now it's set directly in the database. Auth
+each admin's `notification_preferences` row (no row = everything): one switch per admin email
+(new, amended, ending soon) plus a research-area scope, set by each owner/user on the Settings
+page's "Email notifications" section. Auth
 is a shared secret (`x-webhook-secret`, stored in `supabase_vault`), since Postgres triggers have
 no user session to attach a JWT to — that's also why the function has `verify_jwt: false`.
 Secrets (`RESEND_API_KEY`, `WEBHOOK_SECRET`, optionally `NOTIFY_FROM_EMAIL`/`APP_URL`) are set as
