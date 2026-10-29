@@ -5487,15 +5487,17 @@ export default function GrowthCabinetApp() {
     await reload();
   });
 
-  const handleAmendRequisition = withErrorAlert(async (index, payload) => {
+  // Not wrapped in withErrorAlert: the request form handles the error
+  // itself, so a failed submission isn't shown as sent.
+  const handleAmendRequisition = async (index, payload) => {
     await api.amendRequisition(requests[index].id, payload);
     await reload();
-  });
+  };
 
-  const handleSubmitRequisition = withErrorAlert(async (payload) => {
+  const handleSubmitRequisition = async (payload) => {
     await api.submitRequisition(payload, session ? session.user.id : null);
     if (isAdmin) await reload();
-  });
+  };
 
   const goInventory = (filter) => {
     setInventoryFilter(filter || {});
