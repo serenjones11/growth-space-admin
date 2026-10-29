@@ -345,6 +345,11 @@ function AmendedApprovalNote({ req }) {
 function requisitionTab(status) {
   return status === "pending" || status === "approved" ? "pending" : "completed";
 }
+/* Only closed requisitions (the Completed tab) can be deleted, so an active
+   one can't be deleted by a slip meant for "Mark as completed". */
+function canDeleteRequisition(req) {
+  return requisitionTab(req.status) === "completed";
+}
 
 /* Maintenance category pills are all the same neutral grey. */
 const CATEGORY_GREY = { bg: "#F1F5F3", ink: "#5C6D65", border: "#E3E8E5" };
@@ -3290,7 +3295,7 @@ function RequisitionDetailFields({ req }) {
             field("Pest outbreak consent", ["pest_consent"], (x) => (x.pestConsent ? "Consented" : "Not given"))
           ) : (
             <>
-              {field("Invertebrate Welfare Policy", ["invertebrate_welfare_ack"], (x) => (x.invertebrateWelfareAck ? "Read and understood" : "Not confirmed"))}
+              {field("Invertebrate Welfare Policy", ["invertebrate_welfare_ack"], (x) => (x.invertebrateWelfareAck ? <CheckCircle2 size={16} style={{ color: "var(--accent)" }} aria-label="Confirmed" /> : "Not confirmed"))}
               {field("Dimming required", ["dimming_required"], (x) => (x.dimmingRequired ? "Yes" : "No"))}
             </>
           )}
@@ -3492,6 +3497,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
   const avatarText = labIdx !== -1 ? OKABE_ITO_TEXT[labIdx % OKABE_ITO_TEXT.length] : "#fff";
   const initials = req.researcher.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase();
   const overdueForCompletion = req.status === "approved" && new Date(req.endDate) < TODAY;
+  const canDelete = canDeleteRequisition(req);
 
   const saveEdit = (updated) => { onEdit(index, updated); setEditing(false); };
 
@@ -3531,9 +3537,11 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                 <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
                   <Pencil size={12} /> Edit details
                 </button>
-                <button onClick={() => setConfirmingDelete(true)} className="flex items-center gap-1.5 text-xs font-bold" style={{ color: "var(--overdue)" }}>
-                  <Trash2 size={12} /> Delete
-                </button>
+                {canDelete && (
+                  <button onClick={() => setConfirmingDelete(true)} className="flex items-center gap-1.5 text-xs font-bold" style={{ color: "var(--overdue)" }}>
+                    <Trash2 size={12} /> Delete
+                  </button>
+                )}
               </div>
               <RequisitionDetailFields req={req} />
 
@@ -3650,6 +3658,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   if (!req) return null;
   const strongStatus = requisitionStrongStatus(req);
+  const canDelete = canDeleteRequisition(req);
   const choices = assignableUnits(units, req);
   const moveChoices = assignableUnits(units, req, req.assignedUnitId);
   const saveEdit = (updated) => { onEdit(index, updated); setEditing(false); };
@@ -3682,7 +3691,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
             {!editing && (
               <>
                 <button onClick={() => setEditing(true)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--surface-soft)" }} title="Edit"><Pencil size={15} /></button>
-                <button onClick={() => setConfirmingDelete(true)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }} title="Delete"><Trash2 size={15} /></button>
+                {canDelete && <button onClick={() => setConfirmingDelete(true)} className="w-9 h-9 flex items-center justify-center rounded-xl" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }} title="Delete"><Trash2 size={15} /></button>}
               </>
             )}
             {/* This panel opened over a unit's detail modal (still open
@@ -4630,14 +4639,10 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Email *"><input required type="email" value={form.email} onChange={set("email")} className="gc-input" placeholder="a.reyes@university.ac.uk" /></Field>
-            <Field label="Emergency Number *"><input required value={form.emergencyNumber} onChange={set("emergencyNumber")} className="gc-input" placeholder="Mobile number" /></Field>
+            <Field label="Emergency Number"><input value={form.emergencyNumber} onChange={set("emergencyNumber")} className="gc-input" placeholder="Mobile number" /></Field>
           </div>
 
-          {form.role === "PI / Academic Staff" ? (
-            <div className="rounded-xl p-3 text-sm font-medium" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
-              This requisition will be attached to you as PI.
-            </div>
-          ) : (
+          {form.role !== "PI / Academic Staff" && (
             <>
               <Field label="PI *">
                 <select required value={form.labGroupId} onChange={set("labGroupId")} className="gc-input" disabled={piGroupsLoading}>
