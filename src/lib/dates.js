@@ -57,3 +57,25 @@ export function bookingDateState(startDate, endDate, todayDate = today()) {
 export function monthKey(isoDate) {
   return String(isoDate).slice(0, 7);
 }
+
+/* "YYYY-MM-DD" plus n days, as "YYYY-MM-DD" (UTC arithmetic, so no
+   daylight-saving drift). */
+export function addDays(isoDate, n) {
+  const d = new Date(String(isoDate).slice(0, 10));
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/* The earliest start, on or after startDate, at which a stay as long as
+   startDate..endDate fits without overlapping any of `ranges`
+   ([{ startDate, endDate }], inclusive). */
+export function earliestFreeStart(ranges, startDate, endDate) {
+  const length = daysUntil(endDate, new Date(startDate));
+  let start = startDate;
+  for (;;) {
+    const end = addDays(start, length);
+    const blocking = ranges.filter((r) => rangesOverlap(start, end, r.startDate, r.endDate));
+    if (!blocking.length) return start;
+    start = addDays(blocking.reduce((m, r) => (r.endDate > m ? r.endDate : m), blocking[0].endDate), 1);
+  }
+}

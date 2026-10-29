@@ -50,7 +50,7 @@ import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
 import * as api from "./lib/api";
 import { downloadFullBackup } from "./lib/backup";
-import { bookingDateState, daysUntil as daysFrom, fmtGB, localISODate, rangesOverlap, today } from "./lib/dates";
+import { addDays, bookingDateState, daysUntil as daysFrom, earliestFreeStart, fmtGB, localISODate, rangesOverlap, today } from "./lib/dates";
 
 /* ---------------------------------------------------------------------- */
 /* Design tokens - dark sidebar / light workspace, warm-green readouts     */
@@ -285,6 +285,37 @@ function UnitOptions({ choices, freeSuffix = () => "" }) {
         </optgroup>
       )}
     </>
+  );
+}
+/* When no unit is free for a requisition's whole requested window: the
+   cabinets that free up soonest for a stay of the same length, earliest
+   first - so the admin can suggest new dates instead of sharing. */
+function nextAvailableUnits(units, req, limit = 3) {
+  const length = daysFrom(req.endDate, new Date(req.startDate));
+  return units
+    .filter((u) => u.type === req.unitType && u.status !== "service")
+    .map((u) => {
+      const ranges = (u.bookings || []).filter((b) => b.requisitionId !== req.id);
+      const start = earliestFreeStart(ranges, req.startDate, req.endDate);
+      return { unit: u, start, end: addDays(start, length) };
+    })
+    .sort((a, b) => a.start.localeCompare(b.start) || a.unit.id.localeCompare(b.unit.id, undefined, { numeric: true }))
+    .slice(0, limit);
+}
+function NextAvailableNotice({ units, req, choices }) {
+  if (choices.free.length > 0) return null;
+  const next = nextAvailableUnits(units, req);
+  if (!next.length) return null;
+  return (
+    <div className="text-[11.5px] rounded-lg px-2.5 py-2" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--ink)" }}>
+      <div className="font-semibold mb-1">No unit is free for the whole of {fmtGB(req.startDate)} → {fmtGB(req.endDate)}. Next available for the same length:</div>
+      <ul className="space-y-0.5">
+        {next.map(({ unit, start, end }) => (
+          <li key={unit.id}><span className="font-bold">{unit.id}</span> - {FLOOR_LABEL[unit.floor]}, {unit.room}: {fmtGB(start)} → {fmtGB(end)}</li>
+        ))}
+      </ul>
+      <div className="mt-1" style={{ color: "var(--ink-soft)" }}>Change the dates with Edit details, or share a cabinet below.</div>
+    </div>
   );
 }
 /* Shown under a unit picker when the chosen cabinet would be shared. */
@@ -2906,6 +2937,66 @@ function UnitDetailContent({
   );
 }
 
+/* Small pop-up messages, bottom-right, in place of browser alerts:
+   toast("Saved") for a success, toast(msg, { kind: "error" }) for a
+   problem, and an optional { action: { label, onClick } } such as Undo.
+   Any component can call toast(); <Toaster /> (rendered once at the app
+   root) shows them. Errors stay up longer than successes. */
+const toastListeners = new Set();
+let toastSeq = 0;
+function toast(text, { kind = "success", action = null } = {}) {
+  const t = { id: ++toastSeq, text, kind, action, duration: kind === "error" ? 8000 : action ? 6000 : 3500 };
+  toastListeners.forEach((listener) => listener(t));
+}
+const TOAST_STYLE = {
+  success: { icon: CheckCircle2, color: "var(--accent)" },
+  error: { icon: AlertTriangle, color: "var(--overdue)" },
+};
+function Toaster() {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    const timers = new Set();
+    const dismiss = (id) => setItems((xs) => xs.filter((x) => x.id !== id));
+    const add = (t) => {
+      setItems((xs) => [...xs.slice(-3), t]);
+      const timer = setTimeout(() => { timers.delete(timer); dismiss(t.id); }, t.duration);
+      timers.add(timer);
+    };
+    toastListeners.add(add);
+    return () => { toastListeners.delete(add); timers.forEach(clearTimeout); };
+  }, []);
+  if (!items.length) return null;
+  return createPortal(
+    <div className="flex flex-col items-end gap-2" style={{ position: "fixed", right: 16, bottom: 16, left: 16, zIndex: 100, pointerEvents: "none", fontFamily: "'Inter', sans-serif" }} aria-live="polite">
+      {items.map((t) => {
+        const { icon: Icon, color } = TOAST_STYLE[t.kind] || TOAST_STYLE.success;
+        return (
+          <div
+            key={t.id} role={t.kind === "error" ? "alert" : "status"}
+            className="flex items-start gap-2.5 rounded-xl px-3.5 py-2.5 shadow-lg text-sm"
+            style={{ pointerEvents: "auto", maxWidth: 420, background: "var(--surface)", border: "1px solid var(--border)", borderLeft: `4px solid ${color}`, color: "var(--ink)" }}
+          >
+            <Icon size={16} style={{ color, flexShrink: 0, marginTop: 1 }} />
+            <span className="flex-1 font-medium">{t.text}</span>
+            {t.action && (
+              <button
+                onClick={() => { setItems((xs) => xs.filter((x) => x.id !== t.id)); t.action.onClick(); }}
+                className="text-xs font-bold px-2 py-0.5 rounded-md flex-shrink-0" style={{ color: "var(--accent-dark)", background: "var(--accent-soft)" }}
+              >
+                {t.action.label}
+              </button>
+            )}
+            <button onClick={() => setItems((xs) => xs.filter((x) => x.id !== t.id))} aria-label="Dismiss" className="flex-shrink-0" style={{ color: "var(--ink-faint)" }}>
+              <X size={14} />
+            </button>
+          </div>
+        );
+      })}
+    </div>,
+    document.body,
+  );
+}
+
 /* Generic confirm-before-destructive-action popup - matches the app's
    existing overlay/card styling rather than a bare window.confirm(). */
 function ConfirmDialog({ title, message, confirmLabel = "Delete", onConfirm, onCancel }) {
@@ -2943,7 +3034,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
   const hasActiveBooking = !!unitOccupant(unit);
   const handleDeleteClick = () => {
     if (hasActiveBooking) {
-      window.alert("This unit currently has an active booking - complete or reassign that requisition before deleting it.");
+      toast("This unit has an active booking - complete or move that requisition before deleting it.", { kind: "error" });
       return;
     }
     setConfirmingDelete(true);
@@ -3566,6 +3657,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
                     />
                   </select>
                   {choices.free.length + choices.shared.length === 0 && <p className="text-xs" style={{ color: "var(--overdue)" }}>No units of this type are in service.</p>}
+                  <NextAvailableNotice units={units} req={req} choices={choices} />
                   <ShareNotice choices={choices} unitId={chosenUnit} />
                   <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
@@ -3721,6 +3813,7 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
                     <option value="">Select a unit…</option>
                     <UnitOptions choices={choices} />
                   </select>
+                  <NextAvailableNotice units={units} req={req} choices={choices} />
                   <ShareNotice choices={choices} unitId={chosenUnit} />
                   <AmendedApprovalNote req={req} />
                   <div className="flex gap-2 pt-1">
@@ -4394,7 +4487,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
   // Resolve to true on success, as ManageListPanel expects.
   const speciesAction = (fn, failMsg) => async (...args) => {
     try { await fn(...args); await reloadSpeciesOptions(); return true; }
-    catch (err) { window.alert(err.message || failMsg); return false; }
+    catch (err) { toast(err.message || failMsg, { kind: "error" }); return false; }
   };
   const handleAddSpeciesOption = speciesAction((name) => api.addSpeciesOption(discipline, name), "Couldn't add that species.");
   const handleRenameSpeciesOption = speciesAction((row, name) => api.renameSpeciesOption(row.id, name), "Couldn't rename that species.");
@@ -4592,15 +4685,15 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
           // "required" attribute can't stop submission the way it does for
           // the other fields above - check explicitly instead.
           if (!form.startDate || !form.endDate) {
-            window.alert("Please select a start and end date.");
+            toast("Please select a start and end date.", { kind: "error" });
             return;
           }
           if (form.endDate < form.startDate) {
-            window.alert("The end date is before the start date.");
+            toast("The end date is before the start date.", { kind: "error" });
             return;
           }
           if (!form.species.length) {
-            window.alert("Please select at least one species (or add your own with +).");
+            toast("Please select at least one species (or add your own with +).", { kind: "error" });
             return;
           }
           setSubmitting(true);
@@ -4623,7 +4716,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
             setSubmitted(true);
           } catch (err) {
             console.error(err);
-            window.alert(err.message || "Something went wrong submitting this - please try again.");
+            toast(err.message || "Something went wrong submitting this - please try again.", { kind: "error" });
           } finally {
             setSubmitting(false);
           }
@@ -5037,7 +5130,7 @@ function UsersSection({ currentUserId, isOwner }) {
       setUsers(await fn());
       return true;
     } catch (err) {
-      window.alert(err.message);
+      toast(err.message, { kind: "error" });
       return false;
     } finally {
       setBusyId(null);
@@ -5303,7 +5396,7 @@ export default function GrowthCabinetApp() {
       return await fn(...args);
     } catch (err) {
       console.error(err);
-      window.alert(err.message || "Something went wrong saving that - see the console for details.");
+      toast(err.message || "Something went wrong saving that - please try again.", { kind: "error" });
     }
   };
 
@@ -5312,12 +5405,14 @@ export default function GrowthCabinetApp() {
     setEditingUnit(undefined);
     setSelected(null);
     await reload();
+    toast(options?.isNew ? `${data.id} added` : `${data.id} saved`);
   });
 
   const handleDeleteUnit = withErrorAlert(async (unitId) => {
     await api.deleteUnit(unitId);
     setSelected(null);
     await reload();
+    toast(`${unitId} deleted`);
   });
 
   const handleAddRoom = withErrorAlert(async (floor, type, name) => {
@@ -5346,6 +5441,7 @@ export default function GrowthCabinetApp() {
     await downloadFullBackup({ exportedBy: profile?.full_name || session?.user?.email || "" });
     await api.recordBackup(session.user.id);
     await refreshLastBackup();
+    toast("Full backup downloaded");
     return true;
   });
   const handleAddLightCycle = withErrorAlert(async (name) => {
@@ -5438,6 +5534,7 @@ export default function GrowthCabinetApp() {
     // local form state starts as a spread of the original), not a partial patch.
     await api.editRequisition(requests[index].id, updates);
     await reload();
+    toast("Requisition updated");
   });
 
   /* Assigning a requisition to a cabinet already booked for its dates is
@@ -5453,6 +5550,9 @@ export default function GrowthCabinetApp() {
     await api.decideRequisition(req, decision, unitId, session?.user?.id);
     if (sharers.length) await api.markCabinetShared(unitId, req.id, sharers.map((b) => b.id));
     await reload();
+    toast(decision === "approved"
+      ? `${req.researcher}'s requisition approved${sharers.length ? ` - sharing ${unitId}` : ` on ${unitId}`}`
+      : `${req.researcher}'s requisition declined`);
   });
 
   /* Admin manually confirms an ongoing (approved) requisition has finished. This closes the
@@ -5460,13 +5560,18 @@ export default function GrowthCabinetApp() {
      stops counting as active occupancy because fetchAdminData only pulls bookings whose requisition
      is still 'approved'. */
   const handleCompleteRequisition = withErrorAlert(async (index) => {
-    await api.completeRequisition(requests[index].id, session?.user?.id);
+    const req = requests[index];
+    await api.completeRequisition(req.id, session?.user?.id);
     await reload();
+    toast(`${req.researcher}'s requisition marked as completed`, {
+      action: { label: "Undo", onClick: withErrorAlert(async () => { await api.revertRequisitionToActive(req.id); await reload(); toast("Back to active"); }) },
+    });
   });
 
   const handleRevertRequisition = withErrorAlert(async (index) => {
     await api.revertRequisitionToActive(requests[index].id);
     await reload();
+    toast("Requisition back to active");
   });
 
   const handleUpdateAdminNotes = withErrorAlert(async (index, text) => {
@@ -5480,11 +5585,13 @@ export default function GrowthCabinetApp() {
     await api.reassignRequisitionUnit(req.id, newUnitId);
     if (sharers.length) await api.markCabinetShared(newUnitId, req.id, sharers.map((b) => b.id));
     await reload();
+    toast(`Moved to ${newUnitId}`);
   });
 
   const handleDeleteRequisition = withErrorAlert(async (index) => {
     await api.deleteRequisition(requests[index].id);
     await reload();
+    toast("Requisition deleted");
   });
 
   // Not wrapped in withErrorAlert: the request form handles the error
@@ -5542,6 +5649,7 @@ export default function GrowthCabinetApp() {
     return (
       <div className="gc-app min-h-screen">
         <style>{TOKENS}</style>
+        <Toaster />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
         <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
@@ -5578,6 +5686,7 @@ export default function GrowthCabinetApp() {
   return (
     <div className="gc-app min-h-screen flex">
       <style>{TOKENS}</style>
+      <Toaster />
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bookingDateState, daysUntil, fmtGB, localISODate, monthKey, rangesOverlap, today } from "./dates";
+import { addDays, bookingDateState, daysUntil, earliestFreeStart, fmtGB, localISODate, monthKey, rangesOverlap, today } from "./dates";
 
 // The facility is in the UK; pin the zone so BST edge cases are exercised
 // whatever machine runs the tests.
@@ -59,5 +59,31 @@ describe("formatting", () => {
   });
   it("monthKey is the YYYY-MM prefix", () => {
     expect(monthKey("2026-09-30")).toBe("2026-09");
+  });
+});
+
+describe("addDays", () => {
+  it("crosses month, year and clock-change boundaries", () => {
+    expect(addDays("2026-10-31", 1)).toBe("2026-11-01");
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+    expect(addDays("2026-10-24", 2)).toBe("2026-10-26");
+    expect(addDays("2026-03-01", -1)).toBe("2026-02-28");
+  });
+});
+
+describe("earliestFreeStart", () => {
+  const booked = [
+    { startDate: "2026-11-01", endDate: "2026-11-30" },
+    { startDate: "2026-12-05", endDate: "2026-12-20" },
+  ];
+  it("keeps the requested start when nothing overlaps", () => {
+    expect(earliestFreeStart(booked, "2026-10-01", "2026-10-20")).toBe("2026-10-01");
+  });
+  it("moves past a blocking booking", () => {
+    // 10 days from 15 Nov is blocked until 30 Nov; 1-10 Dec then hits the 5 Dec booking.
+    expect(earliestFreeStart(booked, "2026-11-15", "2026-11-24")).toBe("2026-12-21");
+  });
+  it("fits into a gap long enough", () => {
+    expect(earliestFreeStart(booked, "2026-11-15", "2026-11-18")).toBe("2026-12-01");
   });
 });
