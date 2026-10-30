@@ -14,7 +14,6 @@ import {
   Droplets,
   Wrench,
   Sun,
-  User,
   CalendarClock,
   CheckCircle2,
   XCircle,
@@ -859,23 +858,16 @@ const ACTIVITY_META = {
   requisition_deleted: { icon: Trash2, ...ACT_GONE },
   unit_added: { icon: PackagePlus, ...ACT_NEW },
   unit_deleted: { icon: PackageMinus, ...ACT_GONE },
-  unit_renamed: { icon: Pencil, ...ACT_QUIET },
-  unit_edited: { icon: Pencil, ...ACT_QUIET },
   unit_out_of_service: { icon: AlertTriangle, ...ACT_WARN },
   unit_in_service: { icon: CheckCircle2, ...ACT_GOOD },
   service_logged: { icon: Wrench, ...ACT_QUIET },
   service_scheduled: { icon: Wrench, ...ACT_WARN },
-  service_edited: { icon: Wrench, ...ACT_QUIET },
-  service_deleted: { icon: Trash2, ...ACT_GONE },
   document_added: { icon: FileText, ...ACT_NEW },
   document_removed: { icon: Trash2, ...ACT_GONE },
   lab_group_added: { icon: UserPlus, ...ACT_NEW },
   lab_group_approved: { icon: UserPlus, ...ACT_GOOD },
   lab_group_edited: { icon: Pencil, ...ACT_QUIET },
   lab_group_deleted: { icon: UserMinus, ...ACT_GONE },
-  user_added: { icon: UserPlus, ...ACT_NEW },
-  user_role_changed: { icon: User, ...ACT_QUIET },
-  user_removed: { icon: UserMinus, ...ACT_GONE },
 };
 const ACTIVITY_FALLBACK = { icon: History, ...ACT_QUIET };
 
@@ -888,7 +880,7 @@ function buildActivityFeed(activityLog = []) {
   return activityLog
     .map((a) => ({
       type: a.type, date: a.createdAt, unitId: a.unitId, requisitionId: a.requisitionId,
-      title: a.title, subtitle: [a.subtitle, a.actor && `by ${a.actor}`].filter(Boolean).join(" · "),
+      title: a.title, subtitle: a.subtitle,
     }))
     .filter((it) => it.date)
     .sort((a, b) => new Date(b.date) - new Date(a.date));

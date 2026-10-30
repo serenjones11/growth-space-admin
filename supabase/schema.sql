@@ -1529,8 +1529,10 @@ grant execute on function approve_unit_overlap(text, uuid[], uuid) to authentica
 -- ----------------------------------------------------------------------------
 -- One activity_log row per change to requisitions (submitted, approved,
 -- declined, completed, reverted, moved, re-dated, edited, amended, admin
--- notes), units (renamed, out of / back in service, edited), maintenance,
--- documents, PIs and staff logins, with actor_name = who did it.
+-- notes), units (out of / back in service), maintenance (logged, scheduled,
+-- done), documents and PIs. actor_name records who did it (not shown in
+-- the feed). CER renames/edits, maintenance edits/deletions and staff
+-- login changes are deliberately not logged.
 -- Name of the signed-in person making the current change (null for a
 -- signed-out researcher, a scheduled job or the service role).
 create or replace function activity_actor()
@@ -1632,40 +1634,17 @@ revoke execute on function log_requisition_change() from public, anon, authentic
 create or replace trigger trg_log_requisition_change after insert or update on requisitions
   for each row execute procedure log_requisition_change();
 
--- ---- Units (added/removed are already logged by trg_log_unit_insert/delete) ----
+-- ---- Units (added/removed are already logged by trg_log_unit_insert/delete;
+-- renames and other edits are deliberately left out of the feed) ----
 create or replace function log_unit_change()
 returns trigger as $$
-declare
-  changed text[] := '{}';
 begin
-  if old.id is distinct from new.id then
-    perform log_activity('unit_renamed', old.id || ' renamed to ' || new.id, null, new.id, null);
-    return new;
-  end if;
   if old.is_out_of_service is distinct from new.is_out_of_service then
     if new.is_out_of_service then
       perform log_activity('unit_out_of_service', new.id || ' marked out of service', new.floor || ', ' || new.room, new.id, null);
     else
       perform log_activity('unit_in_service', new.id || ' back in service', new.floor || ', ' || new.room, new.id, null);
     end if;
-  end if;
-  if (old.set_day_temp, old.set_night_temp, old.set_humidity, old.set_light_cycle, old.set_light_intensity, old.set_dawn_time, old.set_dusk_time)
-     is distinct from (new.set_day_temp, new.set_night_temp, new.set_humidity, new.set_light_cycle, new.set_light_intensity, new.set_dawn_time, new.set_dusk_time) then
-    changed := changed || 'current settings';
-  end if;
-  if (old.type, old.disciplines, old.floor, old.room, old.manufacturer, old.model, old.serial_number, old.asset_number, old.tscan_id,
-      old.shelves, old.lighting_type, old.ballasts, old.co2_control, old.dimming_control, old.install_date,
-      old.temp_min, old.temp_max, old.humidity_min, old.humidity_max)
-     is distinct from
-     (new.type, new.disciplines, new.floor, new.room, new.manufacturer, new.model, new.serial_number, new.asset_number, new.tscan_id,
-      new.shelves, new.lighting_type, new.ballasts, new.co2_control, new.dimming_control, new.install_date,
-      new.temp_min, new.temp_max, new.humidity_min, new.humidity_max) then
-    changed := changed || 'details';
-  end if;
-  if old.photo_url is distinct from new.photo_url then changed := changed || 'photo'; end if;
-  if old.notes is distinct from new.notes then changed := changed || 'notes'; end if;
-  if cardinality(changed) > 0 then
-    perform log_activity('unit_edited', new.id || ' updated', upper(left(array_to_string(changed, ', '), 1)) || substr(array_to_string(changed, ', '), 2), new.id, null);
   end if;
   return new;
 end;
@@ -1674,14 +1653,14 @@ revoke execute on function log_unit_change() from public, anon, authenticated;
 create or replace trigger trg_log_unit_change after update on units
   for each row execute procedure log_unit_change();
 
--- ---- Maintenance (the app re-saves every entry when one changes, so only
--- real changes are logged) ----
+-- ---- Maintenance: logged, scheduled, and scheduled work done (edits and
+-- deletions are left out of the feed; the app re-saves every entry when one
+-- changes, so only a real scheduled -> completed change is logged) ----
 create or replace function log_service_change()
 returns trigger as $$
 declare
-  r service_log := case when tg_op = 'DELETE' then old else new end;
-  cat text := (select name from maintenance_categories where id = r.category_id);
-  what text := coalesce(cat, 'Maintenance') || coalesce(' · ' || nullif(r.contractor, ''), '');
+  cat text := (select name from maintenance_categories where id = new.category_id);
+  what text := coalesce(cat, 'Maintenance') || coalesce(' · ' || nullif(new.contractor, ''), '');
 begin
   if tg_op = 'INSERT' then
     if new.status = 'scheduled' then
@@ -1689,21 +1668,14 @@ begin
     else
       perform log_activity('service_logged', new.unit_id || ' maintenance logged', what || coalesce(' · ' || nullif(new.notes, ''), ''), new.unit_id, null);
     end if;
-  elsif tg_op = 'UPDATE' then
-    if old.status = 'scheduled' and new.status = 'completed' then
-      perform log_activity('service_logged', new.unit_id || ' scheduled maintenance done', what, new.unit_id, null);
-    elsif (old.category_id, old.status, old.date, old.contractor, old.notes, old.cost)
-          is distinct from (new.category_id, new.status, new.date, new.contractor, new.notes, new.cost) then
-      perform log_activity('service_edited', new.unit_id || ' maintenance entry edited', what, new.unit_id, null);
-    end if;
-  else
-    perform log_activity('service_deleted', old.unit_id || ' maintenance entry deleted', what || ' · ' || to_char(old.date, 'DD/MM/YYYY'), old.unit_id, null);
+  elsif old.status = 'scheduled' and new.status = 'completed' then
+    perform log_activity('service_logged', new.unit_id || ' scheduled maintenance done', what, new.unit_id, null);
   end if;
   return null;
 end;
 $$ language plpgsql security definer set search_path = public;
 revoke execute on function log_service_change() from public, anon, authenticated;
-create or replace trigger trg_log_service_change after insert or update or delete on service_log
+create or replace trigger trg_log_service_change after insert or update on service_log
   for each row execute procedure log_service_change();
 
 -- ---- Documents ----
@@ -1737,33 +1709,6 @@ $$ language plpgsql security definer set search_path = public;
 revoke execute on function log_lab_group_change() from public, anon, authenticated;
 create or replace trigger trg_log_lab_group_change after update on lab_groups
   for each row execute procedure log_lab_group_change();
-
--- ---- Staff logins (Settings > Users). A new login starts as 'researcher'
--- and manage-users then gives it its role, so that update is "added". ----
-create or replace function log_profile_change()
-returns trigger as $$
-declare
-  label constant jsonb := '{"owner": "Owner", "admin": "User"}';
-begin
-  if tg_op = 'DELETE' then
-    if old.role in ('admin', 'owner') then
-      perform log_activity('user_removed', coalesce(nullif(old.full_name, ''), 'A user') || '''s login removed', label ->> old.role::text, null, null);
-    end if;
-    return null;
-  end if;
-  if old.role is distinct from new.role then
-    if old.role = 'researcher' and new.role in ('admin', 'owner') then
-      perform log_activity('user_added', coalesce(nullif(new.full_name, ''), 'Someone') || ' given access', 'as ' || (label ->> new.role::text), null, null);
-    elsif new.role in ('admin', 'owner') then
-      perform log_activity('user_role_changed', coalesce(nullif(new.full_name, ''), 'Someone') || ' is now ' || (label ->> new.role::text), 'was ' || coalesce(label ->> old.role::text, old.role::text), null, null);
-    end if;
-  end if;
-  return null;
-end;
-$$ language plpgsql security definer set search_path = public;
-revoke execute on function log_profile_change() from public, anon, authenticated;
-create or replace trigger trg_log_profile_change after update or delete on profiles
-  for each row execute procedure log_profile_change();
 
 
 -- ============================================================================

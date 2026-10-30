@@ -492,7 +492,6 @@ export async function fetchAdminData() {
     subtitle: row.subtitle || "",
     unitId: row.unit_id,
     requisitionId: row.requisition_id,
-    actor: row.actor_name || "",
     createdAt: row.created_at,
   }));
 
