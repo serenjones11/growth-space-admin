@@ -9,8 +9,9 @@
    browser's time zone - including the hour after midnight in British
    Summer Time, when the UTC date is still yesterday. */
 
-// A booking is "ending soon" this many days (or fewer) before its end date.
-export const ENDING_SOON_DAYS = 2;
+// A booking is "ending soon" this many days (or fewer) before its end date -
+// two weeks, the same point the "Ending soon" email goes to staff.
+export const ENDING_SOON_DAYS = 14;
 
 const pad = (n) => String(n).padStart(2, "0");
 

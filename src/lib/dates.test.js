@@ -33,8 +33,9 @@ describe("bookingDateState", () => {
   it.each([
     ["2026-05-16", "2026-06-01", "upcoming"],
     ["2026-05-15", "2026-06-01", "current"],
-    ["2026-05-01", "2026-05-18", "current"],
-    ["2026-05-01", "2026-05-17", "warning"],
+    ["2026-05-01", "2026-05-30", "current"], // 15 days left
+    ["2026-05-01", "2026-05-29", "warning"], // 14 days left: ending soon
+    ["2026-05-01", "2026-05-19", "warning"], // 4 days left
     ["2026-05-01", "2026-05-15", "warning"],
     ["2026-05-01", "2026-05-14", "overdue"],
   ])("%s → %s is %s", (start, end, expected) => {
