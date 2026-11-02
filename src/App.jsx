@@ -2300,17 +2300,17 @@ function AssetInfoCard({ unit }) {
   const isReftech = unit.type === "reftech";
   return (
     <InfoBox>
-      <BoxLabel>Asset Info</BoxLabel>
+      <BoxLabel>Info</BoxLabel>
       <FieldGrid>
         <FieldPair label="Status" value={<StatusTag unit={unit} big />} />
         <FieldPair label="Type" value={isReftech ? "Reftech Room" : "Growth Cabinet"} />
         <FieldPair label="Research area" value={UNIT_AREA_OPTIONS.find((o) => o.value === unitAreaValue(unit.disciplines)).label} />
+        <FieldPair label="Location" value={<RoomChip unit={unit} size="sm" />} />
         <FieldPair label="Manufacturer" value={unit.manufacturer} />
         <FieldPair label="Model" value={unit.model} />
-        <FieldPair label="Serial No." value={unit.serialNumber} />
-        <FieldPair label="Asset No." value={unit.assetNumber} />
         <FieldPair label="TSCAN ID" value={unit.tscanId} />
-        <FieldPair label="Location" value={<RoomChip unit={unit} size="sm" />} />
+        <FieldPair label="Asset No." value={unit.assetNumber} />
+        <FieldPair label="Serial No." value={unit.serialNumber} />
         <FieldPair label="Installed" value={fmtGB(unit.installDate)} />
       </FieldGrid>
     </InfoBox>
@@ -2329,8 +2329,8 @@ function EnvironmentControlsCard({ unit }) {
         <FieldPair label="Humidity range" value={`${unit.humidityRange[0]}–${unit.humidityRange[1]}%`} />
         <FieldPair label="Lighting type" value={unit.lightingType} />
         <FieldPair label="Ballasts" value={unit.ballasts} />
-        <FieldPair label="CO₂ control" value={unit.co2Control ? "Yes" : "No"} />
         <FieldPair label="Dimming control" value={unit.dimmingControl ? "Yes" : "No"} />
+        <FieldPair label="CO₂ control" value={unit.co2Control ? "Yes" : "No"} />
       </FieldGrid>
     </InfoBox>
   );
