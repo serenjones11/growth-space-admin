@@ -2186,7 +2186,7 @@ function UnitPhotoCard({ unit, onClick, onUpdatePhoto }) {
     >
       <div className="relative" style={{ aspectRatio: "4 / 3", background: "var(--surface-soft)" }}>
         {unit.photoDataUrl ? (
-          <img src={unit.photoDataUrl} alt={`${unit.id} photo`} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+          <img src={unit.photoDataUrl} alt={`${unit.id} photo`} loading="lazy" className="absolute inset-0 w-full h-full object-contain" />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-2 pt-7"
             style={{ background: "repeating-linear-gradient(135deg, var(--surface-soft) 0 10px, var(--surface) 10px 20px)", color: "var(--ink-faint)" }}>
@@ -3686,7 +3686,7 @@ function RequisitionEditForm({ req, units, onSave, onCancel }) {
   );
 }
 
-function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, onDelete, startExpanded = false }) {
+function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, onDelete, startExpanded = false, onToggle }) {
   const [expanded, setExpanded] = useState(startExpanded);
   const [editing, setEditing] = useState(false);
   // An amended, already-approved requisition keeps its unit unless changed.
@@ -3715,7 +3715,7 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
       className="rounded-2xl overflow-hidden"
       style={req.status === "pending" ? { border: `2.5px solid ${PENDING_OUTLINE}`, background: PENDING_TINT } : { border: "1px solid var(--border)", background: "var(--surface)" }}
     >
-      <button onClick={() => setExpanded((v) => !v)} className="w-full flex items-center gap-3.5 p-4 text-left">
+      <button onClick={() => { const next = !expanded; setExpanded(next); if (onToggle) onToggle(req.id, next); }} className="w-full flex items-center gap-3.5 p-4 text-left">
         <span className="w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-extrabold flex-shrink-0" style={{ background: avatarColor, color: avatarText }}>
           {initials}
         </span>
@@ -4014,8 +4014,16 @@ function RequisitionPreviewPanel({ req, index, units, onDecide, onEdit, onComple
   );
 }
 
-function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, onDelete, initialTab = "pending", initialExpandIndex = null, returnUnitId = null, onBackToUnit }) {
+function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRevert, onUpdateAdminNotes, onReassign, onDelete, initialTab = "pending", initialExpandIndex = null, returnUnitId = null, onBackToUnit, onViewChange }) {
   const [tab, setTab] = useState(initialTab);
+  // The tab and the last-opened card go into the address, so a reload
+  // reopens them (see GrowthCabinetApp's address sync).
+  const [expandedId, setExpandedId] = useState(() => requests[initialExpandIndex]?.id || null);
+  const onToggleCard = (id, open) => setExpandedId((cur) => (open ? id : cur === id ? null : cur));
+  useEffect(() => {
+    if (onViewChange) onViewChange({ tab, expandedId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onViewChange is a state setter
+  }, [tab, expandedId]);
   const [historyFilter, setHistoryFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all"); // "all" | "cabinet" | "reftech"
   const [query, setQuery] = useState("");
@@ -4075,10 +4083,10 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
         </div>
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <div className="flex items-center rounded-xl border p-1" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-            <button onClick={() => setTab("pending")} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "pending" ? "var(--sidebar-bg)" : "transparent", color: tab === "pending" ? "#fff" : "var(--ink-soft)" }}>
+            <button onClick={() => { setTab("pending"); setExpandedId(null); }} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "pending" ? "var(--sidebar-bg)" : "transparent", color: tab === "pending" ? "#fff" : "var(--ink-soft)" }}>
               <Clock size={14} /> Active {activeCount > 0 && <span className="text-[10px] font-bold">({activeCount})</span>}
             </button>
-            <button onClick={() => setTab("completed")} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "completed" ? "var(--sidebar-bg)" : "transparent", color: tab === "completed" ? "#fff" : "var(--ink-soft)" }}>
+            <button onClick={() => { setTab("completed"); setExpandedId(null); }} className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: tab === "completed" ? "var(--sidebar-bg)" : "transparent", color: tab === "completed" ? "#fff" : "var(--ink-soft)" }}>
               <History size={14} /> Completed
             </button>
           </div>
@@ -4124,7 +4132,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
                 <div className="text-xs font-bold mb-2" style={{ color: g.key === "amended" ? "var(--overdue)" : "var(--ink-soft)" }}>{g.title} ({g.items.length})</div>
                 <div className="space-y-3">
                   {g.items.map(({ r, i }) => (
-                    <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
+                    <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} onToggle={onToggleCard} />
                   ))}
                 </div>
               </div>
@@ -4135,7 +4143,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
             <SectionLabel>Current ({ongoing.length})</SectionLabel>
             <div className="space-y-3 mt-3">
               {ongoing.map(({ r, i }) => (
-                <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
+                <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} onToggle={onToggleCard} />
               ))}
               {ongoing.length === 0 && <p className="text-sm" style={{ color: "var(--ink-faint)" }}>No approved requisitions currently in progress.</p>}
             </div>
@@ -4162,7 +4170,7 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
           </div>
           <div className="space-y-3">
             {filteredHistoric.map(({ r, i }) => (
-              <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} />
+              <RequisitionCard key={r.id} req={r} index={i} units={units} onDecide={onDecide} onEdit={onEdit} onComplete={onComplete} onRevert={onRevert} onUpdateAdminNotes={onUpdateAdminNotes} onReassign={onReassign} onDelete={onDelete} startExpanded={i === initialExpandIndex} onToggle={onToggleCard} />
             ))}
             {filteredHistoric.length === 0 && (
               <div className="text-center py-16" style={{ color: "var(--ink-faint)" }}>
@@ -5437,10 +5445,32 @@ function AdminLoginForm({ onDone }) {
   );
 }
 
+/* The admin app's address: #page, then optional parts -
+   /t/completed (Requisitions tab), /r/<id> (expanded requisition card),
+   /u/<unit id> (open unit), /p/<id> (requisition pop-up). Hashes with "="
+   belong to Supabase auth links (e.g. password reset) and mean "no view". */
 const APP_PAGES = ["dashboard", "inventory", "requisitions", "settings", "request"];
-function pageFromHash() {
-  const h = window.location.hash.slice(1);
-  return APP_PAGES.includes(h) ? h : "dashboard";
+function parseAppHash() {
+  const raw = window.location.hash.slice(1);
+  const out = { page: "dashboard", tab: null, expandId: null, unitId: null, previewId: null };
+  if (!raw || raw.includes("=")) return out;
+  const parts = raw.split("/");
+  if (APP_PAGES.includes(parts[0])) out.page = parts[0];
+  const keys = { t: "tab", r: "expandId", u: "unitId", p: "previewId" };
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    if (keys[parts[i]]) { try { out[keys[parts[i]]] = decodeURIComponent(parts[i + 1]); } catch { /* malformed - ignore */ } }
+  }
+  if (out.tab !== "completed") out.tab = null;
+  return out;
+}
+function buildAppHash({ page, tab, expandId, unitId, previewId }) {
+  let h = page === "dashboard" ? "" : page;
+  if (tab === "completed") h += "/t/completed";
+  if (expandId) h += `/r/${encodeURIComponent(expandId)}`;
+  if (unitId) h += `/u/${encodeURIComponent(unitId)}`;
+  if (previewId) h += `/p/${encodeURIComponent(previewId)}`;
+  if (h && page === "dashboard") h = "dashboard" + h;
+  return h ? `#${h}` : "";
 }
 
 export default function GrowthCabinetApp() {
@@ -5496,36 +5526,24 @@ export default function GrowthCabinetApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
-  // The open page lives in the address (#inventory, #requisitions...), so a
-  // reload stays put and the browser's back button moves between pages.
-  // Hashes with "=" belong to Supabase auth links (e.g. password reset) and
-  // are left alone.
-  const [page, setPage] = useState(pageFromHash);
-  useEffect(() => {
-    const h = window.location.hash;
-    if (h.includes("=")) return;
-    const want = page === "dashboard" ? "" : `#${page}`;
-    if (h === want) return;
-    window.history.pushState(null, "", want || window.location.pathname + window.location.search);
-  }, [page]);
-  useEffect(() => {
-    const onNav = () => { if (!window.location.hash.includes("=")) setPage(pageFromHash()); };
-    window.addEventListener("popstate", onNav);
-    return () => window.removeEventListener("popstate", onNav);
-  }, []);
+  // Where you are lives in the address, so a reload brings it back and the
+  // browser's back button steps back through it - see parseAppHash().
+  const [page, setPage] = useState(() => parseAppHash().page);
   // Holds only the id, not a snapshot of the unit object - so the drawer
   // always reflects the freshly-reloaded unit after any mutation (add/
   // remove a document, update service log, etc.) instead of showing stale
   // data until it's closed and reopened.
-  const [selectedUnitId, setSelectedUnitId] = useState(null);
+  const [selectedUnitId, setSelectedUnitId] = useState(() => parseAppHash().unitId);
   const [editingUnit, setEditingUnit] = useState(undefined); // undefined = closed, null = add-new, object = edit
   const [inventoryFilter, setInventoryFilter] = useState(null);
   const [inventoryKey, setInventoryKey] = useState(0);
-  const [requisitionsTab, setRequisitionsTab] = useState("pending");
+  const [requisitionsTab, setRequisitionsTab] = useState(() => parseAppHash().tab || "pending");
   const [requisitionsExpandIndex, setRequisitionsExpandIndex] = useState(null);
   const [requisitionsKey, setRequisitionsKey] = useState(0);
   const [returnUnitId, setReturnUnitId] = useState(null); // set when navigating to a requisition from a unit's drawer
   const [previewReqIndex, setPreviewReqIndex] = useState(null); // requisition shown in the timeline's preview side panel
+  const [reqView, setReqView] = useState({ tab: "pending", expandedId: null }); // Requisitions page tab + open card, reported by the page
+  const [navReady, setNavReady] = useState(false); // address restored into state once data has loaded
   const [mobileNavOpen, setMobileNavOpen] = useState(false); // below `lg`, the sidebar is an off-canvas drawer toggled from the mobile top bar
 
   // Lock background scroll while the mobile drawer is open, same as any
@@ -5540,6 +5558,46 @@ export default function GrowthCabinetApp() {
   const units = appData ? appData.units : [];
   const requests = appData ? appData.requests : [];
   const selected = units.find((u) => u.id === selectedUnitId) || null;
+
+  // Apply an address to state. Requisitions are referred to by id there, so
+  // this waits until the data (and so their indexes) has loaded.
+  const applyHash = (h) => {
+    setPage(h.page);
+    setSelectedUnitId(h.unitId && units.some((u) => u.id === h.unitId) ? h.unitId : null);
+    const indexOf = (id) => { const i = requests.findIndex((r) => r.id === id); return i === -1 ? null : i; };
+    setPreviewReqIndex(h.previewId ? indexOf(h.previewId) : null);
+    if (h.page === "requisitions") {
+      setRequisitionsTab(h.tab || "pending");
+      setRequisitionsExpandIndex(h.expandId ? indexOf(h.expandId) : null);
+      setRequisitionsKey((k) => k + 1);
+    }
+  };
+  useEffect(() => {
+    if (!appData || navReady) return;
+    applyHash(parseAppHash());
+    setNavReady(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, when data first arrives
+  }, [appData]);
+  // State -> address. A new page, unit or pop-up adds a history entry (so
+  // Back closes it); a tab or card change just updates the address.
+  const previewId = previewReqIndex != null ? requests[previewReqIndex]?.id || null : null;
+  useEffect(() => {
+    if (!navReady || window.location.hash.includes("=")) return;
+    const onReqs = page === "requisitions";
+    const want = buildAppHash({ page, tab: onReqs ? reqView.tab : null, expandId: onReqs ? reqView.expandedId : null, unitId: selectedUnitId, previewId });
+    const cur = window.location.hash;
+    if (cur === want) return;
+    const strip = (h) => h.replace(/\/(t|r)\/[^/]*/g, "");
+    const url = want || window.location.pathname + window.location.search;
+    if (strip(cur) === strip(want)) window.history.replaceState(null, "", url);
+    else window.history.pushState(null, "", url);
+  }, [navReady, page, reqView, selectedUnitId, previewId]);
+  useEffect(() => {
+    if (!navReady) return;
+    const onNav = () => { if (!window.location.hash.includes("=")) applyHash(parseAppHash()); };
+    window.addEventListener("popstate", onNav);
+    return () => window.removeEventListener("popstate", onNav);
+  });
   const setSelected = (unit) => setSelectedUnitId(unit ? unit.id : null);
   const categories = appData ? appData.categories : [];
   const categoryIdByName = appData ? appData.categoryIdByName : {};
@@ -5890,6 +5948,7 @@ export default function GrowthCabinetApp() {
           {page === "requisitions" && (
             <RequisitionsPage
               key={requisitionsKey}
+              onViewChange={setReqView}
               requests={requests}
               units={units}
               onDecide={handleDecideRequisition}
