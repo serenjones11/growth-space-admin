@@ -23,10 +23,11 @@ describe("summariseUsage", () => {
 });
 
 describe("buildUsageChartSvg", () => {
-  it("draws one line per group with fixed colours and every month label", () => {
+  it("draws a stacked block per non-zero month and group, with fixed colours, totals and every month label", () => {
     const svg = buildUsageChartSvg({ monthLabels, series });
-    expect(svg.match(/<polyline/g)).toHaveLength(2);
-    expect(svg).toContain('stroke="#E69F00"');
+    expect(svg.match(/<rect x=/g)).toHaveLength(4); // Okafor x3 + Chen in Feb
+    for (const t of [">1<", ">3<"]) expect(svg).toContain(t); // column totals
+    expect(svg).toContain('fill="#E69F00"');
     expect(svg).not.toContain("var(--");
     for (const m of monthLabels) expect(svg).toContain(`>${m}<`);
   });

@@ -53,7 +53,7 @@ import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
 import * as api from "./lib/api";
 import { downloadFullBackup } from "./lib/backup";
-import { downloadUsagePdf } from "./lib/usageReport";
+import { downloadUsagePdf, summariseUsage } from "./lib/usageReport";
 import { addDays, bookingDateState, daysUntil as daysFrom, earliestFreeStart, fmtGB, localISODate, rangesOverlap, today } from "./lib/dates";
 
 /* ---------------------------------------------------------------------- */
@@ -983,10 +983,6 @@ const OKABE_ITO_TEXT = [
   "#16211D", "#fff", "#fff", "#fff", "#fff", "#fff", "#fff", "#fff",
 ];
 
-function LineMarker({ cx, cy, color, r = 4 }) {
-  return <circle cx={cx} cy={cy} r={r} fill={color} />;
-}
-
 /* Custom month picker - trigger pill + popover grid grouped by year, styled to match the app
    instead of the browser's native <input type="month">. */
 function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "left" }) {
@@ -1049,67 +1045,183 @@ function MonthPickerButton({ label, value, keys, fullLabels, onSelect, align = "
   );
 }
 
-function LabUsageTrend({ units, labUsageHistory }) {
-  const allKeys = labUsageHistory.keys;
-  // The window now runs years past "now" (so the picker can reach 2100 -
-  // see labUsageWindow()), so the current month is no longer the array's
-  // last entry - anchor both the default range and the "live" splice below
-  // on TODAY's own index instead of allKeys.length - 1.
-  const nowIdx = Math.max(0, allKeys.indexOf(monthKeyOf(TODAY)));
-  const [fromKey, setFromKey] = useState(() => allKeys[Math.max(0, nowIdx - 11)]); // default: last 12 months
-  const [toKey, setToKey] = useState(() => allKeys[nowIdx]);
-  const [hoveredLab, setHoveredLab] = useState(null);
-  const [isolatedLab, setIsolatedLab] = useState(null);
-  const [tooltip, setTooltip] = useState(null);
-  const [isFullScreen, setIsFullScreen] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const activeLab = isolatedLab || hoveredLab;
+/* Width of an element in px, kept up to date - so charts can be drawn at
+   their real size (text stays the same size however wide the screen is). */
+function useElementWidth() {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.clientWidth);
+    const ro = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width];
+}
 
+/* Monthly units held per lab group, shared by the dashboard card, the full
+   report and the PDF. The current month uses today's live count rather than
+   the history query's snapshot. Counts every active booking (a reftech room
+   can hold several). */
+function usageData(units, labUsageHistory) {
+  const allKeys = labUsageHistory.keys;
+  const nowIdx = Math.max(0, allKeys.indexOf(monthKeyOf(TODAY)));
+  const currentCounts = Object.fromEntries(LAB_GROUPS.map((lab) => [lab, units.reduce((sum, u) => sum + currentBookingsList(u).filter((b) => b.labGroup === lab).length, 0)]));
+  const groups = LAB_GROUPS.map((lab, idx) => {
+    const full = (labUsageHistory.series[lab] || []).slice();
+    if (full[nowIdx] !== undefined) full[nowIdx] = currentCounts[lab];
+    return { lab, name: PI_BY_LAB[lab] || lab, color: OKABE_ITO[idx % OKABE_ITO.length], full };
+  });
+  return { allKeys, nowIdx, currentCounts, groups };
+}
+
+/* Stacked columns: one per month, split by lab group, total on top. Hover or
+   tap a column for its breakdown. `groups` carry `values` for the months shown. */
+function UsageColumns({ labels, groups, height = 240 }) {
+  const [ref, w] = useElementWidth();
+  const [active, setActive] = useState(null);
+  const shown = groups.filter((g) => g.values.some((v) => v > 0));
+  const totals = labels.map((_, i) => shown.reduce((s, g) => s + (g.values[i] || 0), 0));
+  const maxRaw = Math.max(1, ...totals);
+  const step = Math.max(1, Math.ceil(maxRaw / 4));
+  const maxV = step * Math.ceil(maxRaw / step);
+  const PAD = { l: 28, r: 6, t: 20, b: 26 };
+  const plotW = Math.max(1, w - PAD.l - PAD.r), plotH = height - PAD.t - PAD.b;
+  const n = labels.length, cw = plotW / Math.max(1, n), bw = Math.max(4, Math.min(44, cw * 0.62));
+  const y = (v) => PAD.t + plotH - (v / maxV) * plotH;
+  const labelEvery = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(plotW / 52))));
+  const tip = active != null ? { i: active, x: PAD.l + cw * (active + 0.5) } : null;
+  return (
+    <div>
+      <div ref={ref} className="relative" style={{ height }} onMouseLeave={() => setActive(null)}>
+        {w > 0 && (
+          <svg width={w} height={height} style={{ display: "block" }}>
+            {Array.from({ length: maxV / step + 1 }, (_, k) => k * step).map((v) => (
+              <g key={v}>
+                <line x1={PAD.l} x2={w - PAD.r} y1={y(v)} y2={y(v)} stroke="var(--border)" />
+                <text x={PAD.l - 7} y={y(v) + 4} fontSize="11" fill="var(--ink-faint)" textAnchor="end">{v}</text>
+              </g>
+            ))}
+            {labels.map((m, i) => {
+              const cx = PAD.l + cw * (i + 0.5);
+              let base = 0;
+              return (
+                <g key={i} opacity={active == null || active === i ? 1 : 0.45} style={{ transition: "opacity 0.12s" }}>
+                  {shown.map((g) => {
+                    const v = g.values[i] || 0;
+                    if (!v) return null;
+                    const top = base + v, rect = <rect key={g.lab} x={cx - bw / 2} y={y(top)} width={bw} height={Math.max(0, y(base) - y(top) - 1.5)} rx={3} fill={g.color} />;
+                    base = top;
+                    return rect;
+                  })}
+                  {totals[i] > 0 && <text x={cx} y={y(totals[i]) - 5} fontSize="11" fontWeight="700" fill="var(--ink)" textAnchor="middle">{totals[i]}</text>}
+                  {(i % labelEvery === 0 || i === n - 1) && <text x={cx} y={height - 7} fontSize="11" fill="var(--ink-soft)" textAnchor="middle">{m}</text>}
+                  <rect x={PAD.l + cw * i} y={PAD.t} width={cw} height={plotH} fill="transparent" style={{ cursor: "pointer" }} onMouseEnter={() => setActive(i)} onClick={() => setActive(i)} />
+                </g>
+              );
+            })}
+          </svg>
+        )}
+        {tip && (
+          <div className="absolute z-10 rounded-xl p-3 text-left pointer-events-none shadow-lg"
+            style={{ top: 4, left: Math.min(Math.max(0, tip.x - 90), Math.max(0, w - 190)), width: 180, background: "var(--surface)", border: "1px solid var(--border)" }}>
+            <div className="text-[12px] font-bold mb-1">{labels[tip.i]} · {totals[tip.i]} {totals[tip.i] === 1 ? "unit" : "units"}</div>
+            {shown.filter((g) => g.values[tip.i] > 0).map((g) => (
+              <div key={g.lab} className="flex items-center gap-1.5 text-[11.5px]" style={{ color: "var(--ink-soft)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: g.color, flexShrink: 0 }} />
+                <span className="truncate flex-1">{g.name}</span><b style={{ color: "var(--ink)" }}>{g.values[tip.i]}</b>
+              </div>
+            ))}
+            {totals[tip.i] === 0 && <div className="text-[11.5px]" style={{ color: "var(--ink-faint)" }}>No units held</div>}
+          </div>
+        )}
+      </div>
+      {shown.length > 0 ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3">
+          {shown.map((g) => (
+            <span key={g.lab} className="inline-flex items-center gap-1.5 text-[12px]">
+              <span style={{ width: 9, height: 9, borderRadius: 3, background: g.color }} />{g.name}
+            </span>
+          ))}
+        </div>
+      ) : <p className="text-xs mt-2" style={{ color: "var(--ink-faint)" }}>No units held by any lab group in these months.</p>}
+    </div>
+  );
+}
+
+/* Dashboard card: the last 6 months as stacked columns, opening the full report. */
+function SpaceUsageCard({ units, labUsageHistory, onOpenReport }) {
+  const { nowIdx, currentCounts, groups } = usageData(units, labUsageHistory);
+  const from = Math.max(0, nowIdx - 5);
+  const labels = labUsageHistory.labels.slice(from, nowIdx + 1);
+  const top = LAB_GROUPS.map((lab) => ({ lab, n: currentCounts[lab] })).sort((a, b) => b.n - a.n)[0];
+  return (
+    <div className="gc-card p-5">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="min-w-0">
+          <h3 className="gc-display font-bold text-sm">Space usage</h3>
+          <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>
+            Units held per month by lab group · last 6 months
+            {top && top.n > 0 ? <> · most now: <strong style={{ color: "var(--ink-soft)" }}>{PI_BY_LAB[top.lab] || top.lab}</strong> ({top.n})</> : ""}
+          </p>
+        </div>
+        <button onClick={onOpenReport} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full flex-shrink-0" style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }}>
+          <Maximize2 size={12} /> Full report
+        </button>
+      </div>
+      <UsageColumns labels={labels} groups={groups.map((g) => ({ ...g, values: g.full.slice(from, nowIdx + 1) }))} height={220} />
+    </div>
+  );
+}
+
+/* Full-screen space usage report: any range of months, stacked columns, then
+   every lab group ranked (click a row to see its units). Download PDF makes
+   the same report as a document. */
+function SpaceUsageReport({ units, labUsageHistory, onClose, goInventory, onEditPIs }) {
+  const { allKeys, nowIdx, currentCounts, groups } = usageData(units, labUsageHistory);
+  const [fromKey, setFromKey] = useState(() => allKeys[Math.max(0, nowIdx - 11)]);
+  const [toKey, setToKey] = useState(() => allKeys[nowIdx]);
+  const [downloading, setDownloading] = useState(false);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const fromIdx = Math.max(0, allKeys.indexOf(fromKey));
   const toIdxRaw = allKeys.indexOf(toKey);
   const toIdx = Math.max(fromIdx, toIdxRaw === -1 ? allKeys.length - 1 : toIdxRaw);
   const labels = labUsageHistory.labels.slice(fromIdx, toIdx + 1);
-
+  const rangeLabel = `${labUsageHistory.fullLabels[fromIdx]} to ${labUsageHistory.fullLabels[toIdx]}`;
   const handleFrom = (key) => { setFromKey(key); if (allKeys.indexOf(key) > allKeys.indexOf(toKey)) setToKey(key); };
   const handleTo = (key) => { setToKey(key); if (allKeys.indexOf(key) < allKeys.indexOf(fromKey)) setFromKey(key); };
 
-  // Counts every currently-active booking, not just one per unit -
-  // unitOccupant() only ever returns the first, which silently undercounts
-  // both a reftech room's normal multiple simultaneous occupants and a
-  // cabinet clash's second (unintended) booking.
-  const currentCounts = LAB_GROUPS.reduce((acc, lab) => {
-    acc[lab] = units.reduce((sum, u) => sum + currentBookingsList(u).filter((b) => b.labGroup === lab).length, 0);
-    return acc;
-  }, {});
-
-  const series = LAB_GROUPS.map((lab, idx) => {
-    const full = (labUsageHistory.series[lab] || []).slice();
-    if (full[nowIdx] !== undefined) full[nowIdx] = currentCounts[lab]; // current month = live count, not the historical query's snapshot
-    return { lab, color: OKABE_ITO[idx % OKABE_ITO.length], values: full.slice(fromIdx, toIdx + 1) };
+  const ranged = groups.map((g) => ({ ...g, values: g.full.slice(fromIdx, toIdx + 1) }));
+  const inRange = nowIdx >= fromIdx && nowIdx <= toIdx;
+  const { rows, totals, allUnitMonths } = summariseUsage({
+    monthLabels: labels,
+    series: ranged.map((g) => ({ name: g.name, color: g.color, values: g.values })),
+    current: Object.fromEntries(ranged.map((g) => [g.name, currentCounts[g.lab]])),
   });
+  const board = rows.map((r, i) => ({ ...r, lab: ranged[i].lab, values: ranged[i].values }))
+    .filter((r) => r.unitMonths > 0 || r.now > 0)
+    .sort((a, b) => b.now - a.now || b.unitMonths - a.unitMonths);
+  const avgInUse = totals.length ? totals.reduce((a, b) => a + b, 0) / totals.length : 0;
+  const avgPct = units.length ? Math.round((avgInUse / units.length) * 100) : 0;
+  // Everyone tied for the most space is named, not just the first.
+  const maxShare = Math.max(0, ...rows.map((r) => r.share));
+  const biggest = rows.filter((r) => r.unitMonths > 0 && r.share === maxShare);
+  const biggestNames = biggest.length <= 2 ? biggest.map((r) => r.name).join(" and ") : `${biggest.slice(0, -1).map((r) => r.name).join(", ")} and ${biggest[biggest.length - 1].name}`;
+  const sparkMax = Math.max(1, ...board.flatMap((r) => r.values));
 
-  const maxV = Math.max(1, ...series.flatMap((s) => s.values)) * 1.2;
-  const W = 760, H = 260, PAD_L = 30, PAD_R = 14, PAD_T = 14, PAD_B = 26;
-  const plotW = W - PAD_L - PAD_R, plotH = H - PAD_T - PAD_B;
-  const xFor = (i) => PAD_L + (labels.length === 1 ? 0 : (i / (labels.length - 1)) * plotW);
-  const yFor = (v) => PAD_T + plotH - (v / maxV) * plotH;
-  // Roughly a dozen month labels however wide the range (up to ~78 years).
-  const labelStep = Math.max(1, Math.ceil(labels.length / 12));
-
-  const ranked = LAB_GROUPS.map((lab) => ({ lab, current: currentCounts[lab] })).sort((a, b) => b.current - a.current);
-  const top = ranked[0];
-  const avg = ranked.length ? ranked.reduce((s, r) => s + r.current, 0) / ranked.length : 0;
-  // PDF of the months currently shown, to send to people outside GrowSpace.
   const downloadPdf = async () => {
     setDownloading(true);
     try {
-      const nameOf = (lab) => PI_BY_LAB[lab] || lab;
-      const inRange = nowIdx >= fromIdx && nowIdx <= toIdx;
       await downloadUsagePdf({
-        monthLabels: labels,
-        rangeLabel: `${labUsageHistory.fullLabels[fromIdx]} to ${labUsageHistory.fullLabels[toIdx]}`,
-        series: series.map((s) => ({ name: nameOf(s.lab), color: s.color, values: s.values })),
-        current: inRange ? Object.fromEntries(LAB_GROUPS.map((lab) => [nameOf(lab), currentCounts[lab]])) : null,
+        monthLabels: labels, rangeLabel,
+        series: ranged.map((g) => ({ name: g.name, color: g.color, values: g.values })),
+        current: inRange ? Object.fromEntries(ranged.map((g) => [g.name, currentCounts[g.lab]])) : null,
       });
       toast("PDF downloaded");
     } catch (err) {
@@ -1119,120 +1231,207 @@ function LabUsageTrend({ units, labUsageHistory }) {
       setDownloading(false);
     }
   };
-  const aboveAvg = top && avg > 0 && top.current > avg ? ` - ${Math.round(((top.current - avg) / avg) * 100)}% above the group average (${avg.toFixed(1)})` : "";
 
-  return (
-    <div className={isFullScreen ? "fixed inset-0 z-50 p-6 gc-scroll overflow-y-auto" : ""} style={isFullScreen ? { background: "var(--bg)" } : undefined}>
-    <div className="gc-card p-5" style={{ position: "relative" }}>
-      <button
-        onClick={() => setIsFullScreen((v) => !v)}
-        className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl flex-shrink-0"
-        style={{ position: "absolute", top: 14, right: 14, color: "var(--ink-soft)", background: "var(--surface-soft)" }}
-      >
-        {isFullScreen ? <><Minimize2 size={12} /> Close</> : <><Maximize2 size={12} /> Full screen</>}
-      </button>
-      <div className="flex items-center justify-between mb-1 flex-wrap gap-3" style={{ paddingRight: 110 }}>
-        <div>
-          <h3 className="gc-display font-bold text-sm">Space usage by lab group</h3>
-          <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units occupied per month · hover or tap a point for details, click a legend entry to isolate it</p>
+  return createPortal(
+    <div className="gc-app fixed inset-0 z-[52] gc-scroll overflow-y-auto" style={{ background: "var(--bg)" }}>
+      <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="gc-display text-xl font-bold">Space usage</h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            <MonthPickerButton label="From" value={fromKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleFrom} align="left" />
+            <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
+            <MonthPickerButton label="To" value={toKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleTo} align="right" />
+            <button onClick={downloadPdf} disabled={downloading} className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl disabled:opacity-50" style={{ background: "var(--btn-accent)", color: "white" }}>
+              <Download size={13} /> {downloading ? "Preparing…" : "Download PDF"}
+            </button>
+            <button onClick={onClose} className="flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-full" style={{ background: "var(--surface-soft)" }}>
+              <Minimize2 size={14} /> Close
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <MonthPickerButton label="From" value={fromKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleFrom} align="left" />
-          <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
-          <MonthPickerButton label="To" value={toKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleTo} align="right" />
-          <button
-            onClick={downloadPdf} disabled={downloading}
-            className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl disabled:opacity-50"
-            style={{ background: "var(--btn-accent)", color: "white" }}
-            title="Download this chart and its figures as a PDF"
-          >
-            <Download size={13} /> {downloading ? "Preparing…" : "Download PDF"}
-          </button>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="gc-card px-5 py-4">
+            <div className="text-xs" style={{ color: "var(--ink-faint)" }}>Average in use</div>
+            <div className="gc-display text-2xl font-extrabold">{avgInUse.toFixed(1)} <span className="text-sm font-semibold" style={{ color: "var(--ink-soft)" }}>units a month</span></div>
+            <div className="text-xs" style={{ color: "var(--ink-soft)" }}>{avgPct <= 100 ? `${avgPct}% of the ${units.length} units` : `${units.length} units in total`} · {rangeLabel}</div>
+          </div>
+          <div className="gc-card px-5 py-4">
+            <div className="text-xs" style={{ color: "var(--ink-faint)" }}>{biggest.length > 1 ? "Biggest users" : "Biggest user"}</div>
+            <div className={`gc-display font-extrabold ${biggest.length > 1 ? "text-lg leading-snug" : "text-2xl truncate"}`}>{allUnitMonths > 0 ? biggestNames : "-"}</div>
+            <div className="text-xs" style={{ color: "var(--ink-soft)" }}>{allUnitMonths > 0 ? `${maxShare}% of all space used in these months${biggest.length > 1 ? " each" : ""}` : "No units held in these months"}</div>
+          </div>
         </div>
-      </div>
 
-      <p className="text-xs mt-2 mb-1" style={{ color: "var(--ink-soft)" }}>
-        {top && top.current > 0 ? (
-          <>Highest right now: <strong style={{ color: "var(--ink)" }}>{piDisplay(top.lab)}</strong> at {top.current} unit{top.current !== 1 ? "s" : ""}{aboveAvg}.</>
-        ) : "No units are currently held by any lab group."}
-      </p>
+        <div className="gc-card p-5">
+          <h3 className="gc-display font-bold text-sm">Units held per month</h3>
+          <p className="text-xs mt-0.5 mb-3" style={{ color: "var(--ink-faint)" }}>By lab group · hover or tap a month for its breakdown</p>
+          <div className="overflow-x-auto gc-scroll"><div style={{ minWidth: Math.max(320, labels.length * 34) }}>
+            <UsageColumns labels={labels} groups={ranged} height={320} />
+          </div></div>
+        </div>
 
-      {/* Phones: keep the chart readable and scroll it sideways rather than shrink it. */}
-      <div className="overflow-x-auto gc-scroll"><div className="relative" style={{ minWidth: 560 }}>
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
-          {[0, 1, 2, 3].map((g) => {
-            const v = (maxV / 3) * g;
-            const y = yFor(v);
-            return (
-              <g key={g}>
-                <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="var(--border)" strokeWidth={1} />
-                <text x={PAD_L - 6} y={y + 3} fontSize={9.5} fill="var(--ink-faint)" textAnchor="end">{Math.round(v)}</text>
-              </g>
-            );
-          })}
-          {labels.map((m, i) => (i % labelStep === 0 || i === labels.length - 1) && (
-            <text key={i} x={xFor(i)} y={H - 6} fontSize={9.5} fill="var(--ink-faint)" textAnchor="middle" fontWeight={600}>{m}</text>
-          ))}
-
-          {series.map((s) => {
-            const dim = activeLab && activeLab !== s.lab;
-            const pts = s.values.map((v, i) => `${xFor(i)},${yFor(v)}`).join(" ");
-            return (
-              <g key={s.lab} opacity={dim ? 0.15 : 1} style={{ transition: "opacity 0.15s" }}>
-                <polyline points={pts} fill="none" stroke={s.color} strokeWidth={activeLab === s.lab ? 3.5 : 2} strokeLinecap="round" strokeLinejoin="round" />
-                {s.values.map((v, i) => (
-                  <g
-                    key={i}
-                    onMouseEnter={() => { setHoveredLab(s.lab); setTooltip({ lab: s.lab, month: labels[i], value: v, x: xFor(i), y: yFor(v) }); }}
-                    onMouseLeave={() => { setHoveredLab(null); setTooltip(null); }}
-                    onClick={() => { setHoveredLab(s.lab); setTooltip({ lab: s.lab, month: labels[i], value: v, x: xFor(i), y: yFor(v) }); }}
-                    style={{ cursor: "pointer" }}
-                  >
-                    {/* generous invisible hit-area so points are easy to hover even when packed close together */}
-                    <circle cx={xFor(i)} cy={yFor(v)} r={9} fill="transparent" />
-                    <LineMarker cx={xFor(i)} cy={yFor(v)} color={s.color} r={activeLab === s.lab ? 4.5 : 3} />
-                  </g>
-                ))}
-              </g>
-            );
-          })}
-
-          {tooltip && (
-            <g transform={`translate(${Math.min(tooltip.x + 10, W - 160)}, ${Math.max(tooltip.y - 46, 4)})`}>
-              <rect width="150" height="42" rx="9" fill="var(--surface)" stroke="var(--border)" />
-              <text x="10" y="16" fontSize="10.5" fontWeight="800" fill="var(--ink)">{piDisplay(tooltip.lab)}</text>
-              <text x="10" y="30" fontSize="10" fill="var(--ink-soft)">{tooltip.month} · {tooltip.value} {tooltip.value === 1 ? "unit" : "units"}</text>
-            </g>
+        <div className="gc-card p-5">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <h3 className="gc-display font-bold text-sm">Lab groups</h3>
+              <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Ranked by units held now · click a group to see its units</p>
+            </div>
+            {onEditPIs && (
+              <button onClick={onEditPIs} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full flex-shrink-0" style={{ background: "var(--btn-accent)", color: "white" }}>
+                <Pencil size={12} /> Edit PIs
+              </button>
+            )}
+          </div>
+          {board.length === 0 ? <p className="text-sm py-3" style={{ color: "var(--ink-faint)" }}>No lab group held any units in these months.</p> : (
+            <div className="overflow-x-auto gc-scroll">
+              <table className="w-full text-[13px]" style={{ borderCollapse: "collapse", minWidth: 620 }}>
+                <thead>
+                  <tr className="text-left text-[11.5px]" style={{ color: "var(--ink-faint)" }}>
+                    <th className="font-semibold pb-2 pr-2">Lab group (PI)</th>
+                    <th className="font-semibold pb-2 px-2 text-right">Now</th>
+                    <th className="font-semibold pb-2 px-2" style={{ width: "30%" }}>Share of space used</th>
+                    <th className="font-semibold pb-2 px-2 text-right">Average</th>
+                    <th className="font-semibold pb-2 px-2 text-right">Peak</th>
+                    <th className="font-semibold pb-2 pl-2">Trend</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {board.map((r) => (
+                    <tr key={r.lab} onClick={() => { onClose(); goInventory({ labGroup: r.lab }); }} className="gc-clickable cursor-pointer" style={{ borderTop: "1px solid var(--border)" }}>
+                      <td className="py-2.5 pr-2"><span className="inline-flex items-center gap-2 font-semibold"><span style={{ width: 9, height: 9, borderRadius: 3, background: r.color, flexShrink: 0 }} />{r.name}</span></td>
+                      <td className="py-2.5 px-2 text-right font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{r.now}</td>
+                      <td className="py-2.5 px-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: "var(--border)" }}><div className="h-full rounded-full" style={{ width: `${r.share}%`, background: r.color }} /></div>
+                          <span className="text-[12px] w-9 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>{r.share}%</span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-2 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>{r.average}</td>
+                      <td className="py-2.5 px-2 text-right" style={{ fontVariantNumeric: "tabular-nums" }}>{r.peak}</td>
+                      <td className="py-2.5 pl-2">
+                        <svg width="100" height="24" style={{ display: "block" }}>
+                          <polyline fill="none" stroke={r.color} strokeWidth="2" strokeLinejoin="round"
+                            points={r.values.map((v, i) => `${3 + (r.values.length === 1 ? 47 : (i / (r.values.length - 1)) * 94)},${21 - ((v || 0) / sparkMax) * 18}`).join(" ")} />
+                        </svg>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </svg>
-      </div></div>
-
-      <div className="flex flex-wrap gap-x-5 gap-y-3 mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
-        {series.map((s) => (
-          <button
-            key={s.lab}
-            onClick={() => setIsolatedLab((cur) => (cur === s.lab ? null : s.lab))}
-            onMouseEnter={() => setHoveredLab(s.lab)}
-            onMouseLeave={() => setHoveredLab(null)}
-            className="flex items-center gap-2 text-sm font-semibold"
-            style={{ color: isolatedLab === s.lab ? s.color : "var(--ink-soft)", opacity: isolatedLab && isolatedLab !== s.lab ? 0.4 : 1 }}
-          >
-            <svg width="14" height="14"><LineMarker cx={7} cy={7} color={s.color} r={5} /></svg>
-            {piDisplay(s.lab)}
-          </button>
-        ))}
-        {isolatedLab && (
-          <button onClick={() => setIsolatedLab(null)} className="text-sm font-bold underline" style={{ color: "var(--accent-dark)" }}>Show all</button>
-        )}
+          <p className="text-[11.5px] mt-3" style={{ color: "var(--ink-faint)" }}>Share of space used = the group's unit-months as a percentage of all unit-months in {rangeLabel} (one unit held for one month = one unit-month).</p>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
+  );
+}
+
+/* What's about to happen: bookings ending (a unit frees up) or starting,
+   requests waiting with a start date coming up, and scheduled maintenance -
+   within `days` of today, soonest first. */
+function buildComingUp(units, requests, days) {
+  const items = [];
+  const within = (d) => d != null && d >= 0 && d <= days;
+  for (const u of units) {
+    for (const b of u.bookings || []) {
+      const ends = daysUntil(b.endDate), starts = daysUntil(b.startDate);
+      if (within(ends)) items.push({ date: b.endDate, color: STATUS_STRONG.warning.color, title: u.type === "reftech" ? `${u.id}: a space frees up` : `${u.id} frees up`, sub: `${b.researcher}'s booking ends`, reqId: b.requisitionId, unitId: u.id });
+      if (starts > 0 && within(starts)) items.push({ date: b.startDate, color: STATUS_STRONG.upcoming.color, title: `${b.researcher} starts on ${u.id}`, sub: b.project || "", reqId: b.requisitionId, unitId: u.id });
+    }
+    for (const s of u.serviceLog || []) {
+      if (s.status === "scheduled" && within(daysUntil(s.date))) items.push({ date: s.date, color: "#2E8BC9", title: `${u.id} maintenance`, sub: s.category || "Scheduled", unitId: u.id });
+    }
+  }
+  for (const r of requests) {
+    if (r.status === "pending" && within(daysUntil(r.startDate))) items.push({ date: r.startDate, color: STATUS_STRONG.pending.color, title: `${r.researcher} wants to start`, sub: `${r.unitType === "reftech" ? "Reftech room" : "Growth cabinet"} · waiting for review`, reqId: r.id });
+  }
+  return items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+function whenLabel(date) {
+  const d = daysUntil(date);
+  return d === 0 ? "Today" : d === 1 ? "Tomorrow" : fmtGB(date).slice(0, 5);
+}
+function ComingUpRow({ item, onClick }) {
+  return (
+    <button onClick={onClick} className="w-full flex items-center gap-3 py-2 text-left gc-clickable rounded-lg px-1 -mx-1">
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-semibold truncate">{item.title}</span>
+        {item.sub && <span className="block text-[11.5px] truncate" style={{ color: "var(--ink-faint)" }}>{item.sub}</span>}
+      </span>
+      <span className="text-[12px] font-semibold flex-shrink-0" style={{ color: "var(--ink-soft)" }}>{whenLabel(item.date)}</span>
+    </button>
+  );
+}
+
+/* Dashboard card: the next 30 days and the latest activity; "View all" opens
+   both in full screen. */
+function ComingUpActivityCard({ units, requests, activity, onOpenItem, onActivityClick }) {
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e) => { if (e.key === "Escape") setFull(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
+  const soon = buildComingUp(units, requests, 30);
+  const later = full ? buildComingUp(units, requests, 90) : [];
+  const empty = (text) => <p className="text-[13px] py-2" style={{ color: "var(--ink-faint)" }}>{text}</p>;
+  return (
+    <div className="gc-card p-5">
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="gc-display font-bold text-sm">Coming up</h3>
+        <button onClick={() => setFull(true)} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }}>
+          <Maximize2 size={12} /> View all
+        </button>
+      </div>
+      <p className="text-xs mb-1" style={{ color: "var(--ink-faint)" }}>Next 30 days</p>
+      {soon.slice(0, 5).map((it, i) => <ComingUpRow key={i} item={it} onClick={() => onOpenItem(it)} />)}
+      {soon.length === 0 && empty("Nothing starting, ending or due in the next 30 days.")}
+      {soon.length > 5 && <button onClick={() => setFull(true)} className="text-xs font-bold mt-1 py-2 -my-1" style={{ color: "var(--accent-dark)" }}>+ {soon.length - 5} more</button>}
+
+      <h3 className="gc-display font-bold text-sm mt-4 mb-2 pt-4" style={{ borderTop: "1px solid var(--border)" }}>Recent activity</h3>
+      <div className="space-y-1">
+        {activity.slice(0, 4).map((item, i) => <ActivityRow key={i} item={item} onClick={() => onActivityClick(item)} />)}
+        {activity.length === 0 && empty("No activity yet.")}
+      </div>
+
+      {full && createPortal(
+        <div className="gc-app fixed inset-0 z-[52] gc-scroll overflow-y-auto" style={{ background: "var(--bg)" }}>
+          <div className="max-w-6xl mx-auto p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="gc-display text-xl font-bold">Coming up &amp; recent activity</h2>
+              <button onClick={() => setFull(false)} className="flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-full" style={{ background: "var(--surface-soft)" }}>
+                <Minimize2 size={14} /> Close
+              </button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+              <div className="gc-card p-5">
+                <h3 className="gc-display font-bold text-sm">Coming up</h3>
+                <p className="text-xs mb-2" style={{ color: "var(--ink-faint)" }}>Next 90 days · {later.length} {later.length === 1 ? "item" : "items"}</p>
+                {later.map((it, i) => <ComingUpRow key={i} item={it} onClick={() => onOpenItem(it)} />)}
+                {later.length === 0 && empty("Nothing starting, ending or due in the next 90 days.")}
+              </div>
+              <div className="gc-card p-5">
+                <h3 className="gc-display font-bold text-sm">Recent activity</h3>
+                <p className="text-xs mb-2" style={{ color: "var(--ink-faint)" }}>Latest {Math.min(activity.length, 100)}</p>
+                <div className="space-y-1">
+                  {activity.slice(0, 100).map((item, i) => <ActivityRow key={i} item={item} onClick={() => { setFull(false); onActivityClick(item); }} />)}
+                  {activity.length === 0 && empty("No activity yet.")}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
 
-/* Admin review queue for PIs who self-registered via the Request Space form
-   (role = "PI / Academic Staff", or a researcher picking "My PI isn't
-   listed") and haven't been verified yet. Hidden entirely when empty. */
 function PendingPIsPanel({ pendingLabGroups, verifiedLabGroups, onApprove, onMerge }) {
   const [mergeTarget, setMergeTarget] = useState({});
   if (pendingLabGroups.length === 0) return null;
@@ -1294,7 +1493,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
   const [backingUp, setBackingUp] = useState(false);
   const [managingPIs, setManagingPIs] = useState(false);
   const [timelineFull, setTimelineFull] = useState(false);
-  const [activityExpanded, setActivityExpanded] = useState(true);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const total = units.length;
   const occupied = units.filter((u) => displayStatus(u).key === "occupied" || displayStatus(u).key === "warning" || displayStatus(u).key === "overdue").length;
@@ -1304,16 +1503,6 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
   const pending = requests.filter((r) => r.status === "pending");
 
   const activity = useMemo(() => buildActivityFeed(activityLog), [activityLog]);
-  const shownActivity = activityExpanded ? activity.slice(0, 50) : activity.slice(0, 4);
-
-  const [labsExpanded, setLabsExpanded] = useState(false);
-  // Counts every currently-active booking, not just one per unit - see the
-  // same fix/comment in LabUsageTrend's currentCounts above.
-  const byLabAll = LAB_GROUPS
-    .map((lab) => ({ lab, count: units.reduce((sum, u) => sum + currentBookingsList(u).filter((b) => b.labGroup === lab).length, 0) }))
-    .filter((l) => l.count > 0)
-    .sort((a, b) => b.count - a.count);
-  const byLab = labsExpanded ? byLabAll : byLabAll.slice(0, 4);
 
   // A requisition's entry opens it on the tab it's on now (by its current
   // status, not the event's); anything else on a unit opens the unit.
@@ -1413,8 +1602,8 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
         </div>
       </div>
 
-      {timelineFull && (
-        <div className="fixed inset-0 z-50 p-4 sm:p-6 gc-scroll overflow-y-auto" style={{ background: "var(--bg)" }}>
+      {timelineFull && createPortal(
+        <div className="gc-app fixed inset-0 z-[52] p-4 sm:p-6 gc-scroll overflow-y-auto" style={{ background: "var(--bg)" }}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="gc-display text-xl font-bold">Requisition timeline</h2>
             <button onClick={() => setTimelineFull(false)} className="flex items-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-full" style={{ background: "var(--surface-soft)" }}>
@@ -1424,83 +1613,27 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
           <div className="gc-card p-5">
             <TimelineView units={units} requests={requests} onNavigate={(tab, index) => onPreviewRequisition(index)} onSelectUnit={onSelectUnit} />
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1.4fr] gap-5">
-        {/* left column */}
-        <div className="space-y-5">
-          <div className="gc-card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="gc-display font-bold text-sm">Recent activity</h3>
-              <button onClick={() => setActivityExpanded((v) => !v)} className="text-xs font-bold py-2.5 -my-2.5" style={{ color: "var(--accent-dark)" }}>
-                {activityExpanded ? "Show less" : "View all"}
-              </button>
-            </div>
-            <div className="space-y-1 gc-scroll" style={{ maxHeight: activityExpanded ? 560 : "none", overflowY: activityExpanded ? "auto" : "visible" }}>
-              {shownActivity.map((item, i) => (
-                <ActivityRow key={i} item={item} onClick={() => handleActivityClick(item)} />
-              ))}
-              {shownActivity.length === 0 && <p className="text-sm py-4" style={{ color: "var(--ink-faint)" }}>No activity yet.</p>}
-            </div>
-          </div>
-        </div>
-
-        {/* right column */}
-        <div className="space-y-5">
-          {/* lab groups row */}
-          <div className="gc-card p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="gc-display font-bold text-sm">Lab groups</h3>
-                <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units currently held, by group - click one to filter inventory</p>
-              </div>
-              <button
-                onClick={() => setManagingPIs(true)}
-                className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full flex-shrink-0"
-                style={{ background: "var(--btn-accent)", color: "white" }}
-              >
-                <Pencil size={12} /> Edit PIs
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {byLab.map((l) => {
-                const idx = LAB_GROUPS.indexOf(l.lab);
-                return (
-                  <button
-                    key={l.lab}
-                    onClick={() => goInventory({ labGroup: l.lab })}
-                    className="gc-clickable flex-1 min-w-[140px] rounded-2xl p-4 text-left"
-                    style={{ background: "var(--surface-soft)" }}
-                  >
-                    <span
-                      className="inline-flex items-center justify-center rounded-lg text-[10px] font-bold px-2.5 py-1 mb-2"
-                      style={{ background: OKABE_ITO[idx % OKABE_ITO.length], color: OKABE_ITO_TEXT[idx % OKABE_ITO_TEXT.length] }}
-                    >
-                      {l.lab.split(" ")[0].slice(0, 4).toUpperCase()}
-                    </span>
-                    <div className="text-sm font-semibold">{piDisplay(l.lab)}</div>
-                    <div className="gc-display text-lg font-bold">{l.count} {l.count === 1 ? "unit" : "units"}</div>
-                  </button>
-                );
-              })}
-            </div>
-            {byLabAll.length > 4 && (
-              <button
-                onClick={() => setLabsExpanded((v) => !v)}
-                className="w-full flex items-center justify-center gap-1.5 text-xs font-bold mt-3 pt-3"
-                style={{ color: "var(--ink-soft)", borderTop: "1px solid var(--border)" }}
-              >
-                {labsExpanded ? "Show fewer lab groups" : `Show all ${byLabAll.length} lab groups`}
-                <ChevronDown size={13} style={{ transform: labsExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
-              </button>
-            )}
-          </div>
-
-          {/* occupancy trend */}
-          <LabUsageTrend units={units} labUsageHistory={labUsageHistory} />
-        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-5 items-start">
+        <SpaceUsageCard units={units} labUsageHistory={labUsageHistory} onOpenReport={() => setReportOpen(true)} />
+        <ComingUpActivityCard
+          units={units} requests={requests} activity={activity}
+          onActivityClick={handleActivityClick}
+          onOpenItem={(it) => {
+            const reqIndex = it.reqId ? requests.findIndex((r) => r.id === it.reqId) : -1;
+            if (reqIndex !== -1) { onPreviewRequisition(reqIndex); return; }
+            const unit = units.find((u) => u.id === it.unitId);
+            if (unit) onSelectUnit(unit);
+          }}
+        />
       </div>
+
+      {reportOpen && (
+        <SpaceUsageReport units={units} labUsageHistory={labUsageHistory} onClose={() => setReportOpen(false)} goInventory={goInventory} onEditPIs={() => setManagingPIs(true)} />
+      )}
 
       {managingPIs && (
         <PIManagementModal

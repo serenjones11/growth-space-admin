@@ -32,15 +32,18 @@ export function summariseUsage({ monthLabels, series, current = null }) {
   return { rows, totals, allUnitMonths };
 }
 
-/* Standalone SVG line chart (no CSS variables), sized in px. */
+/* Standalone SVG stacked-column chart (no CSS variables), sized in px: one
+   column per month split by group, with the total on top - the same design
+   as the app's chart. */
 export function buildUsageChartSvg({ monthLabels, series, width = 1600, height = 560 }) {
-  const PAD_L = 56, PAD_R = 44, PAD_T = 24, PAD_B = 52;
+  const PAD_L = 56, PAD_R = 16, PAD_T = 36, PAD_B = 52;
   const plotW = width - PAD_L - PAD_R, plotH = height - PAD_T - PAD_B;
-  const maxRaw = Math.max(1, ...series.flatMap((s) => s.values.map((v) => v || 0)));
-  const step = Math.max(1, Math.ceil(maxRaw / 4)); // whole-unit gridlines
-  const maxV = step * Math.max(1, Math.ceil(maxRaw / step));
   const n = monthLabels.length;
-  const x = (i) => PAD_L + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const totals = monthLabels.map((_, i) => series.reduce((sum, s) => sum + (s.values[i] || 0), 0));
+  const maxRaw = Math.max(1, ...totals);
+  const step = Math.max(1, Math.ceil(maxRaw / 4)); // whole-unit gridlines
+  const maxV = step * Math.ceil(maxRaw / step);
+  const cw = plotW / Math.max(1, n), bw = Math.min(90, cw * 0.62);
   const y = (v) => PAD_T + plotH - (v / maxV) * plotH;
   const labelStep = Math.max(1, Math.ceil(n / 12));
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -51,13 +54,17 @@ export function buildUsageChartSvg({ monthLabels, series, width = 1600, height =
     out += `<text x="${PAD_L - 12}" y="${y(v) + 7}" font-size="20" fill="${INK_FAINT}" text-anchor="end">${v}</text>`;
   }
   monthLabels.forEach((m, i) => {
-    if (i % labelStep === 0 || i === n - 1) out += `<text x="${x(i)}" y="${height - 16}" font-size="20" fill="${INK_SOFT}" text-anchor="${n > 1 && i === n - 1 ? "end" : "middle"}">${esc(m)}</text>`;
+    const cx = PAD_L + cw * (i + 0.5);
+    let base = 0;
+    for (const s of series) {
+      const v = s.values[i] || 0;
+      if (!v) continue;
+      out += `<rect x="${cx - bw / 2}" y="${y(base + v)}" width="${bw}" height="${Math.max(0, y(base) - y(base + v) - 3)}" rx="6" fill="${s.color}"/>`;
+      base += v;
+    }
+    if (totals[i] > 0) out += `<text x="${cx}" y="${y(totals[i]) - 10}" font-size="21" font-weight="bold" fill="${INK}" text-anchor="middle">${totals[i]}</text>`;
+    if (i % labelStep === 0 || i === n - 1) out += `<text x="${cx}" y="${height - 16}" font-size="20" fill="${INK_SOFT}" text-anchor="middle">${esc(m)}</text>`;
   });
-  for (const s of series) {
-    const pts = s.values.map((v, i) => `${x(i)},${y(v || 0)}`).join(" ");
-    out += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>`;
-    s.values.forEach((v, i) => { out += `<circle cx="${x(i)}" cy="${y(v || 0)}" r="6" fill="${s.color}" stroke="#FFFFFF" stroke-width="2"/>`; });
-  }
   return out + "</svg>";
 }
 
