@@ -179,31 +179,48 @@ function applyLabGroups(rows) {
   LAB_GROUPS = rows.map((g) => g.name);
   PI_BY_LAB = Object.fromEntries(rows.map((g) => [g.name, g.piName]));
 }
-/* Insect Sciences icon: a fly, drawn to sit with the lucide set (same props:
-   size, color, strokeWidth). The drawing is more detailed than lucide's, so
-   its line is drawn at 0.65x the requested stroke width to stay legible. */
-function Fly({ size = 24, color = "currentColor", strokeWidth = 2, ...rest }) {
+/* Insect Sciences icon: a cockroach, drawn to sit with the lucide set (same
+   props: size, color, strokeWidth). Bold and simple so it stays recognisable
+   at the 11-14px it's mostly shown at. */
+function Cockroach({ size = 24, color = "currentColor", strokeWidth = 2, ...rest }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
-      strokeWidth={strokeWidth * 0.65} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...rest}>
-      <path d="M12 1.9v1"/>
-      <path d="M10.3 5.9a1.7 1.75 0 0 1 3.4 0z"/>
-      <ellipse cx="12" cy="10.1" rx="1.75" ry="2.9"/>
-      <ellipse cx="12" cy="17.6" rx="2.2" ry="4.5"/>
-      <path d="M10.3 8.4 8 6.4V3.7L6.3 1.9"/>
-      <path d="M13.7 8.4l2.3-2V3.7l1.7-1.8"/>
-      <path d="M10.2 10 3.6 15.6a2.4 2.4 0 0 0 1.5 4.1c1.6.1 3.4-.2 4.6-.7"/>
-      <path d="M13.8 10l6.6 5.6a2.4 2.4 0 0 1-1.5 4.1c-1.6.1-3.4-.2-4.6-.7"/>
-      <path d="M10 13.6 6.6 15.6V21"/>
-      <path d="M14 13.6l3.4 2V21"/>
-      <path d="M10.1 20.6v2"/>
-      <path d="M13.9 20.6v2"/>
+      strokeWidth={strokeWidth * 0.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...rest}>
+      <ellipse cx="12" cy="13.4" rx="4.1" ry="8.3" />
+      <path d="M9.6 6.7h4.8" />
+      <path d="M8.2 10Q12 13.4 15.8 10" />
+      <path d="M12 11.7v9.9" />
+      <path d="M10.2 5.4C9.2 3.2 7.7 2 5.9 1.5" />
+      <path d="M13.8 5.4c1-2.2 2.5-3.4 4.3-3.9" />
+      <path d="M5.6 6.6l2 2.7h.6" />
+      <path d="M18.4 6.6l-2 2.7h-.6" />
+      <path d="M7.9 11.6H5.5l-2 3.3" />
+      <path d="M16.1 11.6h2.4l2 3.3" />
+      <path d="M8.1 15.6 5.6 17l.3 4" />
+      <path d="M15.9 15.6l2.5 1.4-.3 4" />
     </svg>
   );
 }
+
+/* The GrowSpace app icon (space grid: a 3x3 grid of spaces, the top-right one
+   booked by a leaf) - same artwork as public/favicon.svg and the install icons. */
+function AppLogo({ size = 40, ring = false }) {
+  const cells = [];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) if (!(r === 0 && c === 2))
+    cells.push(<rect key={`${r}${c}`} x={17 + c * 23} y={17 + r * 23} width="18" height="18" rx="5" fill={(r + c) % 2 ? "#2F6E4F" : "#52A070"} />);
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden="true" className="flex-shrink-0 block"
+      style={{ borderRadius: size * 0.22, boxShadow: ring ? "inset 0 0 0 1px rgba(255,255,255,0.14), 0 0 0 1px rgba(255,255,255,0.10)" : undefined }}>
+      <rect width="100" height="100" rx="22" fill="#0E1A16" />
+      {cells}
+      <path d="M63 37C63 25 70 18 83 17C83 29 76 36 63 37Z" fill="#3FCF9B" />
+    </svg>
+  );
+}
+
 const DISCIPLINE_META = {
   plant: { label: "Plant Sciences", icon: Leaf, color: "#2F8F5B" },
-  insect: { label: "Insect Sciences", icon: Fly, color: "#A6763F" },
+  insect: { label: "Insect Sciences", icon: Cockroach, color: "#A6763F" },
 };
 /* A unit's research area label (units.disciplines) <-> the add/edit form's
    single dropdown, where "both" covers a shared reftech room. */
@@ -530,9 +547,9 @@ function bookingStrongStatus(b) {
    for "all," instead of reading a sentence to find the right option. */
 function DisciplineFilterPills({ value, onChange }) {
   const pills = [
-    { key: "all", title: "All areas", color: "var(--ink-soft)", render: <span className="flex items-center" style={{ gap: 1 }}><Leaf size={12} /><Fly size={12} /></span> },
+    { key: "all", title: "All areas", color: "var(--ink-soft)", render: <span className="flex items-center" style={{ gap: 1 }}><Leaf size={12} /><Cockroach size={12} /></span> },
     { key: "plant", title: DISCIPLINE_META.plant.label, color: DISCIPLINE_META.plant.color, render: <Leaf size={14} /> },
-    { key: "insect", title: DISCIPLINE_META.insect.label, color: DISCIPLINE_META.insect.color, render: <Fly size={14} /> },
+    { key: "insect", title: DISCIPLINE_META.insect.label, color: DISCIPLINE_META.insect.color, render: <Cockroach size={14} /> },
   ];
   return (
     <div className="flex items-center gap-1.5">
@@ -771,12 +788,7 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
       style={{ background: "var(--sidebar-bg)" }}
     >
       <div className="flex items-center gap-3 px-2 pb-6 mb-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: "var(--gradient)" }}
-        >
-          <Leaf size={19} color="#fff" />
-        </div>
+        <AppLogo size={40} ring />
         <div className="min-w-0 flex-1">
           <div className="gc-display font-extrabold text-[15.5px] text-white leading-tight">GrowSpace</div>
           <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: "var(--sidebar-text-dim)" }}>Plant &amp; Insect CER Management System</div>
@@ -4566,7 +4578,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
           onClick={() => { setDiscipline("plant"); setForm((f) => ({ ...f, ...defaultConditions("plant") })); goNext(); }}
         />
         <WizardChoice
-          icon={Fly} title="Insects"
+          icon={Cockroach} title="Insects"
           onClick={() => { setDiscipline("insect"); setForm((f) => ({ ...f, ...defaultConditions("insect") })); goNext(); }}
         />
       </WizardShell>
@@ -5647,9 +5659,7 @@ export default function GrowthCabinetApp() {
         <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--gradient)" }}>
-                <Leaf size={15} color="#fff" />
-              </div>
+              <AppLogo size={32} />
               <span className="gc-display font-extrabold text-[14px]">GrowSpace</span>
             </div>
             {session ? (
@@ -5695,9 +5705,7 @@ export default function GrowthCabinetApp() {
           <button onClick={() => setMobileNavOpen(true)} className="p-1 -ml-1 flex-shrink-0" style={{ color: "white" }} aria-label="Open menu">
             <Menu size={22} />
           </button>
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--gradient)" }}>
-            <Leaf size={14} color="#fff" />
-          </div>
+          <AppLogo size={28} ring />
           <span className="gc-display font-extrabold text-[13px] text-white truncate">GrowSpace</span>
           {pendingCount > 0 && (
             <span className="ml-auto text-[10px] rounded-full px-1.5 py-0.5 font-bold flex-shrink-0" style={{ background: "#B23A34", color: "white" }}>
