@@ -2733,6 +2733,33 @@ function TileBookingRow({ booking }) {
   );
 }
 
+/* A bar that fills as a booking runs, with its start and end dates and how
+   long is left (or until it starts / how overdue it is). `note` replaces
+   that middle text - e.g. "Completed" once a requisition is done. Day counts
+   go through daysUntil (calendar days), so it's right around midnight too. */
+function BookingProgress({ startDate, endDate, color, note }) {
+  const toStart = daysUntil(startDate);
+  const left = daysUntil(endDate);
+  const total = Math.max(1, left - toStart);
+  const pct = Math.max(0, Math.min(100, (-toStart / total) * 100));
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+  const text = note || (toStart > 0 ? `starts in ${plural(toStart, "day")}`
+    : left < 0 ? `${plural(-left, "day")} overdue`
+    : left === 0 ? "ends today" : `${plural(left, "day")} left`);
+  return (
+    <div>
+      <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
+        <div className="h-full rounded-full" style={{ width: `${note === "Completed" ? 100 : pct}%`, background: color }} />
+      </div>
+      <div className="flex justify-between items-center text-[11.5px] font-bold mt-1.5">
+        <span style={{ color: "var(--ink)" }}>{fmtGB(startDate)}</span>
+        <span style={{ color }}>{text}</span>
+        <span style={{ color: "var(--ink)" }}>{fmtGB(endDate)}</span>
+      </div>
+    </div>
+  );
+}
+
 /* Tile C: a requisition in the unit view - who, species and PI, with a
    bar that fills as the booking runs. Conditions (temp, humidity, light)
    are on the unit tile, so they're left off here. */
@@ -2740,16 +2767,6 @@ function BookingCard({ booking, onOpenRequisition }) {
   const clickable = !!onOpenRequisition;
   const Wrapper = clickable ? "button" : "div";
   const st = bookingStrongStatus(booking);
-  const start = new Date(booking.startDate), end = new Date(booking.endDate);
-  const total = Math.max(1, (end - start) / 86400000);
-  const elapsed = (TODAY - start) / 86400000;
-  const pct = Math.max(0, Math.min(100, (elapsed / total) * 100));
-  const left = daysUntil(booking.endDate);
-  const toStart = daysUntil(booking.startDate);
-  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  const progressText = toStart > 0 ? `starts in ${plural(toStart, "day")}`
-    : left < 0 ? `${plural(-left, "day")} overdue`
-    : left === 0 ? "ends today" : `${plural(left, "day")} left`;
   const species = booking.species && booking.species.length ? booking.species.join(", ") : "";
   return (
     <Wrapper
@@ -2768,14 +2785,7 @@ function BookingCard({ booking, onOpenRequisition }) {
         {species && <span className="italic" style={{ color: "var(--ink)" }}>{species}</span>}
         {species ? " · " : ""}{piDisplay(booking.labGroup)}
       </div>
-      <div className="h-2 rounded-full mt-3 overflow-hidden" style={{ background: "var(--border)" }}>
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: st.color }} />
-      </div>
-      <div className="flex justify-between items-center text-[11.5px] font-bold mt-1.5">
-        <span style={{ color: "var(--ink)" }}>{fmtGB(booking.startDate)}</span>
-        <span style={{ color: st.color }}>{progressText}</span>
-        <span style={{ color: "var(--ink)" }}>{fmtGB(booking.endDate)}</span>
-      </div>
+      <div className="mt-3"><BookingProgress startDate={booking.startDate} endDate={booking.endDate} color={st.color} /></div>
     </Wrapper>
   );
 }
@@ -3361,8 +3371,12 @@ function RequisitionDetailFields({ req }) {
   const fmtSpecies = (x) => (x.species && x.species.length ? x.species.join(", ") : "-");
   const fmtHumidity = (x) => (isSet(x.setHumidity) ? `${x.setHumidity}% RH` : "Not specified");
   const fmtFloor = (x) => (x.preferredFloor === "any" ? "No preference" : FLOOR_LABEL[x.preferredFloor]);
+  const timelineNote = req.status === "completed" ? "Completed" : req.status === "declined" ? "Declined" : null;
   return (
     <div className="space-y-4">
+      <InfoBox>
+        <BookingProgress startDate={req.startDate} endDate={req.endDate} color={requisitionStrongStatus(req).color} note={timelineNote} />
+      </InfoBox>
       <InfoBox>
         <BoxLabel>Requester</BoxLabel>
         <FieldGrid>
