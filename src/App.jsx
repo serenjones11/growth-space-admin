@@ -931,11 +931,11 @@ function ActivityRow({ item, onClick }) {
   const Icon = meta.icon;
   return (
     <button onClick={onClick} className="w-full flex items-center gap-3 text-left rounded-xl px-2 py-2 -mx-2 gc-clickable" style={{ background: "transparent" }}>
-      <span className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: meta.soft, color: meta.color }}>
+      <span className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "var(--surface-soft)", color: "var(--ink-soft)" }}>
         <Icon size={15} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{item.title}</div>
+        <div className="text-sm font-semibold truncate">{item.title}</div>
         <div className="text-xs truncate" style={{ color: "var(--ink-faint)" }}>{fmtGB(item.date)} · {item.subtitle}</div>
       </div>
       <ChevronRight size={15} style={{ color: "var(--ink-faint)" }} className="flex-shrink-0" />
@@ -1253,8 +1253,8 @@ function SpaceUsageReport({ units, labUsageHistory, onClose, goInventory, onEdit
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="gc-card px-5 py-4">
             <div className="text-xs" style={{ color: "var(--ink-faint)" }}>Average in use</div>
-            <div className="gc-display text-2xl font-extrabold">{avgInUse.toFixed(1)} <span className="text-sm font-semibold" style={{ color: "var(--ink-soft)" }}>units a month</span></div>
-            <div className="text-xs" style={{ color: "var(--ink-soft)" }}>{avgPct <= 100 ? `${avgPct}% of the ${units.length} units` : `${units.length} units in total`} · {rangeLabel}</div>
+            <div className="gc-display text-2xl font-extrabold">{avgPct}%</div>
+            <div className="text-xs" style={{ color: "var(--ink-soft)" }}>of the {units.length} units in use, on average each month · {rangeLabel}</div>
           </div>
           <div className="gc-card px-5 py-4">
             <div className="text-xs" style={{ color: "var(--ink-faint)" }}>{biggest.length > 1 ? "Biggest users" : "Biggest user"}</div>
@@ -1359,8 +1359,8 @@ function ComingUpRow({ item, onClick }) {
     <button onClick={onClick} className="w-full flex items-center gap-3 py-2 text-left gc-clickable rounded-lg px-1 -mx-1">
       <span style={{ width: 8, height: 8, borderRadius: "50%", background: item.color, flexShrink: 0 }} />
       <span className="min-w-0 flex-1">
-        <span className="block text-[13px] font-semibold truncate">{item.title}</span>
-        {item.sub && <span className="block text-[11.5px] truncate" style={{ color: "var(--ink-faint)" }}>{item.sub}</span>}
+        <span className="block text-sm font-semibold truncate">{item.title}</span>
+        {item.sub && <span className="block text-xs truncate" style={{ color: "var(--ink-faint)" }}>{item.sub}</span>}
       </span>
       <span className="text-[12px] font-semibold flex-shrink-0" style={{ color: "var(--ink-soft)" }}>{whenLabel(item.date)}</span>
     </button>
@@ -2481,9 +2481,10 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
       </div>
 
       {labGroupFilter !== "all" && (
-        <div className="flex items-center gap-2 mb-4 text-sm px-4 py-2.5 rounded-xl" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
-          Filtered to <strong>{piDisplay(labGroupFilter)}</strong>
-          <button onClick={() => setLabGroupFilter("all")} className="ml-auto text-xs font-semibold underline">Clear</button>
+        <div className="flex items-center gap-2 mb-4 text-sm px-4 py-2.5 rounded-xl" style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--ink-soft)" }}>
+          <span style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: OKABE_ITO[Math.max(0, LAB_GROUPS.indexOf(labGroupFilter)) % OKABE_ITO.length] }} />
+          Showing units held by <strong style={{ color: "var(--ink)" }}>{piDisplay(labGroupFilter)}</strong>
+          <button onClick={() => setLabGroupFilter("all")} className="ml-auto flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full" style={{ background: "var(--sidebar-bg)", color: "#fff" }}><X size={12} /> Clear</button>
         </div>
       )}
 
