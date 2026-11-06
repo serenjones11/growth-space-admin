@@ -3504,7 +3504,7 @@ function RequisitionDetailFields({ req }) {
             field("Pest outbreak consent", ["pest_consent"], (x) => (x.pestConsent ? "Consented" : "Not given"))
           ) : (
             <>
-              {field("Invertebrate Welfare Policy", ["invertebrate_welfare_ack"], (x) => (x.invertebrateWelfareAck ? <CheckCircle2 size={16} style={{ color: "var(--accent)" }} aria-label="Confirmed" /> : "Not confirmed"))}
+              {field("Invertebrate Welfare Policy", ["invertebrate_welfare_ack"], (x) => (x.invertebrateWelfareAck ? <CheckCircle2 size={16} className="inline-block" style={{ color: "var(--accent)", verticalAlign: "middle", marginTop: -2 }} aria-label="Confirmed" /> : "Not confirmed"))}
               {field("Dimming required", ["dimming_required"], (x) => (x.dimmingRequired ? "Yes" : "No"))}
             </>
           )}
@@ -5437,6 +5437,12 @@ function AdminLoginForm({ onDone }) {
   );
 }
 
+const APP_PAGES = ["dashboard", "inventory", "requisitions", "settings", "request"];
+function pageFromHash() {
+  const h = window.location.hash.slice(1);
+  return APP_PAGES.includes(h) ? h : "dashboard";
+}
+
 export default function GrowthCabinetApp() {
   const { session, profile, profileError, authLoading, reloadProfile } = useSession();
   // Owners and users ('admin') both get the whole app; only owners manage users.
@@ -5490,7 +5496,23 @@ export default function GrowthCabinetApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
 
-  const [page, setPage] = useState("dashboard");
+  // The open page lives in the address (#inventory, #requisitions...), so a
+  // reload stays put and the browser's back button moves between pages.
+  // Hashes with "=" belong to Supabase auth links (e.g. password reset) and
+  // are left alone.
+  const [page, setPage] = useState(pageFromHash);
+  useEffect(() => {
+    const h = window.location.hash;
+    if (h.includes("=")) return;
+    const want = page === "dashboard" ? "" : `#${page}`;
+    if (h === want) return;
+    window.history.pushState(null, "", want || window.location.pathname + window.location.search);
+  }, [page]);
+  useEffect(() => {
+    const onNav = () => { if (!window.location.hash.includes("=")) setPage(pageFromHash()); };
+    window.addEventListener("popstate", onNav);
+    return () => window.removeEventListener("popstate", onNav);
+  }, []);
   // Holds only the id, not a snapshot of the unit object - so the drawer
   // always reflects the freshly-reloaded unit after any mutation (add/
   // remove a document, update service log, etc.) instead of showing stale
