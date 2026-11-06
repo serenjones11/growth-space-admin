@@ -53,6 +53,7 @@ import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
 import * as api from "./lib/api";
 import { downloadFullBackup } from "./lib/backup";
+import { downloadUsagePdf } from "./lib/usageReport";
 import { addDays, bookingDateState, daysUntil as daysFrom, earliestFreeStart, fmtGB, localISODate, rangesOverlap, today } from "./lib/dates";
 
 /* ---------------------------------------------------------------------- */
@@ -1061,6 +1062,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
   const [isolatedLab, setIsolatedLab] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const activeLab = isolatedLab || hoveredLab;
 
   const fromIdx = Math.max(0, allKeys.indexOf(fromKey));
@@ -1097,6 +1099,26 @@ function LabUsageTrend({ units, labUsageHistory }) {
   const ranked = LAB_GROUPS.map((lab) => ({ lab, current: currentCounts[lab] })).sort((a, b) => b.current - a.current);
   const top = ranked[0];
   const avg = ranked.length ? ranked.reduce((s, r) => s + r.current, 0) / ranked.length : 0;
+  // PDF of the months currently shown, to send to people outside GrowSpace.
+  const downloadPdf = async () => {
+    setDownloading(true);
+    try {
+      const nameOf = (lab) => PI_BY_LAB[lab] || lab;
+      const inRange = nowIdx >= fromIdx && nowIdx <= toIdx;
+      await downloadUsagePdf({
+        monthLabels: labels,
+        rangeLabel: `${labUsageHistory.fullLabels[fromIdx]} to ${labUsageHistory.fullLabels[toIdx]}`,
+        series: series.map((s) => ({ name: nameOf(s.lab), color: s.color, values: s.values })),
+        current: inRange ? Object.fromEntries(LAB_GROUPS.map((lab) => [nameOf(lab), currentCounts[lab]])) : null,
+      });
+      toast("PDF downloaded");
+    } catch (err) {
+      console.error(err);
+      toast(`Couldn't make the PDF: ${err.message || err}`, { kind: "error" });
+    } finally {
+      setDownloading(false);
+    }
+  };
   const aboveAvg = top && avg > 0 && top.current > avg ? ` - ${Math.round(((top.current - avg) / avg) * 100)}% above the group average (${avg.toFixed(1)})` : "";
 
   return (
@@ -1118,6 +1140,14 @@ function LabUsageTrend({ units, labUsageHistory }) {
           <MonthPickerButton label="From" value={fromKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleFrom} align="left" />
           <span className="text-xs font-semibold" style={{ color: "var(--ink-faint)" }}>to</span>
           <MonthPickerButton label="To" value={toKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleTo} align="right" />
+          <button
+            onClick={downloadPdf} disabled={downloading}
+            className="flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl disabled:opacity-50"
+            style={{ background: "var(--btn-accent)", color: "white" }}
+            title="Download this chart and its figures as a PDF"
+          >
+            <Download size={13} /> {downloading ? "Preparing…" : "Download PDF"}
+          </button>
         </div>
       </div>
 
