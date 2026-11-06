@@ -796,7 +796,7 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
           <div className="gc-display font-extrabold text-[15.5px] text-white leading-tight">GrowSpace</div>
           <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: "var(--sidebar-text-dim)" }}>Plant &amp; Insect CER Management System</div>
         </div>
-        <button onClick={onClose} className="lg:hidden p-1 -mr-1 flex-shrink-0" style={{ color: "var(--sidebar-text)" }} aria-label="Close menu">
+        <button onClick={onClose} className="lg:hidden p-2.5 -mr-2.5 -my-2 flex-shrink-0" style={{ color: "var(--sidebar-text)" }} aria-label="Close menu">
           <X size={20} />
         </button>
       </div>
@@ -1109,7 +1109,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
       <div className="flex items-center justify-between mb-1 flex-wrap gap-3" style={{ paddingRight: 110 }}>
         <div>
           <h3 className="gc-display font-bold text-sm">Space usage by lab group</h3>
-          <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units occupied per month · hover a line for details, click a legend entry to isolate it</p>
+          <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Units occupied per month · hover or tap a point for details, click a legend entry to isolate it</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <MonthPickerButton label="From" value={fromKey} keys={allKeys} fullLabels={labUsageHistory.fullLabels} onSelect={handleFrom} align="left" />
@@ -1152,6 +1152,7 @@ function LabUsageTrend({ units, labUsageHistory }) {
                     key={i}
                     onMouseEnter={() => { setHoveredLab(s.lab); setTooltip({ lab: s.lab, month: labels[i], value: v, x: xFor(i), y: yFor(v) }); }}
                     onMouseLeave={() => { setHoveredLab(null); setTooltip(null); }}
+                    onClick={() => { setHoveredLab(s.lab); setTooltip({ lab: s.lab, month: labels[i], value: v, x: xFor(i), y: yFor(v) }); }}
                     style={{ cursor: "pointer" }}
                   >
                     {/* generous invisible hit-area so points are easy to hover even when packed close together */}
@@ -1399,7 +1400,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
           <div className="gc-card p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="gc-display font-bold text-sm">Recent activity</h3>
-              <button onClick={() => setActivityExpanded((v) => !v)} className="text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
+              <button onClick={() => setActivityExpanded((v) => !v)} className="text-xs font-bold py-2.5 -my-2.5" style={{ color: "var(--accent-dark)" }}>
                 {activityExpanded ? "Show less" : "View all"}
               </button>
             </div>
@@ -1787,8 +1788,8 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
         <button
           type="button"
           onClick={() => onSelectUnit && onSelectUnit(u)}
-          className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold text-left gc-clickable overflow-hidden"
-          style={{ height: TIMELINE_LANE_H, color: "var(--ink-soft)" }}
+          className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold text-left gc-clickable overflow-hidden sticky left-0 z-[11]"
+          style={{ height: TIMELINE_LANE_H, color: "var(--ink-soft)", background: "var(--surface)" }}
         >
           <span className="truncate">{u.id}</span>
           {rowDisciplines.map((k) => <DisciplineIconPill key={k} discipline={k} />)}
@@ -1906,6 +1907,8 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
 
       {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No cabinets or Reftech rooms match these filters.</p>}
 
+      {/* Full screen on phones: scroll the chart sideways rather than squash the bars. */}
+      <div className={compact ? undefined : "overflow-x-auto gc-scroll"}><div style={compact ? undefined : { minWidth: 720 }}>
       <div className="relative h-5 mb-2 ml-16 sm:ml-24">
         {axisMarks.map((m, i) => (
           <span key={i} className="absolute text-[11px] font-semibold -translate-x-1/2" style={{ left: `${m.pct}%`, color: "var(--ink-faint)" }}>{m.label}</span>
@@ -1920,7 +1923,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
             that window, before they've been assigned to one. */}
         {pendingLanes.length > 0 && (
           <div className="flex items-start gap-2 text-xs mb-4 pb-4" style={{ borderBottom: "1px dashed var(--border)" }}>
-            <span className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold" style={{ height: TIMELINE_LANE_H, color: PENDING_DASH }}>
+            <span className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold sticky left-0 z-[11]" style={{ height: TIMELINE_LANE_H, color: PENDING_DASH, background: "var(--surface)" }}>
               <Clock size={11} className="flex-shrink-0" /> <span className="truncate">Pending</span>
             </span>
             <div
@@ -2016,6 +2019,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
           })}
         </div>
       </div>
+      </div></div>
     </div>
   );
 }
@@ -2435,7 +2439,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, onAddCategory, onRemoveC
       <div className="flex items-center justify-between mb-3">
         <SectionLabel>Maintenance History</SectionLabel>
         {!adding && !editingId && (
-          <button onClick={() => { setAdding(true); setEditingId(null); }} className="flex items-center gap-1 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
+          <button onClick={() => { setAdding(true); setEditingId(null); }} className="flex items-center gap-1 text-xs font-bold py-2.5 -my-2.5" style={{ color: "var(--accent-dark)" }}>
             <PlusCircle size={13} /> Log / schedule maintenance
           </button>
         )}
@@ -2502,7 +2506,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, onAddCategory, onRemoveC
         </div>
       )}
 
-      <table className="w-full text-[13px]" style={{ borderCollapse: "collapse" }}>
+      <div className="overflow-x-auto gc-scroll"><table className="w-full text-[13px]" style={{ borderCollapse: "collapse", minWidth: 520 }}>
         <thead>
           <tr>
             {["Date", "Contractor", "Category", "Notes", "Cost", ""].map((h, i) => (
@@ -2546,7 +2550,7 @@ function ServiceLogEditor({ unit, onUpdate, categories, onAddCategory, onRemoveC
             );
           })}
         </tbody>
-      </table>
+      </table></div>
       {unit.serviceLog.length === 0 && <p className="text-sm py-2" style={{ color: "var(--ink-faint)" }}>No service history yet.</p>}
       {confirmingRemove && (
         <ConfirmDialog
@@ -2592,7 +2596,7 @@ function DocumentsSection({ unit, onAdd, onRemove }) {
     <section>
       <div className="flex items-center justify-between mb-3">
         <SectionLabel>Documents</SectionLabel>
-        <button onClick={() => setAdding((v) => !v)} className="flex items-center gap-1 text-xs font-bold" style={{ color: "var(--accent-dark)" }}>
+        <button onClick={() => setAdding((v) => !v)} className="flex items-center gap-1 text-xs font-bold py-2.5 -my-2.5" style={{ color: "var(--accent-dark)" }}>
           <PlusCircle size={13} /> Add document
         </button>
       </div>
@@ -2667,7 +2671,7 @@ function PhotoCard({ unit, onUpdate }) {
     <>
       <div className="flex items-center justify-between mb-3">
         <SectionLabel>Photo</SectionLabel>
-        <button disabled={busy} onClick={openPicker} className="text-xs font-bold disabled:opacity-40" style={{ color: "var(--accent-dark)" }}>{busy ? "Uploading…" : unit.photoDataUrl ? "Replace" : "Add photo"}</button>
+        <button disabled={busy} onClick={openPicker} className="text-xs font-bold py-2.5 -my-2.5 disabled:opacity-40" style={{ color: "var(--accent-dark)" }}>{busy ? "Uploading…" : unit.photoDataUrl ? "Replace" : "Add photo"}</button>
         <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
       </div>
       {unit.photoDataUrl ? (
@@ -3318,14 +3322,14 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
               (only the ones filled in). */}
           <div className="rounded-xl p-3.5 space-y-3" style={{ background: "var(--surface-soft)", border: "1px solid var(--border)" }}>
             <SettingsHeading>Current settings · Climate</SettingsHeading>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <Field label="Day temp (°C)"><input {...settingInput("dayTemp")} /></Field>
               <Field label="Night temp (°C)"><input {...settingInput("nightTemp")} /></Field>
               <Field label="RH (%)"><input {...settingInput("humidity")} /></Field>
             </div>
             <SettingsHeading>Lighting</SettingsHeading>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
                 <ManagedSelectField
                   label="Light cycle" noun="light cycle" emptyLabel="Not set"
                   value={form.settings?.lightCycle || ""} options={lightCycles}
@@ -5749,7 +5753,7 @@ export default function GrowthCabinetApp() {
           className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 flex-shrink-0"
           style={{ background: "var(--sidebar-bg)" }}
         >
-          <button onClick={() => setMobileNavOpen(true)} className="p-1 -ml-1 flex-shrink-0" style={{ color: "white" }} aria-label="Open menu">
+          <button onClick={() => setMobileNavOpen(true)} className="p-2.5 -ml-2.5 -my-2 flex-shrink-0" style={{ color: "white" }} aria-label="Open menu">
             <Menu size={22} />
           </button>
           <AppLogo size={28} ring />
