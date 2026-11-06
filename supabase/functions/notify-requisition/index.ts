@@ -11,8 +11,8 @@ const WEBHOOK_SECRET = Deno.env.get("WEBHOOK_SECRET");
 // Resend's shared test sender - works with no domain setup, but real
 // deliverability (and sending to arbitrary recipients without it landing in
 // spam) needs a verified sending domain. Set NOTIFY_FROM_EMAIL once one's
-// ready (e.g. "Growth Space Admin <notifications@yourdomain.ac.uk>").
-const FROM_EMAIL = Deno.env.get("NOTIFY_FROM_EMAIL") || "Growth Space Admin <onboarding@resend.dev>";
+// ready (e.g. "GrowSpace <notifications@yourdomain.ac.uk>").
+const FROM_EMAIL = Deno.env.get("NOTIFY_FROM_EMAIL") || "GrowSpace <onboarding@resend.dev>";
 // Optional: link back into the app from the email body.
 const APP_URL = Deno.env.get("APP_URL") || "";
 
@@ -101,14 +101,14 @@ function emailCard(opts: {
 
         <tr><td style="padding:20px 28px 28px 28px;">${opts.bodyHtml}</td></tr>
       </table>
-      <div style="max-width:560px;margin:16px auto 0 auto;font-size:11px;color:${COLOR.inkFaint};text-align:center;font-family:${FONT_STACK};">Growth Space Admin &middot; automated notification</div>
+      <div style="max-width:560px;margin:16px auto 0 auto;font-size:11px;color:${COLOR.inkFaint};text-align:center;font-family:${FONT_STACK};">GrowSpace &middot; automated notification</div>
     </td></tr>
   </table>`;
 }
 
 function ctaButton(): string {
   if (!APP_URL) return "";
-  return `<div style="margin-top:22px;"><a href="${APP_URL}" style="display:inline-block;padding:11px 20px;border-radius:10px;background:${COLOR.accentDark};color:#FFFFFF;font-family:${FONT_STACK};font-size:14px;font-weight:700;text-decoration:none;">Open in Growth Space Admin →</a></div>`;
+  return `<div style="margin-top:22px;"><a href="${APP_URL}" style="display:inline-block;padding:11px 20px;border-radius:10px;background:${COLOR.accentDark};color:#FFFFFF;font-family:${FONT_STACK};font-size:14px;font-weight:700;text-decoration:none;">Open in GrowSpace →</a></div>`;
 }
 
 // Labels for the columns an amendment can change (requisitions.amended_fields).

@@ -1,4 +1,4 @@
-# GrowSpace (Growth Space Admin)
+# GrowSpace
 
 A web app for managing a research facility's growth cabinets and Reftech
 (controlled-environment) rooms: booking space out to researchers, tracking

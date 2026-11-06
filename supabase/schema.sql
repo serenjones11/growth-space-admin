@@ -1,5 +1,5 @@
 -- ============================================================================
--- Growth Space Admin — Supabase schema
+-- GrowSpace — Supabase schema
 -- ============================================================================
 -- Run this in Supabase → SQL Editor → New query, on a fresh project.
 -- It's split into clearly labelled sections so you can run it all at once

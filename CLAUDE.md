@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Growth Space Admin: an internal admin tool for managing a research facility's growth cabinets
+GrowSpace: an internal admin tool for managing a research facility's growth cabinets
 and Reftech (controlled-environment) rooms — booking them out to researchers, tracking
 maintenance, and handling space requisitions (including a public, no-login request form).
 

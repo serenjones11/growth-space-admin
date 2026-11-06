@@ -293,7 +293,7 @@ export async function downloadFullBackup({ exportedBy }) {
   const now = new Date();
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Growth Space Admin";
+  wb.creator = "GrowSpace";
   wb.created = now;
 
   const summary = wb.addWorksheet("Summary");
