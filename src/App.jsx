@@ -45,6 +45,9 @@ import {
   Settings,
   Eye,
   EyeOff,
+  Camera,
+  LayoutList,
+  ImageIcon,
 } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
@@ -2158,7 +2161,74 @@ const FILTER_CHIPS = [
   { key: "warning", label: "Ending soon" }, { key: "overdue", label: "Overdue" }, { key: "service", label: "Out of Service" },
 ];
 
-function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChange }) {
+/* Inventory "Photos" view: a unit as its photo, for finding a cabinet by
+   how it looks when you've forgotten its name. Keeps the ID, manufacturer and
+   model, room and status; a unit without a photo gets an "Add photo" button
+   (on phones the picker offers the camera). */
+function UnitPhotoCard({ unit, onClick, onUpdatePhoto }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const isReftech = unit.type === "reftech";
+  const current = currentBookingsList(unit);
+  const hasClash = !isReftech && current.length > 1 && !isClashAcknowledged(unit, current);
+  const handleFile = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setBusy(true);
+    try { await onUpdatePhoto(unit.id, file); } finally { setBusy(false); e.target.value = ""; }
+  };
+  return (
+    <div
+      role="button" tabIndex={0} onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      className="group text-left rounded-2xl overflow-hidden border transition-all hover:-translate-y-0.5 hover:shadow-lg flex flex-col cursor-pointer min-w-0"
+      style={{ borderColor: "var(--border)", background: "var(--surface)" }}
+    >
+      <div className="relative" style={{ aspectRatio: "4 / 3", background: "var(--surface-soft)" }}>
+        {unit.photoDataUrl ? (
+          <img src={unit.photoDataUrl} alt={`${unit.id} photo`} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-2 pt-7"
+            style={{ background: "repeating-linear-gradient(135deg, var(--surface-soft) 0 10px, var(--surface) 10px 20px)", color: "var(--ink-faint)" }}>
+            <Camera size={18} />
+            <span className="text-[11.5px] font-semibold">No photo yet</span>
+            {onUpdatePhoto && (
+              <>
+                <button
+                  type="button" disabled={busy}
+                  onClick={(e) => { e.stopPropagation(); inputRef.current && inputRef.current.click(); }}
+                  className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg disabled:opacity-50"
+                  style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--accent-dark)" }}
+                >
+                  <Camera size={13} /> {busy ? "Uploading…" : "Add photo"}
+                </button>
+                <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} onClick={(e) => e.stopPropagation()} className="hidden" />
+              </>
+            )}
+          </div>
+        )}
+        <div className="absolute top-2 right-2 flex items-center gap-1.5" style={{ filter: unit.photoDataUrl ? "drop-shadow(0 1px 3px rgba(0,0,0,0.35))" : undefined }}>
+          {hasClash && (
+            <span className="inline-flex items-center gap-1 rounded-full font-bold px-2 py-0.5 text-[10px]" style={{ background: "var(--overdue-soft)", color: "var(--overdue)" }} title="Overlapping requisitions on this cabinet">
+              <AlertTriangle size={10} /> Clash
+            </span>
+          )}
+          <StatusTag unit={unit} />
+        </div>
+      </div>
+      <div className="p-3 sm:p-4 flex flex-col gap-1.5 min-w-0">
+        <div className="gc-display text-base sm:text-lg font-extrabold leading-none truncate">{unit.id}</div>
+        <div className="text-[12px] truncate" style={{ color: "var(--ink-soft)" }}>{unit.manufacturer} {unit.model}</div>
+        <div className="mt-0.5"><RoomChip unit={unit} /></div>
+      </div>
+    </div>
+  );
+}
+
+function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChange, onUpdatePhoto }) {
+  // Details (the normal cards) or Photos; remembered per browser.
+  const [view, setView] = useState(() => { try { return localStorage.getItem("gs-inventory-view") === "photos" ? "photos" : "details"; } catch { return "details"; } });
+  const chooseView = (v) => { setView(v); try { localStorage.setItem("gs-inventory-view", v); } catch { /* storage blocked - just don't remember */ } };
   const [query, setQuery] = useState(initialFilter?.query || "");
   const [statusFilter, setStatusFilter] = useState(initialFilter?.status || "all");
   const [typeFilter, setTypeFilter] = useState(initialFilter?.type || "all");
@@ -2263,6 +2333,17 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="gc-input w-auto font-semibold" style={{ maxWidth: 150 }}>
           {FILTER_CHIPS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
         </select>
+        <div className="inline-flex items-center p-0.5 rounded-xl" role="group" aria-label="View" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+          {[{ key: "details", label: "Details", Icon: LayoutList }, { key: "photos", label: "Photos", Icon: ImageIcon }].map(({ key, label, Icon }) => (
+            <button
+              key={key} onClick={() => chooseView(key)} aria-pressed={view === key}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-[10px] text-xs font-bold"
+              style={{ background: view === key ? "var(--sidebar-bg)" : "transparent", color: view === key ? "#fff" : "var(--ink-soft)" }}
+            >
+              <Icon size={14} /> {label}
+            </button>
+          ))}
+        </div>
         <span className="text-xs gc-mono font-semibold ml-auto" style={{ color: "var(--ink-faint)" }}>{filtered.length} of {units.length}</span>
       </div>
 
@@ -2295,9 +2376,15 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
               <h3 className="gc-display text-[15px] font-extrabold">{g.label}</h3>
               <span className="text-[12.5px] font-semibold" style={{ color: "var(--ink-faint)" }}>{g.items.length} unit{g.items.length !== 1 ? "s" : ""}</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
-              {g.items.map((u) => <UnitCard key={u.id} unit={u} onClick={() => onSelect(u)} />)}
-            </div>
+            {view === "photos" ? (
+              <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-3.5">
+                {g.items.map((u) => <UnitPhotoCard key={u.id} unit={u} onClick={() => onSelect(u)} onUpdatePhoto={onUpdatePhoto} />)}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+                {g.items.map((u) => <UnitCard key={u.id} unit={u} onClick={() => onSelect(u)} />)}
+              </div>
+            )}
           </section>
         ))}
         {filtered.length === 0 && <p className="text-sm text-center py-10" style={{ color: "var(--ink-faint)" }}>No units match your filters.</p>}
@@ -5776,7 +5863,7 @@ export default function GrowthCabinetApp() {
             />
           )}
           {page === "inventory" && (
-            <InventoryPage key={inventoryKey} units={units} onSelect={setSelected} onAddNew={() => setEditingUnit(null)} initialFilter={inventoryFilter} onFilterChange={setInventoryFilter} />
+            <InventoryPage key={inventoryKey} units={units} onSelect={setSelected} onAddNew={() => setEditingUnit(null)} initialFilter={inventoryFilter} onFilterChange={setInventoryFilter} onUpdatePhoto={handleUpdatePhoto} />
           )}
           {page === "requisitions" && (
             <RequisitionsPage
