@@ -2172,7 +2172,7 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
         </div>
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <button onClick={onAddNew} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--btn-accent)", color: "white" }}>
-            <Refrigerator size={15} /> Add CER
+            <Refrigerator size={15} /> Add unit
           </button>
         </div>
       </div>
