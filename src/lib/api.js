@@ -526,6 +526,16 @@ export async function uploadUnitPhoto(unitId, file) {
   }
 }
 
+/* Clears a unit's photo and deletes the stored file (the DB first, so a
+   failed delete never leaves the unit pointing at a missing file). */
+export async function removeUnitPhoto(unitId) {
+  const { data: existing } = await supabase.from("units").select("photo_url").eq("id", unitId).single();
+  const oldPath = existing?.photo_url || null;
+  const { error } = await supabase.from("units").update({ photo_url: null }).eq("id", unitId);
+  if (error) throw error;
+  if (oldPath) await supabase.storage.from(UNIT_FILES_BUCKET).remove([oldPath]);
+}
+
 export async function addUnitDocument(unitId, file, name, type, addedByUserId) {
   const path = `documents/${unitId}/${Date.now()}-${safeFileName(file.name)}`;
   const { error: uploadError } = await supabase.storage.from(UNIT_FILES_BUCKET).upload(path, file, { upsert: true });

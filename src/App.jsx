@@ -2732,9 +2732,15 @@ function DocumentsSection({ unit, onAdd, onRemove }) {
    cabinet photos are tall and portrait, so a fixed-height cover crop cut
    off most of the cabinet. Clicking it opens the full-size image;
    replacing goes through the header button. */
-function PhotoCard({ unit, onUpdate }) {
+function PhotoCard({ unit, onUpdate, onRemove }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const remove = async () => {
+    setConfirmingRemove(false);
+    setBusy(true);
+    try { await onRemove(); } finally { setBusy(false); }
+  };
   const [viewing, setViewing] = useState(false);
   useEffect(() => {
     if (!viewing) return;
@@ -2758,7 +2764,12 @@ function PhotoCard({ unit, onUpdate }) {
     <>
       <div className="flex items-center justify-between mb-3">
         <SectionLabel>Photo</SectionLabel>
-        <button disabled={busy} onClick={openPicker} className="text-xs font-bold py-2.5 -my-2.5 disabled:opacity-40" style={{ color: "var(--accent-dark)" }}>{busy ? "Uploading…" : unit.photoDataUrl ? "Replace" : "Add photo"}</button>
+        <div className="flex items-center gap-4">
+          {unit.photoDataUrl && onRemove && !busy && (
+            <button onClick={() => setConfirmingRemove(true)} className="text-xs font-bold py-2.5 -my-2.5" style={{ color: "var(--overdue)" }}>Remove</button>
+          )}
+          <button disabled={busy} onClick={openPicker} className="text-xs font-bold py-2.5 -my-2.5 disabled:opacity-40" style={{ color: "var(--accent-dark)" }}>{busy ? "Saving…" : unit.photoDataUrl ? "Replace" : "Add photo"}</button>
+        </div>
         <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
       </div>
       {unit.photoDataUrl ? (
@@ -2782,6 +2793,14 @@ function PhotoCard({ unit, onUpdate }) {
           {unit.type === "reftech" ? <DoorOpen size={24} /> : <Leaf size={24} />}
           <span className="text-xs font-semibold">Click to add a photo</span>
         </button>
+      )}
+      {confirmingRemove && (
+        <ConfirmDialog
+          title="Remove this photo?" confirmLabel="Remove"
+          message={`The photo of ${unit.id} will be deleted. You can add a new one at any time.`}
+          onCancel={() => setConfirmingRemove(false)}
+          onConfirm={remove}
+        />
       )}
       {viewing && unit.photoDataUrl && createPortal(
         <div
@@ -3046,7 +3065,7 @@ function UnitDetailContent({
         onAdd={(file, name, type) => onAddDocument(unit.id, file, name, type)}
         onRemove={(docId) => onRemoveDocument(unit.id, docId)}
       />
-      <PhotoCard unit={unit} onUpdate={(file) => onUpdatePhoto(unit.id, file)} />
+      <PhotoCard unit={unit} onUpdate={(file) => onUpdatePhoto(unit.id, file)} onRemove={() => onUpdatePhoto(unit.id, null)} />
     </div>
   );
 }
@@ -5706,8 +5725,10 @@ export default function GrowthCabinetApp() {
     await api.removeUnitDocument(docId);
     await reload();
   });
+  // A file replaces the unit's photo; null removes it.
   const handleUpdatePhoto = withErrorAlert(async (unitId, file) => {
-    await api.uploadUnitPhoto(unitId, file);
+    if (file) await api.uploadUnitPhoto(unitId, file);
+    else { await api.removeUnitPhoto(unitId); toast("Photo removed"); }
     await reload();
   });
 
