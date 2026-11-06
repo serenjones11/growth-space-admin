@@ -32,6 +32,7 @@ supabase/seed.sql                  ← fake sample data for the TEST project onl
 .github/workflows/ci.yml           ← lint + tests + build on every push / pull request
 supabase/functions/notify-requisition/  ← Edge Function: requisition email notifications (Resend)
 supabase/functions/manage-users/   ← Edge Function: Settings page user management (list/add/role/reset/remove)
+brand/                             ← downloadable icon/logo set (SVG + PNG, several colours) - not used by the build
 design-prototypes/                 ← old exploratory HTML mockups, NOT part of the app — ignore
 ```
 
