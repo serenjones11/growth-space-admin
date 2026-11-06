@@ -43,6 +43,8 @@ import {
   Calendar,
   Menu,
   Settings,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
@@ -127,6 +129,7 @@ const TOKENS = `
      buttons (species picker, date picker, etc.) use, instead of each
      browser's own default arrow - one visual language for "this opens a
      list of options" everywhere on the form. */
+  @media (max-width: 639px) { .gc-input { font-size: 16px; } }
   select.gc-input {
     appearance: none; -webkit-appearance: none; cursor: pointer;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%235C6D65' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
@@ -1121,7 +1124,8 @@ function LabUsageTrend({ units, labUsageHistory }) {
         ) : "No units are currently held by any lab group."}
       </p>
 
-      <div className="relative">
+      {/* Phones: keep the chart readable and scroll it sideways rather than shrink it. */}
+      <div className="overflow-x-auto gc-scroll"><div className="relative" style={{ minWidth: 560 }}>
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
           {[0, 1, 2, 3].map((g) => {
             const v = (maxV / 3) * g;
@@ -1163,11 +1167,11 @@ function LabUsageTrend({ units, labUsageHistory }) {
             <g transform={`translate(${Math.min(tooltip.x + 10, W - 160)}, ${Math.max(tooltip.y - 46, 4)})`}>
               <rect width="150" height="42" rx="9" fill="var(--surface)" stroke="var(--border)" />
               <text x="10" y="16" fontSize="10.5" fontWeight="800" fill="var(--ink)">{piDisplay(tooltip.lab)}</text>
-              <text x="10" y="30" fontSize="10" fill="var(--ink-soft)">{tooltip.month} · {tooltip.value} units</text>
+              <text x="10" y="30" fontSize="10" fill="var(--ink-soft)">{tooltip.month} · {tooltip.value} {tooltip.value === 1 ? "unit" : "units"}</text>
             </g>
           )}
         </svg>
-      </div>
+      </div></div>
 
       <div className="flex flex-wrap gap-x-5 gap-y-3 mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
         {series.map((s) => (
@@ -1323,35 +1327,35 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
       />
 
       {/* KPI readout row - same dark-chip language as the inventory cards, for a consistent system */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
         <button
           onClick={() => goInventory({})}
-          className="text-left px-5 py-4 gc-clickable"
+          className="text-left px-3 py-3 sm:px-5 sm:py-4 gc-clickable"
           style={{ background: "var(--chip-bg)", borderRadius: 14 }}
         >
           <div className="text-[10px] font-bold tracking-wider" style={{ color: "var(--chip-label)" }}>UTILISATION</div>
-          <div className="gc-display font-extrabold text-3xl mt-1" style={{ color: "var(--chip-temp)" }}>{utilisation}%</div>
-          <div className="text-[12px] font-semibold mt-1" style={{ color: "var(--chip-label)" }}>{occupied} occupied · {free} free</div>
+          <div className="gc-display font-extrabold text-2xl sm:text-3xl mt-1" style={{ color: "var(--chip-temp)" }}>{utilisation}%</div>
+          <div className="text-[11px] sm:text-[12px] font-semibold mt-1 leading-tight" style={{ color: "var(--chip-label)" }}>{occupied} occupied · {free} free</div>
         </button>
         <button
           onClick={() => goInventory({ status: "overdue" })}
           disabled={overdue.length === 0}
-          className="text-left px-5 py-4 gc-clickable disabled:cursor-default"
+          className="text-left px-3 py-3 sm:px-5 sm:py-4 gc-clickable disabled:cursor-default"
           style={{ background: "var(--chip-bg)", borderRadius: 14 }}
         >
           <div className="text-[10px] font-bold tracking-wider" style={{ color: "var(--chip-label)" }}>OVERDUE</div>
-          <div className="gc-display font-extrabold text-3xl mt-1" style={{ color: "#F87171" }}>{overdue.length}</div>
-          <div className="text-[12px] font-semibold mt-1" style={{ color: "var(--chip-label)" }}>{overdue.length > 0 ? "Needs a follow-up" : "Nothing overdue"}</div>
+          <div className="gc-display font-extrabold text-2xl sm:text-3xl mt-1" style={{ color: "#F87171" }}>{overdue.length}</div>
+          <div className="text-[11px] sm:text-[12px] font-semibold mt-1 leading-tight" style={{ color: "var(--chip-label)" }}>{overdue.length > 0 ? "Needs a follow-up" : "Nothing overdue"}</div>
         </button>
         <button
           onClick={() => goRequisitions("pending")}
           disabled={pending.length === 0}
-          className="text-left px-5 py-4 gc-clickable disabled:cursor-default"
+          className="text-left px-3 py-3 sm:px-5 sm:py-4 gc-clickable disabled:cursor-default"
           style={{ background: "var(--chip-bg)", borderRadius: 14 }}
         >
           <div className="text-[10px] font-bold tracking-wider" style={{ color: "var(--chip-label)" }}>PENDING</div>
-          <div className="gc-display font-extrabold text-3xl mt-1" style={{ color: "var(--chip-cycle)" }}>{pending.length}</div>
-          <div className="text-[12px] font-semibold mt-1" style={{ color: "var(--chip-label)" }}>{pending.length > 0 ? "Awaiting review" : "All caught up"}</div>
+          <div className="gc-display font-extrabold text-2xl sm:text-3xl mt-1" style={{ color: "var(--chip-cycle)" }}>{pending.length}</div>
+          <div className="text-[11px] sm:text-[12px] font-semibold mt-1 leading-tight" style={{ color: "var(--chip-label)" }}>{pending.length > 0 ? "Awaiting review" : "All caught up"}</div>
         </button>
       </div>
 
@@ -1367,7 +1371,12 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
             <Maximize2 size={12} /> Full screen
           </button>
         </div>
-        <TimelineView units={units} requests={requests} onNavigate={(tab, index) => onPreviewRequisition(index)} onSelectUnit={onSelectUnit} compact />
+        {/* Phones: scroll the timeline sideways rather than squash the bars. */}
+        <div className="overflow-x-auto gc-scroll -mx-5 px-5">
+          <div style={{ minWidth: 620 }}>
+            <TimelineView units={units} requests={requests} onNavigate={(tab, index) => onPreviewRequisition(index)} onSelectUnit={onSelectUnit} compact />
+          </div>
+        </div>
       </div>
 
       {timelineFull && (
@@ -1437,7 +1446,7 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
                       {l.lab.split(" ")[0].slice(0, 4).toUpperCase()}
                     </span>
                     <div className="text-sm font-semibold">{piDisplay(l.lab)}</div>
-                    <div className="gc-display text-lg font-bold">{l.count} units</div>
+                    <div className="gc-display text-lg font-bold">{l.count} {l.count === 1 ? "unit" : "units"}</div>
                   </button>
                 );
               })}
@@ -3626,11 +3635,16 @@ function RequisitionCard({ req, index, units, onDecide, onEdit, onComplete, onRe
             <ReviewKindTag req={req} />
           </div>
           <div className="text-xs mt-0.5 truncate" style={{ color: "var(--ink-faint)" }}>{req.projectTitle} · {piDisplay(req.labGroup)}</div>
+          {/* Phones: status and dates drop to their own line so the name has room. */}
+          <div className="sm:hidden flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className="text-[11px] font-bold rounded-full px-2 py-0.5" style={{ background: strongStatus.color, color: strongStatus.ink }}>{strongStatus.label}</span>
+            <span className="text-[11px] font-semibold" style={{ color: "var(--ink-faint)" }}>{fmtGB(req.startDate)} → {fmtGB(req.endDate)}</span>
+          </div>
         </div>
         <div className="hidden sm:block text-xs font-semibold text-right flex-shrink-0" style={{ color: "var(--ink-faint)" }}>
           {fmtGB(req.startDate)} → {fmtGB(req.endDate)}
         </div>
-        <span className="text-xs font-bold rounded-full px-2.5 py-1 flex-shrink-0" style={{ background: strongStatus.color, color: strongStatus.ink }}>
+        <span className="hidden sm:inline-block text-xs font-bold rounded-full px-2.5 py-1 flex-shrink-0" style={{ background: strongStatus.color, color: strongStatus.ink }}>
           {strongStatus.label}
         </span>
         <ChevronDown size={16} style={{ color: "var(--ink-faint)", transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
@@ -5002,8 +5016,8 @@ function AccountSection({ profile, email, onSaveName }) {
       <form onSubmit={savePassword} className="pt-4 space-y-3" style={{ borderTop: "1px solid var(--border)" }}>
         <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Change your password</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="New password"><input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setPasswordMsg(null); }} className="gc-input" autoComplete="new-password" placeholder={`At least ${MIN_PASSWORD} characters`} /></Field>
-          <Field label="Confirm new password"><input type="password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setPasswordMsg(null); }} className="gc-input" autoComplete="new-password" /></Field>
+          <Field label="New password"><PasswordInput value={password} onChange={(e) => { setPassword(e.target.value); setPasswordMsg(null); }} className="gc-input" autoComplete="new-password" placeholder={`At least ${MIN_PASSWORD} characters`} /></Field>
+          <Field label="Confirm new password"><PasswordInput value={confirm} onChange={(e) => { setConfirm(e.target.value); setPasswordMsg(null); }} className="gc-input" autoComplete="new-password" /></Field>
         </div>
         {passwordMsg && <p className="text-sm font-semibold" style={{ color: passwordMsg.ok ? "var(--free)" : "var(--overdue)" }}>{passwordMsg.text}</p>}
         <button type="submit" disabled={!password || savingPassword} className="text-sm font-bold px-4 py-2 rounded-xl text-white disabled:opacity-40" style={{ background: "var(--btn-accent)" }}>
@@ -5192,7 +5206,7 @@ function UsersSection({ currentUserId, isOwner }) {
             return (
               <div key={u.id} className="py-3 space-y-2" style={{ borderTop: "1px solid rgba(22,33,29,0.07)" }}>
                 <div className="flex items-center gap-3 flex-wrap">
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 basis-full sm:basis-0">
                     <div className="text-sm font-semibold truncate flex items-center gap-2">
                       {u.fullName || u.email}{isMe && <span className="text-xs font-normal" style={{ color: "var(--ink-faint)" }}>(you)</span>}
                     </div>
@@ -5284,6 +5298,25 @@ function LoadingScreen({ message = "Loading…", isError = false }) {
 /* Minimal email/password sign-in - the temporary stand-in for Entra ID SSO
    until that's wired up for this org. Not styled beyond matching the
    existing gc-* utility classes. */
+/* A password box with an eye button to show or hide what's been typed.
+   Takes the same props as <input>; `type` is managed here. */
+function PasswordInput({ className = "gc-input", ...props }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="relative">
+      <input {...props} type={shown ? "text" : "password"} className={className} style={{ ...props.style, paddingRight: 42 }} />
+      <button
+        type="button" onClick={() => setShown((v) => !v)}
+        className="absolute inset-y-0 right-0 w-10 flex items-center justify-center"
+        style={{ color: "var(--ink-faint)" }}
+        aria-label={shown ? "Hide password" : "Show password"} title={shown ? "Hide password" : "Show password"}
+      >
+        {shown ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
+}
+
 function AdminLoginForm({ onDone }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -5304,7 +5337,7 @@ function AdminLoginForm({ onDone }) {
     <form onSubmit={submit} className="gc-card p-4 space-y-2.5" style={{ maxWidth: 320, marginLeft: "auto" }}>
       <div className="text-xs font-bold" style={{ color: "var(--ink-soft)" }}>Sign in</div>
       <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="gc-input" />
-      <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="gc-input" />
+      <PasswordInput required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="gc-input" />
       {error && <div className="text-xs" style={{ color: "var(--overdue)" }}>{error}</div>}
       <button type="submit" disabled={busy} className="text-xs font-bold px-3 py-2 rounded-lg" style={{ background: "var(--btn-accent)", color: "white" }}>
         {busy ? "Signing in…" : "Sign in"}
@@ -5685,7 +5718,7 @@ export default function GrowthCabinetApp() {
             )}
           </div>
           {!session && showAdminLogin && (
-            <div className="mb-4 flex justify-end">
+            <div className="mb-4 mx-auto sm:mr-0 w-full" style={{ maxWidth: 320 }}>
               <AdminLoginForm onDone={() => setShowAdminLogin(false)} />
             </div>
           )}
