@@ -19,7 +19,6 @@ import {
   XCircle,
   Leaf,
   DoorOpen,
-  Bug,
   X,
   Maximize2,
   Minimize2,
@@ -180,9 +179,31 @@ function applyLabGroups(rows) {
   LAB_GROUPS = rows.map((g) => g.name);
   PI_BY_LAB = Object.fromEntries(rows.map((g) => [g.name, g.piName]));
 }
+/* Insect Sciences icon: a fly, drawn to sit with the lucide set (same props:
+   size, color, strokeWidth). The drawing is more detailed than lucide's, so
+   its line is drawn at 0.65x the requested stroke width to stay legible. */
+function Fly({ size = 24, color = "currentColor", strokeWidth = 2, ...rest }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color}
+      strokeWidth={strokeWidth * 0.65} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...rest}>
+      <path d="M12 1.9v1"/>
+      <path d="M10.3 5.9a1.7 1.75 0 0 1 3.4 0z"/>
+      <ellipse cx="12" cy="10.1" rx="1.75" ry="2.9"/>
+      <ellipse cx="12" cy="17.6" rx="2.2" ry="4.5"/>
+      <path d="M10.3 8.4 8 6.4V3.7L6.3 1.9"/>
+      <path d="M13.7 8.4l2.3-2V3.7l1.7-1.8"/>
+      <path d="M10.2 10 3.6 15.6a2.4 2.4 0 0 0 1.5 4.1c1.6.1 3.4-.2 4.6-.7"/>
+      <path d="M13.8 10l6.6 5.6a2.4 2.4 0 0 1-1.5 4.1c-1.6.1-3.4-.2-4.6-.7"/>
+      <path d="M10 13.6 6.6 15.6V21"/>
+      <path d="M14 13.6l3.4 2V21"/>
+      <path d="M10.1 20.6v2"/>
+      <path d="M13.9 20.6v2"/>
+    </svg>
+  );
+}
 const DISCIPLINE_META = {
   plant: { label: "Plant Sciences", icon: Leaf, color: "#2F8F5B" },
-  insect: { label: "Insect Sciences", icon: Bug, color: "#A6763F" },
+  insect: { label: "Insect Sciences", icon: Fly, color: "#A6763F" },
 };
 /* A unit's research area label (units.disciplines) <-> the add/edit form's
    single dropdown, where "both" covers a shared reftech room. */
@@ -509,9 +530,9 @@ function bookingStrongStatus(b) {
    for "all," instead of reading a sentence to find the right option. */
 function DisciplineFilterPills({ value, onChange }) {
   const pills = [
-    { key: "all", title: "All areas", color: "var(--ink-soft)", render: <span className="flex items-center" style={{ gap: 1 }}><Leaf size={12} /><Bug size={12} /></span> },
+    { key: "all", title: "All areas", color: "var(--ink-soft)", render: <span className="flex items-center" style={{ gap: 1 }}><Leaf size={12} /><Fly size={12} /></span> },
     { key: "plant", title: DISCIPLINE_META.plant.label, color: DISCIPLINE_META.plant.color, render: <Leaf size={14} /> },
-    { key: "insect", title: DISCIPLINE_META.insect.label, color: DISCIPLINE_META.insect.color, render: <Bug size={14} /> },
+    { key: "insect", title: DISCIPLINE_META.insect.label, color: DISCIPLINE_META.insect.color, render: <Fly size={14} /> },
   ];
   return (
     <div className="flex items-center gap-1.5">
@@ -4545,7 +4566,7 @@ function RequestSpacePage({ onSubmit, onAmend, requests, allowAmend = true, isAd
           onClick={() => { setDiscipline("plant"); setForm((f) => ({ ...f, ...defaultConditions("plant") })); goNext(); }}
         />
         <WizardChoice
-          icon={Bug} title="Insects"
+          icon={Fly} title="Insects"
           onClick={() => { setDiscipline("insect"); setForm((f) => ({ ...f, ...defaultConditions("insect") })); goNext(); }}
         />
       </WizardShell>
