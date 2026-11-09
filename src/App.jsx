@@ -1414,6 +1414,7 @@ function ComingUpRow({ item, onClick }) {
    both in full screen. */
 function ComingUpActivityCard({ units, requests, activity, onOpenItem, onActivityClick }) {
   const [full, setFull] = useState(false);
+  const [activityShown, setActivityShown] = useState(20); // View all: 20 at first, expandable to 100
   useEffect(() => {
     if (!full) return;
     const onKey = (e) => { if (e.key === "Escape") setFull(false); };
@@ -1427,7 +1428,7 @@ function ComingUpActivityCard({ units, requests, activity, onOpenItem, onActivit
     <div className="gc-card p-5">
       <div className="flex items-center justify-between mb-1">
         <h3 className="gc-display font-bold text-sm">Coming up</h3>
-        <button onClick={() => setFull(true)} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }}>
+        <button onClick={() => { setActivityShown(20); setFull(true); }} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full" style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }}>
           <Maximize2 size={12} /> View all
         </button>
       </div>
@@ -1437,8 +1438,8 @@ function ComingUpActivityCard({ units, requests, activity, onOpenItem, onActivit
       {soon.length > 5 && <button onClick={() => setFull(true)} className="text-xs font-bold mt-1 py-2 -my-1" style={{ color: "var(--accent-dark)" }}>+ {soon.length - 5} more</button>}
 
       <h3 className="gc-display font-bold text-sm mt-4 mb-2 pt-4" style={{ borderTop: "1px solid var(--border)" }}>Recent activity</h3>
-      <div className="space-y-1 gc-scroll overflow-y-auto -mx-2 px-2" style={{ maxHeight: 520 }}>
-        {activity.slice(0, 20).map((item, i) => <ActivityRow key={i} item={item} onClick={() => onActivityClick(item)} />)}
+      <div className="space-y-1">
+        {activity.slice(0, 4).map((item, i) => <ActivityRow key={i} item={item} onClick={() => onActivityClick(item)} />)}
         {activity.length === 0 && empty("No activity yet.")}
       </div>
 
@@ -1460,11 +1461,16 @@ function ComingUpActivityCard({ units, requests, activity, onOpenItem, onActivit
               </div>
               <div className="gc-card p-5">
                 <h3 className="gc-display font-bold text-sm">Recent activity</h3>
-                <p className="text-xs mb-2" style={{ color: "var(--ink-faint)" }}>Latest {Math.min(activity.length, 100)}</p>
+                <p className="text-xs mb-2" style={{ color: "var(--ink-faint)" }}>Latest {Math.min(activity.length, activityShown)}</p>
                 <div className="space-y-1">
-                  {activity.slice(0, 100).map((item, i) => <ActivityRow key={i} item={item} onClick={() => { setFull(false); onActivityClick(item); }} />)}
+                  {activity.slice(0, activityShown).map((item, i) => <ActivityRow key={i} item={item} onClick={() => { setFull(false); onActivityClick(item); }} />)}
                   {activity.length === 0 && empty("No activity yet.")}
                 </div>
+                {activityShown < 100 && activity.length > activityShown && (
+                  <button onClick={() => setActivityShown(100)} className="w-full flex items-center justify-center gap-1.5 text-xs font-bold mt-3 pt-3" style={{ color: "var(--ink-soft)", borderTop: "1px solid var(--border)" }}>
+                    Show more (up to 100) <ChevronDown size={13} />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -2068,10 +2074,11 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                   className="absolute rounded-lg flex items-center px-2.5"
                   style={{
                     left: `${left}%`, width: `${width}%`, top, height: TIMELINE_LANE_H,
-                    background: s.color, cursor: "pointer",
+                    // Outlined in the status colour with a light tint of it inside.
+                    background: `color-mix(in srgb, ${s.color} 12%, var(--surface))`, border: `2px solid ${s.color}`, cursor: "pointer",
                   }}
                 >
-                  <span className="text-[11.5px] font-bold truncate" style={{ color: "#fff" }}>{o.researcher}</span>
+                  <span className="text-[11.5px] font-bold truncate" style={{ color: s.color }}>{o.researcher}</span>
                 </button>
                 {/* hover detail card - visibility driven by React state (not a CSS-only hover selector) */}
                 {isHovered && (
