@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { resizeImage, thumbPathOf } from "./images";
 import { bookingDateState, localISODate, monthKey, today as todayDate } from "./dates";
 
 /* Live lab-group lookup, replacing the old hardcoded LAB_GROUP_ID_BY_NAME/
@@ -111,16 +112,43 @@ const UNIT_FILES_BUCKET = "unit-files";
 /* Signed URLs (not public ones - the bucket is private, admin-only), for
    every path in one request. Returns { path: url }; a stale/missing object
    just has no entry, so it can't break the whole fetch. */
-async function trySignedUrls(paths, expiresIn = 3600) {
+/* Signed URLs are kept (per browser) for a week and reused until a day
+   before they expire. The address of a photo then stays the same between
+   visits, so the browser can show it from its own cache instead of
+   downloading it again every time the app loads. Cleared on sign-out. */
+const SIGNED_CACHE_KEY = "gs-signed-urls";
+const SIGNED_TTL = 7 * 24 * 3600; // seconds
+function readSignedCache() {
+  try { return JSON.parse(localStorage.getItem(SIGNED_CACHE_KEY) || "{}"); } catch { return {}; }
+}
+function writeSignedCache(cache) {
+  try { localStorage.setItem(SIGNED_CACHE_KEY, JSON.stringify(cache)); } catch { /* storage blocked - just not reused */ }
+}
+export function clearSignedUrlCache() {
+  try { localStorage.removeItem(SIGNED_CACHE_KEY); } catch { /* ignore */ }
+}
+async function trySignedUrls(paths) {
   const wanted = [...new Set(paths.filter(Boolean))];
   if (!wanted.length) return {};
-  try {
-    const { data, error } = await supabase.storage.from(UNIT_FILES_BUCKET).createSignedUrls(wanted, expiresIn);
-    if (error) return {};
-    return Object.fromEntries(data.filter((d) => !d.error && d.signedUrl).map((d) => [d.path, d.signedUrl]));
-  } catch {
-    return {};
+  const now = Date.now();
+  const cache = readSignedCache();
+  for (const k of Object.keys(cache)) if (cache[k].exp - now < 24 * 3600 * 1000) delete cache[k];
+  const out = {};
+  const missing = wanted.filter((p) => { if (cache[p]) { out[p] = cache[p].url; return false; } return true; });
+  if (missing.length) {
+    try {
+      const { data, error } = await supabase.storage.from(UNIT_FILES_BUCKET).createSignedUrls(missing, SIGNED_TTL);
+      if (!error) {
+        for (const d of data) {
+          if (d.error || !d.signedUrl) continue;
+          out[d.path] = d.signedUrl;
+          cache[d.path] = { url: d.signedUrl, exp: now + SIGNED_TTL * 1000 };
+        }
+      }
+    } catch { /* leave missing ones out */ }
   }
+  writeSignedCache(cache);
+  return out;
 }
 
 /* Storage keys only allow a limited character set - keep the original
@@ -469,10 +497,14 @@ export async function fetchAdminData() {
   // signed URL. Same for each document's storage_path. Resolved in one
   // batch after the main fetch rather than during it, so a slow/failing
   // signed-url call can't hold up everything else.
-  const urls = await trySignedUrls(units.flatMap((u) => [u.photoDataUrl, ...u.documents.map((d) => d.storagePath)]));
+  const urls = await trySignedUrls(units.flatMap((u) => [u.photoDataUrl, thumbPathOf(u.photoDataUrl), ...u.documents.map((d) => d.storagePath)]));
   const unitsWithFiles = units.map((u) => ({
     ...u,
+    photoPath: u.photoDataUrl || null,
     photoDataUrl: urls[u.photoDataUrl] || null,
+    // Small copy for Inventory tiles (missing for photos added before these
+    // existed until ensurePhotoThumbs() makes one).
+    photoThumbUrl: urls[thumbPathOf(u.photoDataUrl)] || null,
     documents: u.documents.map((d) => ({ ...d, url: urls[d.storagePath] || null })),
   }));
 
@@ -514,17 +546,49 @@ export async function uploadUnitPhoto(unitId, file) {
   const { data: existing } = await supabase.from("units").select("photo_url").eq("id", unitId).single();
   const oldPath = existing?.photo_url || null;
 
-  const ext = (file.name.includes(".") ? safeFileName(file.name.split(".").pop()) : "") || "jpg";
+  // Shrunk before upload: ~1600px (plenty for the full-size view, ~250 KB
+  // instead of a phone's ~2.5 MB) plus a ~500px copy for Inventory tiles.
+  // Paths are unique per upload, so browsers may cache them indefinitely.
+  let main = file, thumb = null;
+  try {
+    main = await resizeImage(file, 1600, 0.82);
+    thumb = await resizeImage(file, 500, 0.75);
+  } catch (err) {
+    console.error("Couldn't resize photo - uploading the original", err);
+  }
+  const ext = main !== file ? "jpg" : (file.name.includes(".") ? safeFileName(file.name.split(".").pop()) : "") || "jpg";
   const path = `photos/${unitId}/${Date.now()}.${ext}`;
-  const { error: uploadError } = await supabase.storage.from(UNIT_FILES_BUCKET).upload(path, file, { upsert: true });
+  const opts = { upsert: true, cacheControl: "31536000", contentType: main.type || undefined };
+  const { error: uploadError } = await supabase.storage.from(UNIT_FILES_BUCKET).upload(path, main, opts);
   if (uploadError) throw uploadError;
+  if (thumb) await supabase.storage.from(UNIT_FILES_BUCKET).upload(thumbPathOf(path), thumb, { upsert: true, cacheControl: "31536000", contentType: "image/jpeg" });
 
   const { error } = await supabase.from("units").update({ photo_url: path }).eq("id", unitId);
   if (error) throw error;
 
   if (oldPath && oldPath !== path) {
-    await supabase.storage.from(UNIT_FILES_BUCKET).remove([oldPath]);
+    await supabase.storage.from(UNIT_FILES_BUCKET).remove([oldPath, thumbPathOf(oldPath)]);
   }
+}
+
+/* Makes the small tile copy for any photo that doesn't have one yet (photos
+   uploaded before these existed): downloads the photo once, shrinks it in
+   the browser and stores the copy next to it. Returns how many it made. */
+export async function ensurePhotoThumbs(units) {
+  let made = 0;
+  for (const u of units) {
+    if (!u.photoPath || !u.photoDataUrl || u.photoThumbUrl) continue;
+    try {
+      const res = await fetch(u.photoDataUrl);
+      if (!res.ok) continue;
+      const thumb = await resizeImage(await res.blob(), 500, 0.75);
+      const { error } = await supabase.storage.from(UNIT_FILES_BUCKET).upload(thumbPathOf(u.photoPath), thumb, { upsert: true, cacheControl: "31536000", contentType: "image/jpeg" });
+      if (!error) made++;
+    } catch (err) {
+      console.error("Couldn't make a tile photo for", u.id, err);
+    }
+  }
+  return made;
 }
 
 /* Clears a unit's photo and deletes the stored file (the DB first, so a
@@ -534,7 +598,7 @@ export async function removeUnitPhoto(unitId) {
   const oldPath = existing?.photo_url || null;
   const { error } = await supabase.from("units").update({ photo_url: null }).eq("id", unitId);
   if (error) throw error;
-  if (oldPath) await supabase.storage.from(UNIT_FILES_BUCKET).remove([oldPath]);
+  if (oldPath) await supabase.storage.from(UNIT_FILES_BUCKET).remove([oldPath, thumbPathOf(oldPath)]);
 }
 
 export async function addUnitDocument(unitId, file, name, type, addedByUserId) {

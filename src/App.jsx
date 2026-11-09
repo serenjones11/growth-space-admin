@@ -912,7 +912,7 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
           Settings
         </button>
         <button
-          onClick={() => supabase.auth.signOut()}
+          onClick={() => { api.clearSignedUrlCache(); supabase.auth.signOut(); }}
           className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm"
           style={{ color: "var(--sidebar-text)" }}
         >
@@ -2457,7 +2457,7 @@ function UnitPhotoCard({ unit, onClick, onUpdatePhoto }) {
     >
       <div className="relative" style={{ aspectRatio: "4 / 3", background: "var(--surface-soft)" }}>
         {unit.photoDataUrl ? (
-          <img src={unit.photoDataUrl} alt={`${unit.id} photo`} loading="lazy" className="absolute inset-0 w-full h-full object-contain" />
+          <img src={unit.photoThumbUrl || unit.photoDataUrl} alt={`${unit.id} photo`} loading="lazy" decoding="async" className="absolute inset-0 w-full h-full object-contain" />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center px-2 pt-7"
             style={{ background: "repeating-linear-gradient(135deg, var(--surface-soft) 0 10px, var(--surface) 10px 20px)", color: "var(--ink-faint)" }}>
@@ -5830,6 +5830,7 @@ export default function GrowthCabinetApp() {
   // recently started one may apply its result, so a slow older response
   // can't overwrite fresher data.
   const reloadSeq = useRef(0);
+  const thumbsChecked = useRef(false);
   const reload = async () => {
     const seq = ++reloadSeq.current;
     refreshLastBackup();
@@ -5838,6 +5839,12 @@ export default function GrowthCabinetApp() {
       if (seq !== reloadSeq.current) return;
       applyLabGroups(data.labGroups); // must run before setAppData - see LAB_GROUPS/PI_BY_LAB comment
       applyFloors(data.floors);
+      // Photos added before tile copies existed get one, once, in the
+      // background; the next load then uses the small copies.
+      if (!thumbsChecked.current) {
+        thumbsChecked.current = true;
+        api.ensurePhotoThumbs(data.units).then((made) => { if (made) reload(); }).catch((err) => console.error(err));
+      }
       if (data.lightCycles.length) LIGHT_CYCLE_NAMES = data.lightCycles.map((c) => c.name);
       setAppData(data);
       setLoadError(null);
@@ -6267,7 +6274,7 @@ export default function GrowthCabinetApp() {
               <span className="gc-display font-extrabold text-[14px]">GrowSpace</span>
             </div>
             {session ? (
-              <button onClick={() => supabase.auth.signOut()} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Sign out</button>
+              <button onClick={() => { api.clearSignedUrlCache(); supabase.auth.signOut(); }} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Sign out</button>
             ) : showAdminLogin ? (
               <button onClick={() => setShowAdminLogin(false)} className="text-xs font-semibold underline" style={{ color: "var(--ink-faint)" }}>Cancel</button>
             ) : (
