@@ -193,8 +193,6 @@ export async function downloadUsagePdf({ monthLabels, rangeLabel, series, curren
     doc.setDrawColor(...hexToRgb(GRID)); doc.line(M, yPos + 2, W - M, yPos + 2);
     yPos += 6.6;
   }
-  doc.setFontSize(8); color(INK_FAINT);
-  doc.text("Share of space = this group's unit-months as a percentage of all unit-months in the range. A unit-month is one unit held for one month.", M, yPos + 2);
 
   // Following page(s): the month-by-month figures, 12 months per block.
   doc.addPage(); header();

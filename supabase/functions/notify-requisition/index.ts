@@ -23,7 +23,9 @@ const supabase = createClient(
 
 const UNIT_TYPE_LABEL: Record<string, string> = { cabinet: "Growth Cabinet", reftech: "Reftech Room" };
 const DISCIPLINE_LABEL: Record<string, string> = { plant: "Plant Sciences", insect: "Insect Sciences" };
-const FLOOR_LABEL: Record<string, string> = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
+// Floor names come from the floors table (a managed list in the app); these
+// are only the fallback if that lookup fails.
+let FLOOR_LABEL: Record<string, string> = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
 
 // Same palette as the app's TOKENS (src/App.jsx) - kept as plain hex here
 // since CSS custom properties aren't reliable in email clients. `occupied`
@@ -363,6 +365,9 @@ Deno.serve(async (req) => {
     console.error("requisition lookup failed", error);
     return new Response("requisition not found", { status: 404 });
   }
+
+  const { data: floorRows } = await supabase.from("floors").select("code, label");
+  if (floorRows?.length) FLOOR_LABEL = { ...FLOOR_LABEL, ...Object.fromEntries(floorRows.map((f: { code: string; label: string }) => [f.code, f.label])) };
 
   const dateRange = `${fmtGB(req_.start_date)} to ${fmtGB(req_.end_date)}`;
   const unitTypeLabel = UNIT_TYPE_LABEL[req_.unit_type] || req_.unit_type;

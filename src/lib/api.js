@@ -389,7 +389,7 @@ export async function fetchAdminData() {
   // labGroupCache that this call populates.
   const labGroups = await fetchLabGroups();
 
-  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes, roomsRes, manufacturersRes, lightCycles] = await Promise.all([
+  const [unitsRes, bookingsRes, serviceRes, reqRes, catsRes, docsRes, labUsageHistory, activityLogRes, roomsRes, manufacturersRes, lightCycles, floors] = await Promise.all([
     supabase.from("units").select("*"),
     // "pending" too: an approved requisition that's been amended keeps its
     // booking (and its unit stays occupied) while the amendment is reviewed.
@@ -404,6 +404,7 @@ export async function fetchAdminData() {
     supabase.from("rooms").select("*").order("name"),
     supabase.from("manufacturers").select("*").order("name"),
     listLightCycleOptions(),
+    listFloors(),
   ]);
   for (const res of [unitsRes, bookingsRes, serviceRes, reqRes, docsRes, activityLogRes, roomsRes, manufacturersRes]) {
     if (res.error) throw res.error;
@@ -498,7 +499,7 @@ export async function fetchAdminData() {
   const rooms = roomsRes.data.map((r) => ({ id: r.id, floor: r.floor, type: r.type, name: r.name }));
   const manufacturers = manufacturersRes.data.map((m) => ({ id: m.id, name: m.name }));
 
-  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog, rooms, manufacturers, lightCycles };
+  return { units: unitsWithFiles, requests, categories, categoryColors, categoryIdByName, labUsageHistory, labGroups, activityLog, rooms, manufacturers, lightCycles, floors };
 }
 
 /* ---------------------------------------------------------------------- */
@@ -744,6 +745,31 @@ export async function renameManufacturer(id, oldName, newName) {
   if (error) throw error;
   const { error: unitsError } = await supabase.from("units").update({ manufacturer: newName }).eq("manufacturer", oldName);
   if (unitsError) throw unitsError;
+}
+
+/* Floors (managed list). Public read - the anonymous request form offers a
+   preferred floor. `code` is the fixed key units/rooms/requisitions store;
+   renaming changes only `label`. A floor with units on it can't be removed
+   (foreign key), and its rooms go with it. */
+export async function listFloors() {
+  const { data, error } = await supabase.from("floors").select("code, label, sort_order").order("sort_order").order("label");
+  if (error) throw error;
+  return data.map((f) => ({ code: f.code, label: f.label, sortOrder: f.sort_order }));
+}
+export async function addFloor(code, label, sortOrder) {
+  const { error } = await supabase.from("floors").insert({ code, label, sort_order: sortOrder });
+  if (error) throw error;
+}
+export async function renameFloor(code, label) {
+  const { error } = await supabase.from("floors").update({ label }).eq("code", code);
+  if (error) throw error;
+}
+export async function removeFloor(code) {
+  const { error } = await supabase.from("floors").delete().eq("code", code);
+  if (error) {
+    if (error.code === "23503") throw new Error("This floor still has units on it - move or remove them first.");
+    throw error;
+  }
 }
 
 export async function addManufacturer(name) {

@@ -272,9 +272,19 @@ const LIGHTING_TYPES = ["LED", "Fluorescent", "LED + Fluorescent"];
 const ROLES = ["PhD Student", "Postdoc", "Technician", "Masters Student", "PI / Academic Staff"];
 const CONTAINMENT_LEVELS = ["Wild-Type", "GMO", "DEFRA"];
 
-/* Floors - LG, Level 1, Level 2a, Level 2b, Level 3 */
-const FLOORS = ["LG", "L1", "L2A", "L2B", "L3"];
-const FLOOR_LABEL = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
+/* Floors - a managed list (floors table), loaded into these by applyFloors()
+   before anything renders with them. Defaults until the first load. Units,
+   rooms and requisitions store the floor's fixed `code`; FLOOR_LABEL gives
+   its current name. */
+let FLOORS = ["LG", "L1", "L2A", "L2B", "L3"];
+let FLOOR_LABEL = { LG: "LG", L1: "Level 1", L2A: "Level 2a", L2B: "Level 2b", L3: "Level 3" };
+let FLOOR_ROWS = FLOORS.map((code, i) => ({ code, label: FLOOR_LABEL[code], sortOrder: i }));
+function applyFloors(rows) {
+  if (!rows || !rows.length) return;
+  FLOOR_ROWS = rows;
+  FLOORS = rows.map((f) => f.code);
+  FLOOR_LABEL = Object.fromEntries(rows.map((f) => [f.code, f.label]));
+}
 
 /* Strips everything but letters/digits and lowercases - lets a search
    match regardless of hyphens/spaces/case ("GC01" finds "GC-01"). */
@@ -782,6 +792,47 @@ const NAV = [
 // backdrop), back to a normal in-flow sticky column at `lg` and up - the
 // desktop layout is unchanged, only the positioning strategy swaps at the
 // breakpoint.
+/* Touch swipe left/right on `ref`'s element (phones and tablets). Only a
+   quick, clearly sideways swipe counts; it's ignored when it starts on a
+   text box, inside something that scrolls sideways (timeline, charts,
+   tables), or at the screen edge (the browser's own back gesture). */
+function swipeBlocked(target, root) {
+  for (let n = target; n && n !== root; n = n.parentElement) {
+    if (n.matches && n.matches("input, textarea, select, [contenteditable], [data-no-swipe]")) return true;
+    const ox = getComputedStyle(n).overflowX;
+    if ((ox === "auto" || ox === "scroll") && n.scrollWidth > n.clientWidth + 2) return true;
+  }
+  return false;
+}
+function useSwipe(ref, onSwipe) {
+  const handler = useRef(onSwipe);
+  useEffect(() => { handler.current = onSwipe; });
+  useEffect(() => {
+    let start = null;
+    const down = (e) => {
+      start = null;
+      const root = ref.current;
+      if (!root || e.touches.length !== 1 || !root.contains(e.target)) return;
+      const t = e.touches[0];
+      if (t.clientX < 24 || t.clientX > window.innerWidth - 24 || swipeBlocked(e.target, root)) return;
+      start = { x: t.clientX, y: t.clientY, at: Date.now() };
+    };
+    const up = (e) => {
+      if (!start) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - start.x, dy = t.clientY - start.y, quick = Date.now() - start.at < 700;
+      start = null;
+      if (quick && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.8 && handler.current) handler.current(dx < 0 ? "left" : "right");
+    };
+    document.addEventListener("touchstart", down, { passive: true });
+    document.addEventListener("touchend", up, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", down);
+      document.removeEventListener("touchend", up);
+    };
+  }, [ref]);
+}
+
 function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
   const go = (key) => {
     setPage(key);
@@ -795,11 +846,13 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
       style={{ background: "var(--sidebar-bg)" }}
     >
       <div className="flex items-center gap-3 px-2 pb-6 mb-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-        <AppLogo size={40} ring />
-        <div className="min-w-0 flex-1">
-          <div className="gc-display font-extrabold text-[15.5px] text-white leading-tight">GrowSpace</div>
-          <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: "var(--sidebar-text-dim)" }}>Plant &amp; Insect CER Management System</div>
-        </div>
+        <button type="button" onClick={() => go("dashboard")} className="flex items-center gap-3 min-w-0 flex-1 text-left" title="Go to the dashboard">
+          <AppLogo size={40} ring />
+          <div className="min-w-0 flex-1">
+            <div className="gc-display font-extrabold text-[15.5px] text-white leading-tight">GrowSpace</div>
+            <div className="text-[10px] font-bold tracking-wider mt-0.5" style={{ color: "var(--sidebar-text-dim)" }}>Plant &amp; Insect CER Management System</div>
+          </div>
+        </button>
         <button onClick={onClose} className="lg:hidden p-2.5 -mr-2.5 -my-2 flex-shrink-0" style={{ color: "var(--sidebar-text)" }} aria-label="Close menu">
           <X size={20} />
         </button>
@@ -1151,27 +1204,21 @@ function UsageColumns({ labels, groups, height = 240 }) {
   );
 }
 
-/* Dashboard card: the last 6 months as stacked columns, opening the full report. */
+/* Dashboard card: 6 months either side of this month as stacked columns,
+   opening the full report. Future months show bookings already approved. */
 function SpaceUsageCard({ units, labUsageHistory, onOpenReport }) {
-  const { nowIdx, currentCounts, groups } = usageData(units, labUsageHistory);
-  const from = Math.max(0, nowIdx - 5);
-  const labels = labUsageHistory.labels.slice(from, nowIdx + 1);
-  const top = LAB_GROUPS.map((lab) => ({ lab, n: currentCounts[lab] })).sort((a, b) => b.n - a.n)[0];
+  const { allKeys, nowIdx, groups } = usageData(units, labUsageHistory);
+  const from = Math.max(0, nowIdx - 6), to = Math.min(allKeys.length - 1, nowIdx + 6);
+  const labels = labUsageHistory.labels.slice(from, to + 1);
   return (
     <div className="gc-card p-5">
       <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="min-w-0">
-          <h3 className="gc-display font-bold text-sm">Space usage</h3>
-          <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>
-            Units held per month by lab group · last 6 months
-            {top && top.n > 0 ? <> · most now: <strong style={{ color: "var(--ink-soft)" }}>{PI_BY_LAB[top.lab] || top.lab}</strong> ({top.n})</> : ""}
-          </p>
-        </div>
+        <h3 className="gc-display font-bold text-sm min-w-0">Space usage</h3>
         <button onClick={onOpenReport} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full flex-shrink-0" style={{ color: "var(--ink-soft)", background: "var(--surface-soft)" }}>
           <Maximize2 size={12} /> Full report
         </button>
       </div>
-      <UsageColumns labels={labels} groups={groups.map((g) => ({ ...g, values: g.full.slice(from, nowIdx + 1) }))} height={220} />
+      <UsageColumns labels={labels} groups={groups.map((g) => ({ ...g, values: g.full.slice(from, to + 1) }))} height={220} />
     </div>
   );
 }
@@ -1181,8 +1228,9 @@ function SpaceUsageCard({ units, labUsageHistory, onOpenReport }) {
    the same report as a document. */
 function SpaceUsageReport({ units, labUsageHistory, onClose, goInventory, onEditPIs }) {
   const { allKeys, nowIdx, currentCounts, groups } = usageData(units, labUsageHistory);
-  const [fromKey, setFromKey] = useState(() => allKeys[Math.max(0, nowIdx - 11)]);
-  const [toKey, setToKey] = useState(() => allKeys[nowIdx]);
+  // Default: 6 months either side of this month.
+  const [fromKey, setFromKey] = useState(() => allKeys[Math.max(0, nowIdx - 6)]);
+  const [toKey, setToKey] = useState(() => allKeys[Math.min(allKeys.length - 1, nowIdx + 6)]);
   const [downloading, setDownloading] = useState(false);
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -1264,8 +1312,7 @@ function SpaceUsageReport({ units, labUsageHistory, onClose, goInventory, onEdit
         </div>
 
         <div className="gc-card p-5">
-          <h3 className="gc-display font-bold text-sm">Units held per month</h3>
-          <p className="text-xs mt-0.5 mb-3" style={{ color: "var(--ink-faint)" }}>By lab group · hover or tap a month for its breakdown</p>
+          <h3 className="gc-display font-bold text-sm mb-3">Units held per month</h3>
           <div className="overflow-x-auto gc-scroll"><div style={{ minWidth: Math.max(320, labels.length * 34) }}>
             <UsageColumns labels={labels} groups={ranged} height={320} />
           </div></div>
@@ -1273,10 +1320,7 @@ function SpaceUsageReport({ units, labUsageHistory, onClose, goInventory, onEdit
 
         <div className="gc-card p-5">
           <div className="flex items-start justify-between gap-3 mb-3">
-            <div>
-              <h3 className="gc-display font-bold text-sm">Lab groups</h3>
-              <p className="text-xs mt-0.5" style={{ color: "var(--ink-faint)" }}>Ranked by units held now · click a group to see its units</p>
-            </div>
+            <h3 className="gc-display font-bold text-sm">Lab groups</h3>
             {onEditPIs && (
               <button onClick={onEditPIs} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-full flex-shrink-0" style={{ background: "var(--btn-accent)", color: "white" }}>
                 <Pencil size={12} /> Edit PIs
@@ -1321,7 +1365,6 @@ function SpaceUsageReport({ units, labUsageHistory, onClose, goInventory, onEdit
               </table>
             </div>
           )}
-          <p className="text-[11.5px] mt-3" style={{ color: "var(--ink-faint)" }}>Share of space used = the group's unit-months as a percentage of all unit-months in {rangeLabel} (one unit held for one month = one unit-month).</p>
         </div>
       </div>
     </div>,
@@ -1394,8 +1437,8 @@ function ComingUpActivityCard({ units, requests, activity, onOpenItem, onActivit
       {soon.length > 5 && <button onClick={() => setFull(true)} className="text-xs font-bold mt-1 py-2 -my-1" style={{ color: "var(--accent-dark)" }}>+ {soon.length - 5} more</button>}
 
       <h3 className="gc-display font-bold text-sm mt-4 mb-2 pt-4" style={{ borderTop: "1px solid var(--border)" }}>Recent activity</h3>
-      <div className="space-y-1">
-        {activity.slice(0, 4).map((item, i) => <ActivityRow key={i} item={item} onClick={() => onActivityClick(item)} />)}
+      <div className="space-y-1 gc-scroll overflow-y-auto -mx-2 px-2" style={{ maxHeight: 520 }}>
+        {activity.slice(0, 20).map((item, i) => <ActivityRow key={i} item={item} onClick={() => onActivityClick(item)} />)}
         {activity.length === 0 && empty("No activity yet.")}
       </div>
 
@@ -1845,10 +1888,54 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
   const [urgencyFilters, setUrgencyFilters] = useState(new Set()); // empty = show all
   const [disciplineFilter, setDisciplineFilter] = useState("all");
   const [hoveredRow, setHoveredRow] = useState(null);
-  // Default window: 2 months behind today, 10 months ahead - same on the
+  // Unit-name column: wide enough for the longest name plus its research-area
+  // icons, and draggable wider/narrower (double-click resets; remembered per
+  // browser). Measured at the largest label size.
+  const autoLabelW = useMemo(() => {
+    let measure = (t) => t.length * 8;
+    try {
+      const ctx = document.createElement("canvas").getContext("2d");
+      ctx.font = "700 12.5px Inter, sans-serif";
+      measure = (t) => ctx.measureText(t).width;
+    } catch { /* no canvas - rough estimate */ }
+    const iconW = (u) => Object.keys(DISCIPLINE_META).filter((k) => (u.disciplines || []).includes(k)).length * 30;
+    const shown = compact ? units.filter((u) => requests.some((r) => r.assignedUnitId === u.id)) : units;
+    const widest = Math.max(measure("Pending") + 18, ...shown.map((u) => measure(u.id) + iconW(u)));
+    return Math.ceil(Math.min(260, Math.max(56, widest + 8)));
+  }, [units, requests, compact]);
+  const [customLabelW, setCustomLabelW] = useState(() => {
+    try { const v = Number(localStorage.getItem("gs-timeline-label-w")); return v > 0 ? v : null; } catch { return null; }
+  });
+  const labelW = customLabelW || autoLabelW;
+  const startLabelResize = (e) => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = labelW;
+    let latest = w0;
+    const move = (ev) => { latest = Math.round(Math.min(360, Math.max(48, w0 + ev.clientX - x0))); setCustomLabelW(latest); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      try { localStorage.setItem("gs-timeline-label-w", String(latest)); } catch { /* not remembered */ }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  // Where the timeline is wider than the screen (phones), open it scrolled
+  // so today sits in the middle rather than at the far right.
+  const chartRef = useRef(null);
+  useEffect(() => {
+    let n = chartRef.current && chartRef.current.parentElement;
+    while (n && !(n.scrollWidth > n.clientWidth + 2 && ["auto", "scroll"].includes(getComputedStyle(n).overflowX))) n = n.parentElement;
+    if (!n || !chartRef.current) return;
+    const inner = chartRef.current.offsetWidth, track = inner - (labelW + 8);
+    n.scrollLeft = Math.max(0, labelW + 8 + track * (pct(TODAY) / 100) - n.clientWidth / 2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on first show
+  }, []);
+  const resetLabelW = () => { setCustomLabelW(null); try { localStorage.removeItem("gs-timeline-label-w"); } catch { /* ignore */ } };
+  // Default window: 6 months either side of this month - same on the
   // dashboard preview and the full-screen view.
-  const [fromKey, setFromKey] = useState(() => monthKeyOf(addMonths(TODAY, -2)));
-  const [toKey, setToKey] = useState(() => monthKeyOf(addMonths(TODAY, 10)));
+  const [fromKey, setFromKey] = useState(() => monthKeyOf(addMonths(TODAY, -6)));
+  const [toKey, setToKey] = useState(() => monthKeyOf(addMonths(TODAY, 6)));
   const toggleUrgency = (key) => setUrgencyFilters((prev) => {
     const next = new Set(prev);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -1954,11 +2041,12 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
         <button
           type="button"
           onClick={() => onSelectUnit && onSelectUnit(u)}
-          className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold text-left gc-clickable overflow-hidden sticky left-0 z-[11]"
-          style={{ height: TIMELINE_LANE_H, color: "var(--ink-soft)", background: "var(--surface)" }}
+          className="flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold text-left gc-clickable overflow-hidden sticky left-0 z-[11]"
+          style={{ width: labelW, height: TIMELINE_LANE_H, color: "var(--ink-soft)", background: "var(--surface)" }}
+          title={u.id}
         >
-          <span className="truncate">{u.id}</span>
           {rowDisciplines.map((k) => <DisciplineIconPill key={k} discipline={k} />)}
+          <span className="truncate">{u.id}</span>
         </button>
         <div className="relative flex-1 rounded-lg" style={{ height: rowH, background: "var(--surface-soft)" }}>
           {items.map(({ o, s, reqIndex, start, end, lane }) => {
@@ -2074,22 +2162,35 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
       {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No cabinets or Reftech rooms match these filters.</p>}
 
       {/* Full screen on phones: scroll the chart sideways rather than squash the bars. */}
-      <div className={compact ? undefined : "overflow-x-auto gc-scroll"}><div style={compact ? undefined : { minWidth: 720 }}>
-      <div className="relative h-5 mb-2 ml-16 sm:ml-24">
-        {axisMarks.map((m, i) => (
-          <span key={i} className="absolute text-[11px] font-semibold -translate-x-1/2" style={{ left: `${m.pct}%`, color: "var(--ink-faint)" }}>{m.label}</span>
-        ))}
+      <div className={compact ? undefined : "overflow-x-auto gc-scroll"}><div ref={chartRef} className="relative" style={compact ? undefined : { minWidth: 720 }}>
+      {/* Drag the edge of the unit-name column to resize it. */}
+      <div
+        onPointerDown={startLabelResize} onDoubleClick={resetLabelW}
+        className="absolute top-0 bottom-0 z-[12] group" role="separator" aria-orientation="vertical" aria-label="Resize unit names"
+        title="Drag to widen the unit names · double-click to reset"
+        style={{ left: labelW, width: 10, cursor: "col-resize", touchAction: "none" }}
+      >
+        <span className="block h-full mx-auto opacity-0 group-hover:opacity-100 transition-opacity" style={{ width: 2, background: "var(--border)" }} />
+      </div>
+      <div className="flex h-5 mb-2">
+        {/* pinned blank corner, so month labels don't slide under the unit names when scrolled */}
+        <span className="flex-shrink-0 sticky left-0 z-[11]" style={{ width: labelW + 8, background: "var(--surface)" }} />
+        <div className="relative flex-1">
+          {axisMarks.map((m, i) => (
+            <span key={i} className={`absolute text-[11px] font-semibold whitespace-nowrap ${m.pct < 3 ? "" : "-translate-x-1/2"}`} style={{ left: `${m.pct}%`, color: "var(--ink-faint)" }}>{m.label}</span>
+          ))}
+        </div>
       </div>
 
       <div className="relative">
-        <div className="absolute top-0 bottom-0 border-l border-dashed ml-16 sm:ml-24 pointer-events-none z-10" style={{ left: `${pct(TODAY)}%`, borderColor: "var(--ink-faint)" }} />
+        <div className="absolute top-0 bottom-0 border-l border-dashed pointer-events-none z-10" style={{ left: `calc(${labelW + 8}px + (100% - ${labelW + 8}px) * ${pct(TODAY) / 100})`, borderColor: "var(--ink-faint)" }} />
 
         {/* Pending requests, lined up against their requested dates -
             lets an admin see at a glance which units below are free during
             that window, before they've been assigned to one. */}
         {pendingLanes.length > 0 && (
           <div className="flex items-start gap-2 text-xs mb-4 pb-4" style={{ borderBottom: "1px dashed var(--border)" }}>
-            <span className="w-16 sm:w-24 flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold sticky left-0 z-[11]" style={{ height: TIMELINE_LANE_H, color: PENDING_DASH, background: "var(--surface)" }}>
+            <span className="flex-shrink-0 flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-[12.5px] font-bold sticky left-0 z-[11]" style={{ width: labelW, height: TIMELINE_LANE_H, color: PENDING_DASH, background: "var(--surface)" }}>
               <Clock size={11} className="flex-shrink-0" /> <span className="truncate">Pending</span>
             </span>
             <div
@@ -2164,9 +2265,9 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
               .sort((a, b) => a.room.localeCompare(b.room, undefined, { numeric: true }));
             return (
               <div key={g.floor}>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-2 sticky left-0 w-max z-[11]">
                   <span style={{ width: 3, height: 13, borderRadius: 2, background: "var(--accent-dark)" }} />
-                  <span className="text-[13px] font-extrabold gc-display">{FLOOR_LABEL[g.floor]}</span>
+                  <span className="text-[13px] font-extrabold gc-display">{FLOOR_LABEL[g.floor] || g.floor}</span>
                 </div>
                 {compact ? (
                   <div className="space-y-1.5">{g.unitRows.slice(0, 3).map(renderUnitRow)}</div>
@@ -2174,7 +2275,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                   <div className="space-y-3">
                     {roomGroups.map((rg) => (
                       <div key={rg.room}>
-                        <div className="text-[11px] font-bold uppercase tracking-wide mb-1.5 ml-1" style={{ color: "var(--ink-faint)" }}>{rg.room}</div>
+                        <div className="text-[11px] font-bold uppercase tracking-wide mb-1.5 ml-1 sticky left-0 w-max" style={{ color: "var(--ink-faint)" }}>{rg.room}</div>
                         <div className="space-y-1.5">{rg.rows.map(renderUnitRow)}</div>
                       </div>
                     ))}
@@ -2447,7 +2548,6 @@ function InventoryPage({ units, onSelect, onAddNew, initialFilter, onFilterChang
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="gc-display text-2xl font-extrabold">Inventory</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: "var(--ink-soft)" }}>{units.length} growth cabinets &amp; Reftech rooms across {FLOORS.length} floors</p>
         </div>
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <button onClick={onAddNew} className="flex items-center gap-1.5 text-sm font-bold px-4 py-2.5 rounded-xl" style={{ background: "var(--btn-accent)", color: "white" }}>
@@ -3324,8 +3424,21 @@ function ConfirmDialog({ title, message, confirmLabel = "Delete", onConfirm, onC
   );
 }
 
-function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, onAssignRequisition, requests, onOpenRequisition, goRequisitions, categories, onAddCategory, onRemoveCategory }) {
+function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddDocument, onRemoveDocument, onUpdatePhoto, onUpdateNotes, onAcknowledgeClash, onAssignRequisition, requests, onOpenRequisition, goRequisitions, categories, onAddCategory, onRemoveCategory, onStepUnit }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Swipe (touch) or the arrow keys move to the next / previous unit.
+  const panelRef = useRef(null);
+  useSwipe(panelRef, (dir) => onStepUnit && onStepUnit(dir === "left" ? 1 : -1));
+  useEffect(() => {
+    if (!onStepUnit) return;
+    const onKey = (e) => {
+      if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+      if (e.key === "ArrowRight") onStepUnit(1);
+      if (e.key === "ArrowLeft") onStepUnit(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onStepUnit]);
   if (!unit) return null;
 
   const hasActiveBooking = !!unitOccupant(unit);
@@ -3348,6 +3461,7 @@ function UnitModal({ unit, onClose, onEdit, onDelete, onUpdateServiceLog, onAddD
       onClick={onClose}
     >
       <div
+        ref={panelRef}
         className="gc-scroll rounded-none sm:rounded-3xl shadow-2xl h-full sm:h-auto sm:max-h-[82vh] overflow-y-auto"
         style={{
           background: "var(--surface)",
@@ -3402,7 +3516,7 @@ function SettingsHeading({ children }) {
     </div>
   );
 }
-function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoom, onDeleteRoom, manufacturers, onAddManufacturer, onRenameManufacturer, onDeleteManufacturer, lightCycles, onAddLightCycle, onRenameLightCycle, onDeleteLightCycle }) {
+function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoom, onDeleteRoom, onAddFloor, onRenameFloor, onDeleteFloor, manufacturers, onAddManufacturer, onRenameManufacturer, onDeleteManufacturer, lightCycles, onAddLightCycle, onRenameLightCycle, onDeleteLightCycle }) {
   const isEdit = !!unit;
   const [form, setForm] = useState(
     unit
@@ -3507,15 +3621,11 @@ function AddEditUnitModal({ unit, onClose, onSave, rooms, onAddRoom, onRenameRoo
               </select>
             </Field>
             <div className="sm:col-span-2">
-              <Field label="Floor">
-                <select
-                  value={form.floor}
-                  onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value, room: firstRoomFor(e.target.value, f.type) }))}
-                  className="gc-input"
-                >
-                  {FLOORS.map((f) => <option key={f} value={f}>{FLOOR_LABEL[f]}</option>)}
-                </select>
-              </Field>
+              <FloorSelectField
+                value={form.floor}
+                onChange={(code) => setForm((f) => ({ ...f, floor: code, room: firstRoomFor(code, f.type) }))}
+                onAdd={onAddFloor} onRename={onRenameFloor} onDelete={onDeleteFloor}
+              />
             </div>
             {/* Rooms belong to one floor and unit type, so the list is scoped
                 to both; the add row names the floor. */}
@@ -3640,6 +3750,17 @@ function TextField({ label, value, was }) {
     </div>
   );
 }
+/* An email address that opens a new message to it in Outlook on the web
+   (the University's Microsoft 365), in a new tab, with a subject filled in. */
+function OutlookEmailLink({ email, subject = "" }) {
+  const href = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(email)}${subject ? `&subject=${encodeURIComponent(subject)}` : ""}`;
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="underline decoration-1 underline-offset-2" style={{ color: "var(--accent-dark)" }} title={`Email ${email} in Outlook`}>
+      {email}
+    </a>
+  );
+}
+
 function RequisitionDetailFields({ req }) {
   const isPlant = req.discipline === "plant";
   // While an amendment awaits review, fields it changed show in red with
@@ -3665,7 +3786,7 @@ function RequisitionDetailFields({ req }) {
         <FieldGrid>
           {field("Name", ["researcher_name"], (x) => x.researcher)}
           {field("Role", ["role"], (x) => x.role || "-")}
-          {field("Email", ["email"], (x) => x.email)}
+          {field("Email", ["email"], (x) => (x.email ? <OutlookEmailLink email={x.email} subject={`GrowSpace requisition ${req.code ? `${req.code}: ` : ""}${req.projectTitle || ""}`} /> : "-"))}
           {field("Emergency number", ["emergency_number"], (x) => x.emergencyNumber || "-")}
           {field("PI/Supervisor", ["pi_name", "lab_group_id"], (x) => x.pi || "-")}
           {isChanged("project_title") && field("Project title", ["project_title"], (x) => x.projectTitle)}
@@ -4262,7 +4383,6 @@ function RequisitionsPage({ requests, units, onDecide, onEdit, onComplete, onRev
       <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="gc-display text-2xl font-extrabold">Requisitions</h1>
-          <p className="text-[13px] mt-0.5" style={{ color: "var(--ink-soft)" }}>{requests.length} requests submitted via the request-space form</p>
         </div>
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <div className="flex items-center rounded-xl border p-1" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
@@ -4621,6 +4741,29 @@ function ManageLabelRow({ label, open, onToggle }) {
    light cycles): a plain select plus the Manage panel. `value` is the
    unit's own free-text field, so it can hold a name that's no longer on
    the list; `emptyLabel` adds a blank choice for an optional field. */
+/* Floor picker with a Manage list (add / rename / remove), like rooms and
+   manufacturers. Values are floor codes; the list shows and edits names. */
+function FloorSelectField({ value, onChange, onAdd, onRename, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const options = FLOOR_ROWS.map((f) => ({ id: f.code, name: f.label }));
+  return (
+    <div>
+      <ManageLabelRow label="Floor" open={open} onToggle={onAdd ? () => setOpen((v) => !v) : undefined} />
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="gc-input w-full">
+        {!FLOORS.includes(value) && value && <option value={value}>{value}</option>}
+        {FLOOR_ROWS.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}
+      </select>
+      {open && (
+        <ManageListPanel
+          options={options} noun="floor"
+          onAdd={onAdd} onRename={onRename} onDelete={onDelete}
+          onAdded={(label) => { const f = FLOOR_ROWS.find((r) => r.label === label); if (f) onChange(f.code); }}
+        />
+      )}
+    </div>
+  );
+}
+
 function ManagedSelectField({ label, addTo, value, options, onChange, onAdd, onRename, onDelete, noun, emptyLabel }) {
   const [open, setOpen] = useState(false);
   const names = options.map((o) => o.name);
@@ -5662,6 +5805,12 @@ export default function GrowthCabinetApp() {
   const isOwner = profile?.role === "owner";
   const isAdmin = isOwner || profile?.role === "admin";
   const [showAdminLogin, setShowAdminLogin] = useState(false);
+  // Floors are public: load them for the request form too (admins also get
+  // them with every reload).
+  const [, setFloorsVersion] = useState(0);
+  useEffect(() => {
+    api.listFloors().then((rows) => { applyFloors(rows); setFloorsVersion((v) => v + 1); }).catch((err) => console.error(err));
+  }, []);
 
   // appData is null until an admin session's data has loaded. Everything
   // the old mock generators produced now comes from src/lib/api.js instead.
@@ -5681,6 +5830,7 @@ export default function GrowthCabinetApp() {
       const data = await api.fetchAdminData();
       if (seq !== reloadSeq.current) return;
       applyLabGroups(data.labGroups); // must run before setAppData - see LAB_GROUPS/PI_BY_LAB comment
+      applyFloors(data.floors);
       if (data.lightCycles.length) LIGHT_CYCLE_NAMES = data.lightCycles.map((c) => c.name);
       setAppData(data);
       setLoadError(null);
@@ -5782,6 +5932,31 @@ export default function GrowthCabinetApp() {
     return () => window.removeEventListener("popstate", onNav);
   });
   const setSelected = (unit) => setSelectedUnitId(unit ? unit.id : null);
+  // Next / previous unit (swipe or arrow keys in the unit window), in
+  // Inventory order: by floor, then unit ID. Wraps round at the ends.
+  const stepUnit = (d) => {
+    const order = units.slice().sort((a, b) => (FLOORS.indexOf(a.floor) - FLOORS.indexOf(b.floor)) || a.id.localeCompare(b.id, undefined, { numeric: true }));
+    const i = order.findIndex((u) => u.id === selectedUnitId);
+    if (i === -1 || order.length < 2) return;
+    setSelectedUnitId(order[(i + d + order.length) % order.length].id);
+  };
+  // Swipe left/right on the page (phones and tablets) moves between the
+  // main pages, in sidebar order.
+  const mainRef = useRef(null);
+  useSwipe(mainRef, (dir) => {
+    const order = ["dashboard", "inventory", "requisitions"];
+    const i = order.indexOf(page), j = i + (dir === "left" ? 1 : -1);
+    if (i === -1 || j < 0 || j >= order.length) return;
+    setPage(order[j]);
+    window.scrollTo({ top: 0 });
+  });
+  // Tapping GrowSpace (logo or name) goes back to the dashboard.
+  const goDashboard = () => {
+    setSelectedUnitId(null);
+    setPreviewReqIndex(null);
+    setMobileNavOpen(false);
+    setPage("dashboard");
+  };
   const categories = appData ? appData.categories : [];
   const categoryIdByName = appData ? appData.categoryIdByName : {};
   const labUsageHistory = appData ? appData.labUsageHistory : { labels: [], fullLabels: [], keys: [], series: {} };
@@ -5861,6 +6036,25 @@ export default function GrowthCabinetApp() {
   });
   const handleDeleteLightCycle = withErrorAlert(async (id) => {
     await api.removeLightCycleOption(id);
+    await reload();
+    return true;
+  });
+  // Floors: a new floor gets a short fixed code made from its name.
+  const handleAddFloor = withErrorAlert(async (label) => {
+    const base = label.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) || "FLOOR";
+    let code = base, n = 2;
+    while (FLOORS.includes(code)) code = `${base}${n++}`;
+    await api.addFloor(code, label, Math.max(-1, ...FLOOR_ROWS.map((f) => f.sortOrder)) + 1);
+    await reload();
+    return true;
+  });
+  const handleRenameFloor = withErrorAlert(async (row, label) => {
+    await api.renameFloor(row.id, label);
+    await reload();
+    return true;
+  });
+  const handleDeleteFloor = withErrorAlert(async (code) => {
+    await api.removeFloor(code);
     await reload();
     return true;
   });
@@ -6108,8 +6302,10 @@ export default function GrowthCabinetApp() {
           <button onClick={() => setMobileNavOpen(true)} className="p-2.5 -ml-2.5 -my-2 flex-shrink-0" style={{ color: "white" }} aria-label="Open menu">
             <Menu size={22} />
           </button>
-          <AppLogo size={28} ring />
-          <span className="gc-display font-extrabold text-[13px] text-white truncate">GrowSpace</span>
+          <button type="button" onClick={goDashboard} className="flex items-center gap-3 min-w-0" title="Go to the dashboard">
+            <AppLogo size={28} ring />
+            <span className="gc-display font-extrabold text-[13px] text-white truncate">GrowSpace</span>
+          </button>
           {pendingCount > 0 && (
             <span className="ml-auto text-[10px] rounded-full px-1.5 py-0.5 font-bold flex-shrink-0" style={{ background: "#B23A34", color: "white" }}>
               {pendingCount}
@@ -6117,7 +6313,7 @@ export default function GrowthCabinetApp() {
           )}
         </header>
 
-        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1400px]">
+        <main ref={mainRef} className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1400px]">
           {page === "dashboard" && (
             <DashboardPage
               units={units} requests={requests} activityLog={activityLog} goInventory={goInventory} goRequisitions={goRequisitions}
@@ -6164,6 +6360,7 @@ export default function GrowthCabinetApp() {
       {selected && (
         <UnitModal
           unit={selected}
+          onStepUnit={stepUnit}
           onClose={() => setSelected(null)}
           onEdit={(u) => { setEditingUnit(u); }}
           onDelete={handleDeleteUnit}
@@ -6183,7 +6380,7 @@ export default function GrowthCabinetApp() {
         />
       )}
       {editingUnit !== undefined && (
-        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onRenameRoom={handleRenameRoom} onDeleteRoom={handleDeleteRoom} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onRenameManufacturer={handleRenameManufacturer} onDeleteManufacturer={handleDeleteManufacturer} lightCycles={lightCycles} onAddLightCycle={handleAddLightCycle} onRenameLightCycle={handleRenameLightCycle} onDeleteLightCycle={handleDeleteLightCycle} />
+        <AddEditUnitModal unit={editingUnit} onClose={() => setEditingUnit(undefined)} onSave={handleSaveUnit} rooms={rooms} onAddRoom={handleAddRoom} onRenameRoom={handleRenameRoom} onDeleteRoom={handleDeleteRoom} onAddFloor={handleAddFloor} onRenameFloor={handleRenameFloor} onDeleteFloor={handleDeleteFloor} manufacturers={manufacturers} onAddManufacturer={handleAddManufacturer} onRenameManufacturer={handleRenameManufacturer} onDeleteManufacturer={handleDeleteManufacturer} lightCycles={lightCycles} onAddLightCycle={handleAddLightCycle} onRenameLightCycle={handleRenameLightCycle} onDeleteLightCycle={handleDeleteLightCycle} />
       )}
       {previewReqIndex !== null && (
         <RequisitionPreviewPanel
