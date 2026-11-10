@@ -912,15 +912,6 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
 
       <div className="mt-4 pt-4 space-y-1" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
         <button
-          onClick={refreshApp}
-          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold"
-          style={{ color: "var(--sidebar-text)" }}
-          title="Reload the app: latest data and latest version"
-        >
-          <RotateCw size={17} />
-          Refresh
-        </button>
-        <button
           onClick={() => go("settings")}
           className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold"
           style={{ background: page === "settings" ? "var(--sidebar-active)" : "transparent", color: page === "settings" ? "var(--chip-temp)" : "var(--sidebar-text)" }}
@@ -928,14 +919,24 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
           <Settings size={17} />
           Settings
         </button>
-        <button
-          onClick={() => { api.clearSignedUrlCache(); supabase.auth.signOut(); }}
-          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm"
-          style={{ color: "var(--sidebar-text)" }}
-        >
-          <LogOut size={17} />
-          Log out
-        </button>
+        <div className="flex items-center">
+          <button
+            onClick={() => { api.clearSignedUrlCache(); supabase.auth.signOut(); }}
+            className="flex-1 min-w-0 flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm"
+            style={{ color: "var(--sidebar-text)" }}
+          >
+            <LogOut size={17} />
+            Log out
+          </button>
+          <button
+            onClick={refreshApp}
+            className="p-2 mr-1.5 rounded-lg flex-shrink-0 hover:bg-white/5"
+            style={{ color: "var(--sidebar-text-dim)" }}
+            aria-label="Refresh" title="Refresh (latest data and latest version)"
+          >
+            <RotateCw size={15} />
+          </button>
+        </div>
       </div>
     </aside>
   );
@@ -6350,8 +6351,8 @@ export default function GrowthCabinetApp() {
               {pendingCount}
             </span>
           )}
-          <button onClick={refreshApp} className={`p-2.5 -mr-2.5 -my-2 flex-shrink-0 ${pendingCount > 0 ? "" : "ml-auto"}`} style={{ color: "white" }} aria-label="Refresh" title="Refresh">
-            <RotateCw size={20} />
+          <button onClick={refreshApp} className={`p-2.5 -mr-2.5 -my-2 flex-shrink-0 ${pendingCount > 0 ? "" : "ml-auto"}`} style={{ color: "var(--sidebar-text-dim)" }} aria-label="Refresh" title="Refresh">
+            <RotateCw size={17} />
           </button>
         </header>
 
