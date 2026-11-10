@@ -1644,7 +1644,8 @@ function DashboardPage({ units, requests, activityLog, goInventory, goRequisitio
           </button>
         </div>
         {/* Phones: scroll the timeline sideways rather than squash the bars. */}
-        <div className="overflow-x-auto gc-scroll -mx-5 px-5">
+        {/* Every unit, scrolling inside the card (month labels stay pinned at the top). */}
+        <div className="overflow-auto gc-scroll -mx-5 px-5" style={{ maxHeight: 420 }}>
           <div style={{ minWidth: 620 }}>
             <TimelineView units={units} requests={requests} onNavigate={(tab, index) => onPreviewRequisition(index)} onSelectUnit={onSelectUnit} compact />
           </div>
@@ -1905,10 +1906,9 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
       measure = (t) => ctx.measureText(t).width;
     } catch { /* no canvas - rough estimate */ }
     const iconW = (u) => Object.keys(DISCIPLINE_META).filter((k) => (u.disciplines || []).includes(k)).length * 30;
-    const shown = compact ? units.filter((u) => requests.some((r) => r.assignedUnitId === u.id)) : units;
-    const widest = Math.max(measure("Pending") + 18, ...shown.map((u) => measure(u.id) + iconW(u)));
+    const widest = Math.max(measure("Pending") + 18, ...units.map((u) => measure(u.id) + iconW(u)));
     return Math.ceil(Math.min(260, Math.max(56, widest + 8)));
-  }, [units, requests, compact]);
+  }, [units]);
   const [customLabelW, setCustomLabelW] = useState(() => {
     try { const v = Number(localStorage.getItem("gs-timeline-label-w")); return v > 0 ? v : null; } catch { return null; }
   });
@@ -2015,23 +2015,21 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
   // share its row, laid out in lanes so genuinely overlapping ones stack
   // instead of covering each other, while non-overlapping ones fall back
   // to lane 0 and free stretches of the row read as visibly empty. The
-  // full view lists every unit on the floor - including ones with nothing
-  // booked - so a free room is as visible as a busy one; the compact
-  // dashboard preview stays a "highlights" list, same as before.
+  // view lists every unit on the floor - including ones with nothing
+  // booked - so a free unit is as visible as a busy one, and a pending
+  // request can be lined up against the free rows. The dashboard copy does
+  // the same, scrolling inside its card.
   const groups = FLOORS
     .filter((f) => floorFilter === "all" || floorFilter === f)
     .map((f) => {
-      const floorUnits = compact
-        ? units.filter((u) => u.floor === f && occupiedByUnit.has(u.id))
-        : units.filter((u) => u.floor === f);
+      const floorUnits = units.filter((u) => u.floor === f);
       const unitRows = floorUnits
         .slice()
         .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
         .map((u) => ({ u, items: assignLanes((occupiedByUnit.get(u.id) || []).slice().sort((a, b) => a.start - b.start)) }));
       return { floor: f, unitRows };
     })
-    .filter((g) => g.unitRows.length)
-    .slice(0, compact ? 2 : undefined);
+    .filter((g) => g.unitRows.length);
 
   // Renders one unit's row - its requisitions all land on this single row,
   // in lanes only where their dates genuinely overlap, so a gap in the row
@@ -2166,8 +2164,6 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
         </div>
       )}
 
-      {groups.length === 0 && <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>No cabinets or Reftech rooms match these filters.</p>}
-
       {/* Full screen on phones: scroll the chart sideways rather than squash the bars. */}
       <div className={compact ? undefined : "overflow-x-auto gc-scroll"}><div ref={chartRef} className="relative" style={compact ? undefined : { minWidth: 720 }}>
       {/* Drag the edge of the unit-name column to resize it. */}
@@ -2179,7 +2175,7 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
       >
         <span className="block h-full mx-auto opacity-0 group-hover:opacity-100 transition-opacity" style={{ width: 2, background: "var(--border)" }} />
       </div>
-      <div className="flex h-5 mb-2">
+      <div className="flex h-6 pb-1 mb-1 sticky top-0 z-[13]" style={{ background: "var(--surface)" }}>
         {/* pinned blank corner, so month labels don't slide under the unit names when scrolled */}
         <span className="flex-shrink-0 sticky left-0 z-[11]" style={{ width: labelW + 8, background: "var(--surface)" }} />
         <div className="relative flex-1">
@@ -2256,6 +2252,17 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
           </div>
         )}
 
+        {/* Where the units would go: say why there's nothing, rather than nothing at all. */}
+        {groups.length === 0 && (
+          <p className="text-sm py-6 text-center" style={{ color: "var(--ink-faint)" }}>{compact ? "No cabinets or Reftech rooms yet." : "No cabinets or Reftech rooms match these filters."}</p>
+        )}
+        {compact && groups.length > 0 && occupied.length === 0 && (
+          <div className="flex gap-2 mb-4">
+            <span className="flex-shrink-0" style={{ width: labelW }} />
+            <div className="relative z-[11] flex-1 text-[12.5px] text-center rounded-lg py-2.5" style={{ color: "var(--ink-faint)", border: "1px dashed var(--border)", background: "var(--surface)" }}>No bookings yet. Approved requisitions appear here.</div>
+          </div>
+        )}
+
         <div className="space-y-5">
           {groups.map((g) => {
             // Cabinets sharing a physical room cluster together under a
@@ -2275,9 +2282,10 @@ function TimelineView({ units, requests = [], onNavigate, onSelectUnit, compact 
                 <div className="flex items-center gap-2 mb-2 sticky left-0 w-max z-[11]">
                   <span style={{ width: 3, height: 13, borderRadius: 2, background: "var(--accent-dark)" }} />
                   <span className="text-[13px] font-extrabold gc-display">{FLOOR_LABEL[g.floor] || g.floor}</span>
+                  <span className="text-[11.5px] font-semibold" style={{ color: "var(--ink-faint)" }}>{g.unitRows.filter((r) => r.items.length).length} of {g.unitRows.length} booked</span>
                 </div>
                 {compact ? (
-                  <div className="space-y-1.5">{g.unitRows.slice(0, 3).map(renderUnitRow)}</div>
+                  <div className="space-y-1.5">{g.unitRows.map(renderUnitRow)}</div>
                 ) : (
                   <div className="space-y-3">
                     {roomGroups.map((rg) => (
