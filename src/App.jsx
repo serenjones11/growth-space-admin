@@ -48,6 +48,7 @@ import {
   Camera,
   LayoutList,
   ImageIcon,
+  RotateCw,
 } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 import { useSession } from "./lib/useSession";
@@ -833,6 +834,13 @@ function useSwipe(ref, onSwipe) {
   }, [ref]);
 }
 
+/* Full reload: fresh data plus the latest deployed version. There's no
+   browser refresh button in an app saved to the home screen; the URL hash
+   keeps you on the same page. */
+function refreshApp() {
+  window.location.reload();
+}
+
 function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
   const go = (key) => {
     setPage(key);
@@ -903,6 +911,15 @@ function Sidebar({ page, setPage, pendingCount, mobileOpen, onClose }) {
       </nav>
 
       <div className="mt-4 pt-4 space-y-1" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+        <button
+          onClick={refreshApp}
+          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold"
+          style={{ color: "var(--sidebar-text)" }}
+          title="Reload the app: latest data and latest version"
+        >
+          <RotateCw size={17} />
+          Refresh
+        </button>
         <button
           onClick={() => go("settings")}
           className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold"
@@ -6333,6 +6350,9 @@ export default function GrowthCabinetApp() {
               {pendingCount}
             </span>
           )}
+          <button onClick={refreshApp} className={`p-2.5 -mr-2.5 -my-2 flex-shrink-0 ${pendingCount > 0 ? "" : "ml-auto"}`} style={{ color: "white" }} aria-label="Refresh" title="Refresh">
+            <RotateCw size={20} />
+          </button>
         </header>
 
         <main ref={mainRef} className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1400px]">
